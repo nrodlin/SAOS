@@ -270,7 +270,7 @@ class Telescope:
             # normalized PSF           
             self.PSF_norma  = self.PSF/self.PSF.max()  
             output_PSF.append(self.PSF.copy())
-            output_PSF_norma.append(self.PSF.copy())
+            output_PSF_norma.append(self.PSF_norma.copy())
 
         if len(output_PSF)==1:
             output_PSF = output_PSF[0]
