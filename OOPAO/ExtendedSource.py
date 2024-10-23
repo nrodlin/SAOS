@@ -1,14 +1,21 @@
 from OOPAO.Source import Source
+from OOPAO.Asterism import Asterism
 import numpy as np
 from astropy.io import fits
+import matplotlib.pyplot as plt
 
 class ExtendedSource(Source):
     def __init__(self, optBand:str,
                  coordinates:list = [0,0],
+                 fov=10,
                  altitude:float = np.inf, 
                  display_properties:bool=True,
                  chromatic_shift:list = None,
-                 img_path="C:/Users/nlinares/Documents/06.Repositorios/simestao/imsol.fits"):
+                 img_path="OOPAO/OOPAO/images/imsol.fits",
+                 img_PS=1/60,
+                 nSubDirs=1,
+                 patch_padding=2,
+                 ):
         """SOURCE
         A extended source object shares the implementation of the Source class, but the photometry varies for the Sun. 
         The LGS and Magnitude parameters are omitted in this definition
@@ -19,14 +26,23 @@ class ExtendedSource(Source):
             The optical band of the source (see the method photometry)
             ex, 'V0' corresponds to a wavelength of 500 nm
         coordinates : list, optional
-            DESCRIPTION. The default is [0,0].
+            DESCRIPTION. The default is [0,0], in polar format [r, theta] in which theta is in degrees.
+        fov : float
+            DESCRIPTION. Field of View in arcsec of the patch selected
         altitude : float, optional
             DESCRIPTION. The default is np.inf.
         display_properties : bool, optional
             DESCRIPTION. The default is True.
         chromatic_shift : list, optional
             DESCRIPTION. The default is None.
-
+        img_path: str, optional
+            DESCRIPTION. Sun pattern that shall be uploaded, expected FITS file.
+        img_PS: str, optional
+            DESCRIPTION. Plate Scale in "/px of the input image, default matches the default img_path PS
+        nSubDirs: int, optional
+            DESCRIPTION. Number of sub-directions taken from the sun image to build the inner aberration of the pupil in the image
+        patch_padding: float, optional
+            DESCRIPTION. Padding outside the subaperture FoV in arcsec.
         Returns
         -------
         None.
@@ -84,13 +100,38 @@ class ExtendedSource(Source):
         self.altitude = altitude                                # altitude of the source object in m    
         self.coordinates = coordinates                          # polar coordinates [r,theta] 
         self.chromatic_shift = chromatic_shift                  # shift in arcsec to be applied to the atmospheric phase screens (one value for each layer) to simulate a chromatic effect
+        self.fov = fov                                          # Field of View in arcsec of the patch selected
+        self.img_path = img_path                                # Sun pattern that shall be uploaded, expected FITS file.
+        self.img_PS = img_PS                                    # Plate Scale in "/px of the input image, default matches the default img_path PS
+        self.nSubDirs = nSubDirs                                # Number of sub-directions taken from the sun image to build the inner aberration of the pupil in the image
+        self.patch_padding = patch_padding                      # Padding outside the subaperture FoV in arcsec.
 
         self.type     = 'SUN'
-        self.img_path = img_path
 
         if self.display_properties:
             self.print_properties()
             
+        self.sun_nopad, self.sun_padded = self.load_sun_img()   # Take sun patch, pad + no pad
+
+        if self.nSubDirs > 5:
+            raise BaseException("Too many directions, processing will not be feasible")
+        
+        self.subDirs_coordinates, self.subDirs_sun = self.get_subDirs() # Coordinates are in polar [r, theta(radians)] + FoV [arcsec]
+                                                                        # The origin is the center of the Subaperture.
+
+        # Finally, create an Asterism using the coordinates of the subdirections to monitor the atmosphere in those lines of sight
+
+        subDirs_stars = []
+
+        for dirX in range(self.nSubDirs):
+            for dirY in range(self.nSubDirs):
+                subDirs_stars.append(Source(optBand=self.optBand, 
+                                            magnitude=1, 
+                                            coordinates=[self.subDirs_coordinates[0,dirX,dirY], self.subDirs_coordinates[1,dirX,dirY]], 
+                                            display_properties=False))
+        
+        self.sun_subDir_ast = Asterism(subDirs_stars)
+
         self.is_initialized = True
         
     def photometry(self,arg):
@@ -138,5 +179,57 @@ class ExtendedSource(Source):
         print('{: ^8s}'.format(self.type) +'{: ^10s}'.format(str(self.wavelength))+ '{: ^8s}'.format(str(self.coordinates[0]))+ '{: ^10s}'.format(str(self.coordinates[1]))+'{: ^10s}'.format(str(np.round(self.altitude,2)))+'{: ^10s}'.format(str(np.round(self.nPhoton,1))) )
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
 
-    def load_sun_img(self, img_path):
-        sun = fits.open(img_path)[0].data
+    def load_sun_img(self):
+        tmp_sun = fits.open(self.img_path)[0].data
+
+        cx = (self.coordinates[0] * np.cos(self.coordinates[1] * (180/np.pi)) / self.img_PS) + tmp_sun.shape[0]//2
+        cy = (self.coordinates[0] * np.sin(self.coordinates[1] * (180/np.pi)) / self.img_PS) + tmp_sun.shape[1]//2
+
+        width_subap_nopad = self.fov / self.img_PS
+        width_subap_pad = (self.fov+self.patch_padding) / self.img_PS
+
+        sun_nopad = tmp_sun[np.round(cx-width_subap_nopad/2).astype(int):np.round(cx+width_subap_nopad/2).astype(int),
+                            np.round(cy-width_subap_nopad/2).astype(int):np.round(cy+width_subap_nopad/2).astype(int)]
+        sun_pad = tmp_sun[np.round(cx-width_subap_pad/2).astype(int):np.round(cx+width_subap_pad/2).astype(int),
+                          np.round(cy-width_subap_pad/2).astype(int):np.round(cy+width_subap_pad/2).astype(int)]
+
+        return sun_nopad, sun_pad
+    
+    def get_subDirs(self):
+        subDir_loc = np.zeros((3,self.nSubDirs, self.nSubDirs))
+        if self.nSubDirs > 1:
+            subDir_size = (2*(self.fov+self.patch_padding)) / (self.nSubDirs+1) # This guarantees a superposition of the 50% of the subdirs
+        else:
+            subDir_size = self.fov+self.patch_padding
+        
+        subDir_imgs = np.zeros((np.ceil(subDir_size/self.img_PS).astype(int), np.ceil(subDir_size/self.img_PS).astype(int), self.nSubDirs, self.nSubDirs))
+
+        for dirX in range(self.nSubDirs):
+            for dirY in range(self.nSubDirs):
+                # Define subDir origin in the mid of the subDir + displace to iterate through the subDirs + 
+                # (-Translation) to define the global axis in the centre of the subaperture
+                dirx_c = (subDir_size/2) + dirX * (subDir_size/2) +  - (self.fov+self.patch_padding)/2
+                diry_c = (subDir_size/2) + dirY * (subDir_size/2) +  - (self.fov+self.patch_padding)/2
+                  
+                # Now, change to polar
+
+                subDir_loc[0, dirX, dirY] = np.sqrt(dirx_c**2 + diry_c**2)
+                subDir_loc[1, dirX, dirY] = np.arctan2(diry_c, dirx_c) * (180/np.pi) # degrees
+                subDir_loc[2, dirX, dirY] = subDir_size
+
+                # Finally, crop the region
+
+                cx = (dirx_c / self.img_PS) + self.sun_padded.shape[0]//2
+                cy = (diry_c / self.img_PS) + self.sun_padded.shape[1]//2               
+
+                subDir_imgs[:,:,dirX,dirY] = self.sun_padded[np.round(cx-subDir_size/(2*self.img_PS)).astype(int):np.round(cx+subDir_size/(2*self.img_PS)).astype(int),
+                                                             np.round(cy-subDir_size/(2*self.img_PS)).astype(int):np.round(cy+subDir_size/(2*self.img_PS)).astype(int)]       
+        
+        """         fig, axs = plt.subplots(self.nSubDirs, self.nSubDirs, squeeze=False)
+        print(axs.shape)
+        for dirX in range(self.nSubDirs):
+            for dirY in range(self.nSubDirs):
+                axs[dirX, dirY].imshow(subDir_imgs[:,:,dirX,dirY])
+        plt.show() """
+        
+        return subDir_loc, subDir_imgs
