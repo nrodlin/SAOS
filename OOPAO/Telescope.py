@@ -215,16 +215,6 @@ class Telescope:
             
         elif self.src.tag == 'asterism':
             input_source = self.src.src
-            r = np.squeeze(np.asarray(self.src.coordinates))[:,0]
-            theta = np.squeeze(np.asarray(self.src.coordinates))[:,1]
-            
-            x_max = max(np.abs(r * np.cos(theta)))
-            y_max = max(np.abs(r * np.sin(theta)))
-            
-            if max(x_max,y_max) > max(self.xPSF_arcsec):
-                factor = 0
-            else:
-                factor = 1 
         else:
             input_source = [self.src]
 
@@ -245,12 +235,12 @@ class Telescope:
             else:
                 amp_mask = self.amplitude_filtered               
                 phase    = self.phase_filtered
-    
+
             amp      = amp_mask*self.pupil*self.pupilReflectivity*np.sqrt(input_source[i_src].fluxMap)
             
             # add a Tip/Tilt for off-axis sources
-            [Tip,Tilt]            = np.meshgrid(np.linspace(-np.pi,np.pi,self.resolution),np.linspace(-np.pi,np.pi,self.resolution))               
-            self.delta_TT = input_source[i_src].coordinates[0]*(1/conversion_constant)*(self.D/input_source[i_src].wavelength)*(np.cos(input_source[i_src].coordinates[1])*Tip+np.sin(input_source[i_src].coordinates[1])*Tilt)*self.pupil
+            [Tip,Tilt]            = np.meshgrid(np.linspace(-np.pi,np.pi,self.resolution),np.linspace(-np.pi,np.pi,self.resolution))            
+            self.delta_TT = input_source[i_src].coordinates[0]*(1/conversion_constant)*(self.D/input_source[i_src].wavelength)*(np.cos(np.deg2rad(input_source[i_src].coordinates[1]))*Tip+np.sin(np.deg2rad(input_source[i_src].coordinates[1]))*Tilt)*self.pupil
             
             # axis in arcsec
             self.xPSF_arcsec       = [-conversion_constant*(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor), conversion_constant*(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor)]
@@ -277,10 +267,8 @@ class Telescope:
             output_PSF_norma = output_PSF_norma[0]
 
         self.PSF        = output_PSF.copy()
-        self.PSF_norma  = output_PSF_norma.copy()                 
-  
- 
-    
+        self.PSF_norma  = output_PSF_norma.copy()     
+
     def PropagateField(self, amplitude, phase, zeroPaddingFactor, img_resolution = None):
 
         xp                  = np
@@ -503,7 +491,7 @@ class Telescope:
                     for i_src in range(len(input_source)):
                         obj.telescope.src         = input_source[i_src]
                         [Tip,Tilt]                = np.meshgrid(np.linspace(-np.pi,np.pi,self.resolution),np.linspace(-np.pi,np.pi,self.resolution))               
-                        delta_TT                  = input_source[i_src].coordinates[0]*(1/((180/np.pi)*3600))*(self.D/input_source[i_src].wavelength)*(np.cos(input_source[i_src].coordinates[1])*Tip+np.sin(input_source[i_src].coordinates[1])*Tilt)*self.pupil
+                        delta_TT                  = input_source[i_src].coordinates[0]*(1/((180/np.pi)*3600))*(self.D/input_source[i_src].wavelength)*(np.cos(np.deg2rad(input_source[i_src].coordinates[1]))*Tip+np.sin(np.deg2rad(input_source[i_src].coordinates[1]))*Tilt)*self.pupil
                         obj.wfs_measure(phase_in  = input_source[i_src].phase + delta_TT ,integrate = False )
                         output_raw_data += obj.raw_data.copy()
                         if obj.tag=='pyramid':
@@ -523,7 +511,7 @@ class Telescope:
                     self.optical_path.append([obj.tag,id(obj)])
 
                 self.computePSF(detector = obj)
-                obj.fov_arcsec = self.xPSF_arcsec[1] -self.xPSF_arcsec[0] 
+                obj.fov_arcsec = self.xPSF_arcsec[1] - self.xPSF_arcsec[0] 
                 obj.fov_rad = self.xPSF_rad[1] - self.xPSF_rad[0]
                 if obj.integrationTime is not None:
                     if obj.integrationTime < self.samplingTime:
@@ -561,7 +549,6 @@ class Telescope:
                 FP_filtered         = FP_in*np.fft.fftshift(obj.mask)
                 em_field            = np.fft.ifft2(FP_filtered)
                 self.em_field_filtered  = em_field[obj.center-self.resolution//2:obj.center+self.resolution//2,obj.center-self.resolution//2:obj.center+self.resolution//2]
-                # self.phase_filtered = np.arctan2(np.imag(self.em_field_filtered),np.real(self.em_field_filtered))*self.pupil
                 self.phase_filtered = ((np.angle(self.em_field_filtered)))*self.pupil
                 
                 self.amplitude_filtered  = np.abs(self.em_field_filtered)

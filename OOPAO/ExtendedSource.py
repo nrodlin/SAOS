@@ -117,7 +117,7 @@ class ExtendedSource(Source):
             raise BaseException("Too many directions, processing will not be feasible")
         
         self.subDirs_coordinates, self.subDirs_sun = self.get_subDirs() # Coordinates are in polar [r, theta(radians)] + FoV [arcsec]
-                                                                        # The origin is the center of the Subaperture.
+                                                                        # The origin is the telescope axis.
 
         # Finally, create an Asterism using the coordinates of the subdirections to monitor the atmosphere in those lines of sight
 
@@ -182,8 +182,8 @@ class ExtendedSource(Source):
     def load_sun_img(self):
         tmp_sun = fits.open(self.img_path)[0].data
 
-        cx = (self.coordinates[0] * np.cos(self.coordinates[1] * (180/np.pi)) / self.img_PS) + tmp_sun.shape[0]//2
-        cy = (self.coordinates[0] * np.sin(self.coordinates[1] * (180/np.pi)) / self.img_PS) + tmp_sun.shape[1]//2
+        cx = (self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[0]//2
+        cy = (self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[1]//2
 
         width_subap_nopad = self.fov / self.img_PS
         width_subap_pad = (self.fov+self.patch_padding) / self.img_PS
@@ -203,18 +203,21 @@ class ExtendedSource(Source):
             subDir_size = self.fov+self.patch_padding
         
         subDir_imgs = np.zeros((np.ceil(subDir_size/self.img_PS).astype(int), np.ceil(subDir_size/self.img_PS).astype(int), self.nSubDirs, self.nSubDirs))
-
+        
+        tel_x = self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1]))
+        tel_y = self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1]))
+        
         for dirX in range(self.nSubDirs):
             for dirY in range(self.nSubDirs):
                 # Define subDir origin in the mid of the subDir + displace to iterate through the subDirs + 
                 # (-Translation) to define the global axis in the centre of the subaperture
                 dirx_c = (subDir_size/2) + dirX * (subDir_size/2) +  - (self.fov+self.patch_padding)/2
                 diry_c = (subDir_size/2) + dirY * (subDir_size/2) +  - (self.fov+self.patch_padding)/2
-                  
-                # Now, change to polar
 
-                subDir_loc[0, dirX, dirY] = np.sqrt(dirx_c**2 + diry_c**2)
-                subDir_loc[1, dirX, dirY] = np.arctan2(diry_c, dirx_c) * (180/np.pi) # degrees
+                # Now, change to polar, moving the origin towards the telescope axis
+
+                subDir_loc[0, dirX, dirY] = np.sqrt((dirx_c+tel_x)**2 + (diry_c+tel_y)**2)
+                subDir_loc[1, dirX, dirY] = np.rad2deg(np.arctan2((diry_c+tel_y), (dirx_c+tel_x)))
                 subDir_loc[2, dirX, dirY] = subDir_size
 
                 # Finally, crop the region

@@ -41,13 +41,13 @@ class Asterism:
         src_3 = Source(opticalBand = 'H', magnitude = 8, coordinates=[60,120])
         src_4 = Source(opticalBand = 'H', magnitude = 8, coordinates=[60,240])
         
-        ast = Asterism([src_1,src_2,src_3, src_4])
+        ast = Asterism([src_1,src_2,src_3, src_4]
 
         
         """
         self.n_source = len(list_src)
         self.src = list_src
-        self.coordinates = []
+        self.coordinates = [] # polar, [r, theta] where theta is in [deg]
 
         self.altitude = []
         self.nPhoton = 0
@@ -83,10 +83,23 @@ class Asterism:
             tmp_OPD = telescope.OPD_no_pupil.copy()
             telescope.OPD_no_pupil = [tmp_OPD for i in range(self.n_source)]
         for i in range(self.n_source):
+            telescope.OPD = telescope.OPD*telescope.pupil # here to ensure that a new pupil is taken into account
+
             # update the phase of the source
             self.src[i].phase = telescope.OPD[i]*2*np.pi/self.src[i].wavelength
             self.src[i].phase_no_pupil = telescope.OPD_no_pupil[i]*2*np.pi/self.src[i].wavelength
-            
+    
+            # compute the variance in the pupil
+            self.src[i].var        = np.var(self.src[i].phase[np.where(telescope.pupil==1)])
+            # assign the source object to the obj object
+    
+            self.src[i].fluxMap    = telescope.pupilReflectivity*self.src[i].nPhoton*telescope.samplingTime*(telescope.D/telescope.resolution)**2
+            if telescope.optical_path is None:
+                telescope.optical_path = []
+                telescope.optical_path.append([self.src[i].type + '('+self.src[i].optBand+')',id(self)])
+                telescope.optical_path.append([telescope.tag,id(telescope)])
+            else:
+                telescope.optical_path[0] =[self.type + '('+self.src[i].optBand+')',id(self)]           
         # assign the source object to the telescope object
         telescope.src   = self
         

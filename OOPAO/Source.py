@@ -34,7 +34,7 @@ class Source:
         magnitude : float
             The magnitude of the star.
         coordinates : list, optional
-            DESCRIPTION. The default is [0,0].
+            DESCRIPTION. The default is [0,0], in [deg]
         altitude : float, optional
             DESCRIPTION. The default is np.inf.
         laser_coordinates : list, optional
