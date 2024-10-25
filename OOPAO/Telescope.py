@@ -215,6 +215,8 @@ class Telescope:
             
         elif self.src.tag == 'asterism':
             input_source = self.src.src
+        elif self.src.tag == "sun":
+            input_source = self.src.sun_subDir_ast.src
         else:
             input_source = [self.src]
 
@@ -227,9 +229,12 @@ class Telescope:
             if input_wavelenght == input_source[i_src].wavelength:
                 input_wavelenght = input_source[i_src].wavelength
             else:
-                raise AttributeError('The asterism contains sources with different wavelengths. Summing up PSFs with different wavelength is not implemented.')                    
+                if self.src.tag == "asterism":
+                    raise AttributeError('The asterism contains sources with different wavelengths. Summing up PSFs with different wavelength is not implemented.')                    
+                else:
+                    raise AttributeError('The subDirs wavelengths are different, which is not supported.') 
             
-            if self.spatialFilter is None:            
+            if self.spatialFilter is None:          
                 amp_mask = 1
                 phase    = input_source[i_src].phase
             else:
@@ -415,6 +420,9 @@ class Telescope:
                     if self.src.tag == 'asterism':
                         for i in range(self.src.n_source):
                             self.src.src[i].phase = self._OPD*2*np.pi/self.src.src[i].wavelength
+                    elif self.src.tag == "sun"                       :
+                        for i in range(self.src.sun_subDir_ast.n_source):
+                            self.src.sun_subDir_ast.src[i].phase = self._OPD*2*np.pi/self.src.sun_subDir_ast.src[i].wavelength                       
                     else:
                         raise TypeError('The wrong object was attached to the telescope')                                      
             else:
@@ -422,6 +430,9 @@ class Telescope:
                     if len(self._OPD)==self.src.n_source:
                         for i in range(self.src.n_source):
                             self.src.src[i].phase = self._OPD[i]*2*np.pi/self.src.src[i].wavelength
+                    elif self.src.tag == "sun"                       :
+                        for i in range(self.src.sun_subDir_ast.n_source):
+                            self.src.sun_subDir_ast.src[i].phase = self._OPD*2*np.pi/self.src.sun_subDir_ast.src[i].wavelength                         
                     else:
                         raise TypeError('A list of OPD cannnot be propagated to a single source')
                     
@@ -442,6 +453,9 @@ class Telescope:
                     if self.src.tag == 'asterism':
                         for i in range(self.src.n_source):
                             self.src.src[i].phase_no_pupil = self._OPD_no_pupil*2*np.pi/self.src.src[i].wavelength
+                    elif self.src.tag == 'sun':
+                        for i in range(self.src.sun_subDir_ast.n_source):
+                            self.src.sun_subDir_ast.src[i].phase_no_pupil = self._OPD_no_pupil*2*np.pi/self.src.sun_subDir_ast.src[i].wavelength
                     else:
                         raise TypeError('The wrong object was attached to the telescope')                                      
             else:
@@ -451,6 +465,12 @@ class Telescope:
                             self.src.src[i].phase_no_pupil = self._OPD_no_pupil[i]*2*np.pi/self.src.src[i].wavelength
                     else:
                         raise TypeError('The lenght of the OPD list ('+str(len(self._OPD_no_pupil))+') does not match the number of sources ('+str(self.src.n_source)+')')
+                elif self.src.tag == 'sun':
+                    if len(self._OPD_no_pupil)==self.src.sun_subDir_ast.n_source:
+                        for i in range(self.src.sun_subDir_ast.n_source):
+                            self.src.sun_subDir_ast.src[i].phase_no_pupil = self._OPD_no_pupil[i]*2*np.pi/self.src.sun_subDir_ast.src[i].wavelength
+                    else:
+                        raise TypeError('The lenght of the OPD list ('+str(len(self._OPD_no_pupil))+') does not match the number of subDirs ('+str(self.src.sun_subDir_ast.n_source)+' defined for the sun)')
                         
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% TELESCOPE INTERACTIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%  
@@ -501,7 +521,21 @@ class Telescope:
                         obj.focal_plane_camera.frame = output_raw_em
                     obj.raw_data = output_raw_data.copy()
                     obj.signal_2D,obj.signal = obj.wfs_integrate()    
-                        
+                elif self.src.tag == 'sun':
+                    input_source        = copy.deepcopy(self.src.src)
+                    output_raw_data     = np.zeros([obj.raw_data.shape[0],obj.raw_data.shape[0]])
+                    if obj.tag=='pyramid':
+                        raise ValueError("Pyramid WFS does not work with solar images.")
+                    obj.telescope       = copy.deepcopy(self)
+                    
+                    for i_src in range(len(input_source)):
+                        obj.telescope.src         = input_source[i_src]
+                        [Tip,Tilt]                = np.meshgrid(np.linspace(-np.pi,np.pi,self.resolution),np.linspace(-np.pi,np.pi,self.resolution))               
+                        delta_TT                  = input_source[i_src].coordinates[0]*(1/((180/np.pi)*3600))*(self.D/input_source[i_src].wavelength)*(np.cos(np.deg2rad(input_source[i_src].coordinates[1]))*Tip+np.sin(np.deg2rad(input_source[i_src].coordinates[1]))*Tilt)*self.pupil
+                        obj.wfs_measure(phase_in  = input_source[i_src].phase + delta_TT ,integrate = False )
+                        output_raw_data += obj.raw_data.copy()
+                    obj.raw_data = output_raw_data.copy()
+                    obj.signal_2D,obj.signal = obj.wfs_integrate()                           
                 else:
                     obj.telescope=self              
                     obj.wfs_measure(phase_in = self.src.phase)               
@@ -567,24 +601,40 @@ class Telescope:
                     else:
                         self.OPD =self.OPD_no_pupil*pupil 
                 else:           
-                     if self.src.tag == 'asterism':
-                         if len(self.OPD) == self.src.n_source:
-                             for i in range(self.src.n_source):
-                                 if obj.altitude is not None:
-                                     self.OPD_no_pupil[i]  = obj.dm_propagation(self,OPD_in = self.OPD_no_pupil[i], i_source = i  )
-                                 else:
-                                     self.OPD_no_pupil[i]  = obj.dm_propagation(self,OPD_in = self.OPD_no_pupil[i] )
-                                 if np.ndim(self.OPD_no_pupil[i]) == 2:
-                                     self.OPD[i] = self.OPD_no_pupil[i]*self.pupil
-                                 else:
-                                     self.OPD[i] =self.OPD_no_pupil[i]*pupil 
-                             self.OPD = self.OPD
-                             self.OPD_no_pupil = self.OPD_no_pupil
+                    if self.src.tag == 'asterism':
+                        if len(self.OPD) == self.src.n_source:
+                            for i in range(self.src.n_source):
+                                if obj.altitude is not None:
+                                    self.OPD_no_pupil[i]  = obj.dm_propagation(self,OPD_in = self.OPD_no_pupil[i], i_source = i  )
+                                else:
+                                    self.OPD_no_pupil[i]  = obj.dm_propagation(self,OPD_in = self.OPD_no_pupil[i] )
+                                if np.ndim(self.OPD_no_pupil[i]) == 2:
+                                    self.OPD[i] = self.OPD_no_pupil[i]*self.pupil
+                                else:
+                                    self.OPD[i] =self.OPD_no_pupil[i]*pupil 
+                            self.OPD = self.OPD
+                            self.OPD_no_pupil = self.OPD_no_pupil
                                  
-                         else:
-                             raise TypeError('The lenght of the OPD list ('+str(len(self._OPD_no_pupil))+') does not match the number of sources ('+str(self.src.n_source)+')')
-                     else:
-                         raise TypeError('The wrong object was attached to the telescope')                                      
+                        else:
+                            raise TypeError('The lenght of the OPD list ('+str(len(self._OPD_no_pupil))+') does not match the number of sources ('+str(self.src.n_source)+')')
+                    if self.src.tag == 'sun':
+                        if len(self.OPD) == self.src.sun_subDir_ast.sun_source:
+                            for i in range(self.src.sun_subDir_ast.n_source):
+                                if obj.altitude is not None:
+                                    self.OPD_no_pupil[i]  = obj.dm_propagation(self,OPD_in = self.OPD_no_pupil[i], i_source = i  )
+                                else:
+                                    self.OPD_no_pupil[i]  = obj.dm_propagation(self,OPD_in = self.OPD_no_pupil[i] )
+                                if np.ndim(self.OPD_no_pupil[i]) == 2:
+                                    self.OPD[i] = self.OPD_no_pupil[i]*self.pupil
+                                else:
+                                    self.OPD[i] =self.OPD_no_pupil[i]*pupil 
+                            self.OPD = self.OPD
+                            self.OPD_no_pupil = self.OPD_no_pupil
+                                 
+                        else:
+                            raise TypeError('The lenght of the OPD list ('+str(len(self._OPD_no_pupil))+') does not match the number of subDirs ('+str(self.src.sun_subDir_ast.n_source)+')')
+                    else:
+                        raise TypeError('The wrong object was attached to the telescope')                                      
         return self
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% TELESCOPE METHODS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
     def resetOPD(self):
@@ -596,6 +646,11 @@ class Telescope:
                 self.optical_path.append([self.tag,id(self)])
                 self.OPD = [self.pupil.astype(float) for i in range(self.src.n_source)]
                 self.OPD_no_pupil = [self.pupil.astype(float)*0 +1 for i in range(self.src.n_source)]
+            if self.src.tag == 'sun':
+                self.optical_path = [[self.src.type, id(self.src)]]
+                self.optical_path.append([self.tag,id(self)])
+                self.OPD = [self.pupil.astype(float) for i in range(self.src.sun_subDir_ast.n_source)]
+                self.OPD_no_pupil = [self.pupil.astype(float)*0 +1 for i in range(self.src.sun_subDir_ast.n_source)]
             else:
                 self.optical_path = [[self.src.type + '('+self.src.optBand+')', id(self.src)]]
                 self.optical_path.append([self.tag,id(self)])
@@ -782,6 +837,8 @@ class Telescope:
             if self.src.type == 'asterism':
                 for i_src in range(len(self.src.src)):
                     print('{: ^18s}'.format('Source '+self.src.src[i_src].type)            + '{: ^18s}'.format(str(np.round(1e9*self.src.src[i_src].wavelength,2)))            +'{: ^18s}'.format('[nm]' ))
+            elif self.src.type == "sun":
+                    print('{: ^18s}'.format('Source '+self.src.type)            + '{: ^18s}'.format(str(np.round(1e9*self.src.wavelength,2)))            +'{: ^18s}'.format('[nm]' ))
             else:
                 print('{: ^18s}'.format('Source '+self.src.type)            + '{: ^18s}'.format(str(np.round(1e9*self.src.wavelength,2)))            +'{: ^18s}'.format('[nm]' ))
         else:

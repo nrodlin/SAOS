@@ -96,7 +96,7 @@ class ExtendedSource(Source):
         self.phase      = []                                    # phase of the source 
         self.phase_no_pupil      = []                           # phase of the source (no pupil)
         self.fluxMap    = []                                    # 2D flux map of the source
-        self.tag        = 'source'                              # tag of the object
+        self.tag        = 'sun'                                 # tag of the object
         self.altitude = altitude                                # altitude of the source object in m    
         self.coordinates = coordinates                          # polar coordinates [r,theta] 
         self.chromatic_shift = chromatic_shift                  # shift in arcsec to be applied to the atmospheric phase screens (one value for each layer) to simulate a chromatic effect
@@ -236,3 +236,38 @@ class ExtendedSource(Source):
         plt.show() """
         
         return subDir_loc, subDir_imgs
+
+    def __mul__(self,obj):
+        print("Here I am")
+        if obj.tag =='telescope':
+            obj.src   = self
+            if type(obj.OPD) is list:
+                obj.resetOPD()
+            
+            if np.ndim(obj.OPD) ==3:
+                obj.resetOPD()
+    
+            obj.OPD = obj.OPD*obj.pupil # here to ensure that a new pupil is taken into account
+    
+            # update the phase of the source
+            self.phase      = obj.OPD*2*np.pi/self.wavelength
+            self.phase_no_pupil      = obj.OPD_no_pupil*2*np.pi/self.wavelength
+    
+            # compute the variance in the pupil
+            self.var        = np.var(self.phase[np.where(obj.pupil==1)])
+            # assign the source object to the obj object
+    
+            self.fluxMap    = obj.pupilReflectivity*self.nPhoton*obj.samplingTime*(obj.D/obj.resolution)**2
+
+            for i in range(self.sun_subDir_ast.n_source):
+                self.sun_subDir_ast.src[i].fluxMap = self.fluxMap
+            if obj.optical_path is None:
+                obj.optical_path = []
+                obj.optical_path.append([self.type + '('+self.optBand+')',id(self)])
+                obj.optical_path.append([obj.tag,id(obj)])
+            else:
+                obj.optical_path[0] =[self.type + '('+self.optBand+')',id(self)]
+                
+            return obj
+        else:
+            raise AttributeError('The Source can only be paired to a Telescope!')
