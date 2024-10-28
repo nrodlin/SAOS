@@ -129,6 +129,7 @@ class ExtendedSource(Source):
                                             magnitude=1, 
                                             coordinates=[self.subDirs_coordinates[0,dirX,dirY], self.subDirs_coordinates[1,dirX,dirY]], 
                                             display_properties=False))
+                subDirs_stars[-1].nPhoton = np.round(self.nPhoton/(self.nSubDirs*self.nSubDirs))
         
         self.sun_subDir_ast = Asterism(subDirs_stars)
 
@@ -240,33 +241,33 @@ class ExtendedSource(Source):
     def __mul__(self,obj):
         print("Here I am")
         if obj.tag =='telescope':
-            obj.src   = self
-            if type(obj.OPD) is list:
-                obj.resetOPD()
-            
-            if np.ndim(obj.OPD) ==3:
-                obj.resetOPD()
-    
-            obj.OPD = obj.OPD*obj.pupil # here to ensure that a new pupil is taken into account
-    
-            # update the phase of the source
-            self.phase      = obj.OPD*2*np.pi/self.wavelength
-            self.phase_no_pupil      = obj.OPD_no_pupil*2*np.pi/self.wavelength
-    
-            # compute the variance in the pupil
-            self.var        = np.var(self.phase[np.where(obj.pupil==1)])
-            # assign the source object to the obj object
-    
-            self.fluxMap    = obj.pupilReflectivity*self.nPhoton*obj.samplingTime*(obj.D/obj.resolution)**2
 
-            for i in range(self.sun_subDir_ast.n_source):
-                self.sun_subDir_ast.src[i].fluxMap = self.fluxMap
-            if obj.optical_path is None:
-                obj.optical_path = []
-                obj.optical_path.append([self.type + '('+self.optBand+')',id(self)])
-                obj.optical_path.append([obj.tag,id(obj)])
-            else:
-                obj.optical_path[0] =[self.type + '('+self.optBand+')',id(self)]
+            if type(obj.OPD) is not list:
+                tmp_OPD = obj.OPD.copy()
+                obj.OPD = [tmp_OPD for i in range(self.nSubDirs*self.nSubDirs)]
+                
+                tmp_OPD = obj.OPD_no_pupil.copy()
+                obj.OPD_no_pupil = [tmp_OPD for i in range(self.nSubDirs*self.nSubDirs)]
+            for i in range(self.nSubDirs*self.nSubDirs):
+                obj.OPD = obj.OPD*obj.pupil # here to ensure that a new pupil is taken into account
+
+                # update the phase of the source
+                self.sun_subDir_ast.src[i].phase = obj.OPD[i]*2*np.pi/self.sun_subDir_ast.src[i].wavelength
+                self.sun_subDir_ast.src[i].phase_no_pupil = obj.OPD_no_pupil[i]*2*np.pi/self.sun_subDir_ast.src[i].wavelength
+        
+                # compute the variance in the pupil
+                self.sun_subDir_ast.src[i].var        = np.var(self.sun_subDir_ast.src[i].phase[np.where(obj.pupil==1)])
+                # assign the source object to the obj object
+        
+                self.sun_subDir_ast.src[i].fluxMap    = obj.pupilReflectivity*self.sun_subDir_ast.src[i].nPhoton*obj.samplingTime*(obj.D/obj.resolution)**2
+                if obj.optical_path is None:
+                    obj.optical_path = []
+                    obj.optical_path.append([self.sun_subDir_ast.src[i].type + '('+self.sun_subDir_ast.src[i].optBand+')',id(self)])
+                    obj.optical_path.append([obj.tag,id(obj)])
+                else:
+                    obj.optical_path[0] =[self.type + '('+self.sun_subDir_ast.src[i].optBand+')',id(self)]   
+            # assign the source object to the telescope object
+            obj.src   = self
                 
             return obj
         else:

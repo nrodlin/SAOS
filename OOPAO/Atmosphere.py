@@ -644,7 +644,7 @@ class Atmosphere:
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
         
     def __mul__(self,obj):
-        if obj.tag == 'telescope' or obj.tag == 'source' or obj.tag =='asterism':
+        if obj.tag == 'telescope' or obj.tag == 'source' or obj.tag =='asterism' or obj.tag == 'sun':
             if obj.tag == 'telescope':
                 if self.fov == obj.fov:   
                     self.telescope = obj
@@ -664,6 +664,14 @@ class Atmosphere:
                 if np.max(c_[:,0]) <= self.fov/2:
                     self.telescope.src  = obj
                     self.asterism       = obj
+                    obj                 = self.telescope
+                else:
+                    raise ValueError('One of the source is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
+            elif obj.tag =='sun':
+                c_ = np.asarray(obj.sun_subDir_ast.coordinates)
+                if np.max(c_[:,0]) <= self.fov/2:
+                    self.telescope.src  = obj
+                    self.asterism       = obj.sun_subDir_ast
                     obj                 = self.telescope
                 else:
                     raise ValueError('One of the source is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
@@ -701,7 +709,7 @@ class Atmosphere:
             raise TypeError(' layer_index should be a list') 
         normalized_speed = np.asarray(self.windSpeed)/max(self.windSpeed)
 
-        if self.telescope.src.tag =='asterism':
+        if self.telescope.src.tag =='asterism' or self.telescope.src.tag =='sun':
             list_src = self.asterism
         
         plt.figure(fig_index,figsize = [n_sp*4,3*(1+display_cn2)], edgecolor = None)

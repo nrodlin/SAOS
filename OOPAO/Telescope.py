@@ -200,12 +200,15 @@ class Telescope:
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% PSF COMPUTATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
     def computePSF(self,zeroPaddingFactor=2,detector = None,img_resolution=None):
-        conversion_constant = (180/np.pi)*3600
+        conversion_constant = (180/np.pi)*3600 # from rad to arcsec
         factor = 1 
 
         if detector is not None:
             zeroPaddingFactor = detector.psf_sampling
             img_resolution    = detector.resolution
+            xPSF_arcsec_max = detector.fov_arcsec
+        else:
+            xPSF_arcsec_max  = self.fov
 
         if img_resolution is None:
             img_resolution = zeroPaddingFactor*self.resolution
@@ -232,7 +235,7 @@ class Telescope:
                 if self.src.tag == "asterism":
                     raise AttributeError('The asterism contains sources with different wavelengths. Summing up PSFs with different wavelength is not implemented.')                    
                 else:
-                    raise AttributeError('The subDirs wavelengths are different, which is not supported.') 
+                    raise AttributeError('The subDirs wavelengths are different, which does not make sense, the subDirs shall share the conditions of the principal direction.') 
             
             if self.spatialFilter is None:          
                 amp_mask = 1
@@ -246,10 +249,13 @@ class Telescope:
             # add a Tip/Tilt for off-axis sources
             [Tip,Tilt]            = np.meshgrid(np.linspace(-np.pi,np.pi,self.resolution),np.linspace(-np.pi,np.pi,self.resolution))            
             self.delta_TT = input_source[i_src].coordinates[0]*(1/conversion_constant)*(self.D/input_source[i_src].wavelength)*(np.cos(np.deg2rad(input_source[i_src].coordinates[1]))*Tip+np.sin(np.deg2rad(input_source[i_src].coordinates[1]))*Tilt)*self.pupil
-            
+            #plt.imshow(self.delta_TT), plt.show()
+
             # axis in arcsec
             self.xPSF_arcsec       = [-conversion_constant*(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor), conversion_constant*(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor)]
             self.yPSF_arcsec       = [-conversion_constant*(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor), conversion_constant*(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor)]
+
+            print(i_src, img_resolution, self.xPSF_arcsec)
             
             # axis in radians
             self.xPSF_rad   = [-(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor),(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor)]
