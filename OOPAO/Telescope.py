@@ -302,8 +302,6 @@ class Telescope:
                     
                     sun_PSF_tmp = np.abs(np.fft.ifft2(Object_O*Coherence_H))[start_x:start_x + self.src.subDirs_sun.shape[0], start_y:start_y + self.src.subDirs_sun.shape[1]]*self.src.filter_2D[:,:,dirX,dirY]
                     
-                    #self.src.filter_2D
-                    
                     full_corner_x = dirX*(self.src.subDirs_sun.shape[0]//2)
                     full_corner_y = dirY*(self.src.subDirs_sun.shape[0]//2)
 

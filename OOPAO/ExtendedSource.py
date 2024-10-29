@@ -133,7 +133,8 @@ class ExtendedSource(Source):
         
         self.sun_subDir_ast = Asterism(subDirs_stars)
 
-        # Last step, define the 2D filter that will be used to combine the subDirs
+        # Last step, define the 2D filter that will be used to combine the subDirs. 
+        # Taken from the WideField module of DASP (Durham Adaptive Optics Simulator, Alaister Basedn et al.)
 
         self.filter_2D = np.zeros((self.subDirs_sun.shape[0], self.subDirs_sun.shape[1],self.nSubDirs,self.nSubDirs))
 
@@ -148,25 +149,17 @@ class ExtendedSource(Source):
                 self.filter_2D[:,:,dirX,dirY] = np.copy(filter_2D_template)
 
                 if dirX == 0: # top, add top left and right to match the external contributions to the filter
-                    # top, left half
-                    self.filter_2D[0:subDir_size//2,0:subDir_size//2,dirX,dirY] += filter_2D_template[-subDir_size//2:,-subDir_size//2:] # add bottom right
-                    # top, right half
-                    self.filter_2D[0:subDir_size//2,-subDir_size//2:,dirX,dirY] += filter_2D_template[-subDir_size//2:,0:subDir_size//2] # add bottom left
-                if dirX == (self.nSubDirs-1): # bottom, add top left and right to match the external contributions to the filter
-                    # bottom, left half
-                    self.filter_2D[-subDir_size//2:,0:subDir_size//2,dirX,dirY] += filter_2D_template[0:subDir_size//2,-subDir_size//2:] # add top right
-                    # bottom, right half
-                    self.filter_2D[-subDir_size//2:,-subDir_size//2:,dirX,dirY] += filter_2D_template[0:subDir_size//2,0:subDir_size//2] # add top left
-                if dirY == 0: # left, add right top and bottom to match the external contributions to the filter
-                    # left, top half
-                    self.filter_2D[0:subDir_size//2,0:subDir_size//2,dirX,dirY] += filter_2D_template[-subDir_size//2:,-subDir_size//2:] # add right bottom
-                    # left, bottom half
-                    self.filter_2D[-subDir_size//2:,0:subDir_size//2:,dirX,dirY] += filter_2D_template[0:subDir_size//2:,-subDir_size//2:] # add right top 
-                if dirY == (self.nSubDirs-1): # right, add left top and bottom to match the external contributions to the filter
-                    # right, top half
-                    self.filter_2D[0:subDir_size//2,-subDir_size//2:,dirX,dirY] += filter_2D_template[-subDir_size//2:,0:subDir_size//2] # add left bottom
-                    # right, bottom half
-                    self.filter_2D[-subDir_size//2:,-subDir_size//2:,dirX,dirY] += filter_2D_template[0:subDir_size//2,0:subDir_size//2] # add left top
+                    # top
+                    self.filter_2D[0:subDir_size//2,:,dirX,dirY] += filter_2D_template[-subDir_size//2:,:] # add bottom
+                if dirX == (self.nSubDirs-1): # bottom, add top to match the external contributions to the filter
+                    # bottom
+                    self.filter_2D[-subDir_size//2:,:,dirX,dirY] += filter_2D_template[0:subDir_size//2,:] # add top
+                if dirY == 0: # left, add right match the external contributions to the filter
+                    # left
+                    self.filter_2D[:,0:subDir_size//2,dirX,dirY] += filter_2D_template[:,-subDir_size//2:] # add right
+                if dirY == (self.nSubDirs-1): # right, add left match the external contributions to the filter
+                    # right
+                    self.filter_2D[:,-subDir_size//2:,dirX,dirY] += filter_2D_template[:,0:subDir_size//2] # add left
 
                 # Corner cases:
 
