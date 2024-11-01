@@ -15,7 +15,7 @@ class ExtendedSource(Source):
                  img_PS=1/60,
                  nSubDirs=1,
                  patch_padding=2,
-                 ):
+                 subDir_margin=1.0):
         """SOURCE
         A extended source object shares the implementation of the Source class, but the photometry varies for the Sun. 
         The LGS and Magnitude parameters are omitted in this definition
@@ -105,6 +105,7 @@ class ExtendedSource(Source):
         self.img_PS = img_PS                                    # Plate Scale in "/px of the input image, default matches the default img_path PS
         self.nSubDirs = nSubDirs                                # Number of sub-directions taken from the sun image to build the inner aberration of the pupil in the image
         self.patch_padding = patch_padding                      # Padding outside the subaperture FoV in arcsec.
+        self.subDir_margin = subDir_margin                                # Extra margin to the subDirs size to avoid border effects [arcsec]
 
         self.type     = 'SUN'
 
@@ -135,14 +136,14 @@ class ExtendedSource(Source):
 
         # Last step, define the 2D filter that will be used to combine the subDirs. 
         # Taken from the WideField module of DASP (Durham Adaptive Optics Simulator, Alaister Basedn et al.)
+        filt_width = np.round((self.subDirs_coordinates[2,0,0])/self.img_PS).astype(int)
+        self.filter_2D = np.zeros((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
 
-        self.filter_2D = np.zeros((self.subDirs_sun.shape[0], self.subDirs_sun.shape[1],self.nSubDirs,self.nSubDirs))
-
-        lin = 1 - np.abs(np.arange(self.subDirs_sun.shape[0]) - (self.subDirs_sun.shape[0] - 1) / 2) / ((self.subDirs_sun.shape[0] - 1) / 2)
-        filter_2D_template = np.tile(lin, (self.subDirs_sun.shape[0], 1))
+        lin = 1 - np.abs(np.arange(filt_width) - (filt_width - 1) / 2) / ((filt_width - 1) / 2)
+        filter_2D_template = np.tile(lin, (filt_width, 1))
         filter_2D_template = filter_2D_template * lin[:, np.newaxis]
-
-        subDir_size = self.subDirs_sun.shape[0]
+        
+        subDir_size = filt_width
 
         for dirX in range(self.nSubDirs):
             for dirY in range(self.nSubDirs):
@@ -164,13 +165,13 @@ class ExtendedSource(Source):
                 # Corner cases:
 
                 if (dirX == 0 and dirY == 0): # top-left
-                    self.filter_2D[0:subDir_size//2,0:subDir_size//2,dirX,dirY] = 1
+                    self.filter_2D[0:subDir_size//2,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
                 if (dirX == 0 and dirY == (self.nSubDirs-1)): # top-right
-                    self.filter_2D[0:subDir_size//2,-subDir_size//2:,dirX,dirY] = 1
+                    self.filter_2D[0:subDir_size//2,-subDir_size//2:,dirX,dirY] = np.max(filter_2D_template)
                 if (dirX == (self.nSubDirs-1) and dirY == 0): # bottom-left
-                    self.filter_2D[-subDir_size//2:,0:subDir_size//2,dirX,dirY] = 1
+                    self.filter_2D[-subDir_size//2:,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
                 if (dirX == (self.nSubDirs-1) and dirY == (self.nSubDirs-1)): # bottom-right
-                    self.filter_2D[-subDir_size//2:,-subDir_size//2:,dirX,dirY] = 1
+                    self.filter_2D[-subDir_size//2:,-subDir_size//2:,dirX,dirY] = np.max(filter_2D_template)
                
         self.is_initialized = True
         
@@ -226,7 +227,7 @@ class ExtendedSource(Source):
         cy = (self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[1]//2
 
         width_subap_nopad = self.fov / self.img_PS
-        width_subap_pad = (self.fov+self.patch_padding) / self.img_PS
+        width_subap_pad = (self.fov+self.patch_padding+self.subDir_margin) / self.img_PS
 
         sun_nopad = tmp_sun[np.round(cx-width_subap_nopad/2).astype(int):np.round(cx+width_subap_nopad/2).astype(int),
                             np.round(cy-width_subap_nopad/2).astype(int):np.round(cy+width_subap_nopad/2).astype(int)]
@@ -242,7 +243,7 @@ class ExtendedSource(Source):
         else:
             subDir_size = self.fov+self.patch_padding
         
-        subDir_imgs = np.zeros((np.ceil(subDir_size/self.img_PS).astype(int), np.ceil(subDir_size/self.img_PS).astype(int), self.nSubDirs, self.nSubDirs))
+        subDir_imgs = np.zeros((np.ceil((subDir_size+self.subDir_margin)/self.img_PS).astype(int), np.ceil((subDir_size+self.subDir_margin)/self.img_PS).astype(int), self.nSubDirs, self.nSubDirs))
         
         tel_x = self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1]))
         tel_y = self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1]))
@@ -265,10 +266,10 @@ class ExtendedSource(Source):
                 cx = (dirx_c / self.img_PS) + self.sun_padded.shape[0]//2
                 cy = (diry_c / self.img_PS) + self.sun_padded.shape[1]//2               
 
-                subDir_imgs[:,:,dirX,dirY] = self.sun_padded[np.round(cx-subDir_size/(2*self.img_PS)).astype(int):np.round(cx+subDir_size/(2*self.img_PS)).astype(int),
-                                                             np.round(cy-subDir_size/(2*self.img_PS)).astype(int):np.round(cy+subDir_size/(2*self.img_PS)).astype(int)]       
-        
-        """         fig, axs = plt.subplots(self.nSubDirs, self.nSubDirs, squeeze=False)
+                subDir_imgs[:,:,dirX,dirY] = self.sun_padded[np.round(cx-(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int):np.round(cx+(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int),
+                                                             np.round(cy-(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int):np.round(cy+(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int)]       
+        print(subDir_imgs.shape)
+        """ fig, axs = plt.subplots(self.nSubDirs, self.nSubDirs, squeeze=False)
         print(axs.shape)
         for dirX in range(self.nSubDirs):
             for dirY in range(self.nSubDirs):
@@ -298,7 +299,7 @@ class ExtendedSource(Source):
                 self.sun_subDir_ast.src[i].var        = np.var(self.sun_subDir_ast.src[i].phase[np.where(obj.pupil==1)])
                 # assign the source object to the obj object
         
-                self.sun_subDir_ast.src[i].fluxMap    = obj.pupilReflectivity*self.sun_subDir_ast.src[i].nPhoton*obj.samplingTime*(obj.D/obj.resolution)**2
+                self.sun_subDir_ast.src[i].fluxMap    = (1/self.nSubDirs**2)*self.sun_subDir_ast.src[i].nPhoton*obj.samplingTime*(obj.D/obj.resolution)**2
                 if obj.optical_path is None:
                     obj.optical_path = []
                     obj.optical_path.append([self.sun_subDir_ast.src[i].type + '('+self.sun_subDir_ast.src[i].optBand+')',id(self)])

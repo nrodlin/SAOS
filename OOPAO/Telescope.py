@@ -250,72 +250,87 @@ class Telescope:
             [Tip,Tilt]            = np.meshgrid(np.linspace(-np.pi,np.pi,self.resolution),np.linspace(-np.pi,np.pi,self.resolution))            
             # This only applies if we want to compute the PSF of an off-axis object with the phase of the on-axis object and get the PSF over the orginal spot, a very limited case.
             self.delta_TT = 0*input_source[i_src].coordinates[0]*(1/conversion_constant)*(self.D/input_source[i_src].wavelength)*(np.cos(np.deg2rad(input_source[i_src].coordinates[1]))*Tip+np.sin(np.deg2rad(input_source[i_src].coordinates[1]))*Tilt)*self.pupil
-            #plt.imshow(self.delta_TT), plt.show()
 
             # axis in arcsec
             if self.src.tag == "sun":
-                self.xPSF_arcsec = [-self.src.fov/(2*self.src.nSubDirs), self.src.fov/(2*self.src.nSubDirs)]
-                self.yPSF_arcsec = [-self.src.fov/(2*self.src.nSubDirs), self.src.fov/(2*self.src.nSubDirs)]
+                self.xPSF_arcsec = [-self.src.fov/2, self.src.fov/2]
+                self.yPSF_arcsec = [-self.src.fov/2, self.src.fov/2]
 
             else:
                 self.xPSF_arcsec       = [-conversion_constant*(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor), conversion_constant*(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor)]
                 self.yPSF_arcsec       = [-conversion_constant*(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor), conversion_constant*(input_source[i_src].wavelength/self.D) * (img_resolution/2/zeroPaddingFactor)]
-
-            print(i_src, img_resolution, self.xPSF_arcsec)
-            
+          
             # axis in radians
             self.xPSF_rad   = [self.xPSF_arcsec[0]/conversion_constant,self.xPSF_arcsec[1]/conversion_constant]
             self.yPSF_rad   = [self.yPSF_arcsec[0]/conversion_constant,self.yPSF_arcsec[1]/conversion_constant]
-            
-            if input_source[i_src].coordinates[0] > max(self.xPSF_arcsec):
-                if warning_src is False:
-                    print('Warning : Some Sources are outside of the field of view of the detector ('+str( self.xPSF_arcsec[1])+' arcsec) -- Wrapping effects will appear')
-                    warning_src = True
+
+            if self.src.tag == "sun":
+                diagonal_semi_length = np.sqrt(self.xPSF_arcsec[0]**2 + self.yPSF_arcsec[0]**2)
+                farthest_corner = input_source[i_src].coordinates[0] + diagonal_semi_length
+                if farthest_corner > self.fov:
+                    if warning_src is False:
+                        print('Warning : Some Sources are outside of the field of view of the telescope (' + str(farthest_corner) + ' arcsec) -- Wrapping effects will appear')
+                        warning_src = True                
+            else:
+                if input_source[i_src].coordinates[0] > max(self.xPSF_arcsec):
+                    if warning_src is False:
+                        print('Warning : Some Sources are outside of the field of view of the detector (' + str(self.xPSF_arcsec[1]) + ' arcsec) -- Wrapping effects will appear')
+                        warning_src = True
     
             self.PropagateField(amplitude = amp , phase = phase+self.delta_TT*factor, zeroPaddingFactor = zeroPaddingFactor,img_resolution=img_resolution)
 
             # normalized PSF           
-            self.PSF_norma  = self.PSF/self.PSF.max()  
+            self.PSF_norma  = self.PSF/np.sum(self.PSF)
             output_PSF.append(self.PSF.copy())
             output_PSF_norma.append(self.PSF_norma.copy())
 
         if len(output_PSF)==1:
             output_PSF = output_PSF[0]
             output_PSF_norma = output_PSF_norma[0]
-        
+
         if self.src.tag == 'sun':
-            pad_height = self.src.subDirs_sun[:,:,0, 0].shape[0] + output_PSF[0].shape[0] - 1
-            pad_width = self.src.subDirs_sun[:,:,0, 0].shape[1] + output_PSF[0].shape[1] - 1
+            pad_img_size = 2 ** np.round(1+np.log2(self.src.subDirs_sun[:,:,0, 0].shape[0] + output_PSF[0].shape[0]))
 
-            start_x = (pad_height - self.src.subDirs_sun.shape[0]) // 2
-            start_y = (pad_width - self.src.subDirs_sun.shape[1]) // 2
+            # Coordinates to look the patch inside the zero padded image after the FFT.
+            start_FFT = np.round((pad_img_size/2)-(self.src.subDirs_coordinates[2,0,0])/(2*self.src.img_PS)).astype(int)
+            end_FFT = start_FFT + np.round((self.src.subDirs_coordinates[2,0,0])/self.src.img_PS).astype(int)
 
-            sun_PSF_combined = np.zeros_like(self.src.sun_padded)
-            
+            sun_PSF_combined = np.zeros(np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int), np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int))
+            sun_psf_tmp_3D = np.zeros((np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int), np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int), self.src.nSubDirs*self.src.nSubDirs))
+
             # Mix the subdirs into a unique PSF
             for dirX in range(self.src.nSubDirs):
                 for dirY in range(self.src.nSubDirs):
                     index = dirX*self.src.nSubDirs + dirY
-                    
-                    Object_O = np.fft.fft2(self.src.subDirs_sun[:,:,dirX, dirY], s=(pad_height, pad_width))
-                    Coherence_H = np.fft.fft2(output_PSF[index], s=(pad_height, pad_width))
-                    
-                    sun_PSF_tmp = np.abs(np.fft.ifft2(Object_O*Coherence_H))[start_x:start_x + self.src.subDirs_sun.shape[0], start_y:start_y + self.src.subDirs_sun.shape[1]]*self.src.filter_2D[:,:,dirX,dirY]
-                    
-                    full_corner_x = dirX*(self.src.subDirs_sun.shape[0]//2)
-                    full_corner_y = dirY*(self.src.subDirs_sun.shape[0]//2)
 
-                    sun_PSF_combined[full_corner_x:full_corner_x+self.src.subDirs_sun[:,:,0, 0].shape[0],
-                                     full_corner_y:full_corner_y+self.src.subDirs_sun[:,:,0, 0].shape[1]] += sun_PSF_tmp
+                    Object_O = np.fft.fft2(np.pad(self.src.subDirs_sun[:,:,dirX, dirY],pad_width=((pad_img_size-self.src.subDirs_sun[:,:,0, 0].shape[0])/2).astype(int))) 
+                    Coherence_H = np.fft.fft2(np.pad(output_PSF_norma[index], pad_width=((pad_img_size-output_PSF_norma[index].shape)/2).astype(int)))
 
-        plt.imshow(sun_PSF_combined), plt.show()
+                    global_corner_x = np.round(dirX*((self.src.subDirs_coordinates[2,0,0])/(2*self.src.img_PS))).astype(int)
+                    global_corner_y = np.round(dirY*((self.src.subDirs_coordinates[2,0,0])/(2*self.src.img_PS))).astype(int)
+
+                    global_corner_x_end = global_corner_x + np.round((self.src.subDirs_coordinates[2,0,0])/(self.src.img_PS)).astype(int)
+                    global_corner_y_end = global_corner_y + np.round((self.src.subDirs_coordinates[2,0,0])/(self.src.img_PS)).astype(int)
+
+                    sun_psf_tmp_3D[global_corner_x:global_corner_x_end,
+                                   global_corner_y:global_corner_y_end,index] = np.abs(np.fft.fftshift(np.fft.ifft2(Object_O*Coherence_H)))[start_FFT:end_FFT, start_FFT:end_FFT] * self.src.filter_2D[:,:,dirX, dirY]
+                    
+
+        sun_PSF_combined = np.sum(sun_psf_tmp_3D,axis=2)
         
         offset = np.round(self.src.patch_padding/(2*self.src.img_PS)).astype(int)
 
         sun_PSF_combined_fov = sun_PSF_combined[offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int), 
                                                 offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int)]
         
-        plt.imshow(sun_PSF_combined_fov), plt.show()
+        if self.src.tag == "sun":
+            self.PSF_sun = np.copy(sun_PSF_combined_fov)
+            self.PSF_sun_norma = np.copy(sun_PSF_combined_fov)
+        
+        """ _,axs = plt.subplots(1,2)
+        axs[0].imshow(self.src.sun_nopad, 'gray')
+        axs[1].imshow(sun_PSF_combined_fov, 'gray')
+        plt.show() """
 
         self.PSF        = output_PSF.copy()
         self.PSF_norma  = output_PSF_norma.copy()     
@@ -577,7 +592,7 @@ class Telescope:
                     for i_src in range(len(input_source)):
                         obj.telescope.src         = input_source[i_src]
                         [Tip,Tilt]                = np.meshgrid(np.linspace(-np.pi,np.pi,self.resolution),np.linspace(-np.pi,np.pi,self.resolution))               
-                        delta_TT                  = input_source[i_src].coordinates[0]*(1/((180/np.pi)*3600))*(self.D/input_source[i_src].wavelength)*(np.cos(np.deg2rad(input_source[i_src].coordinates[1]))*Tip+np.sin(np.deg2rad(input_source[i_src].coordinates[1]))*Tilt)*self.pupil
+                        delta_TT                  = 0*input_source[i_src].coordinates[0]*(1/((180/np.pi)*3600))*(self.D/input_source[i_src].wavelength)*(np.cos(np.deg2rad(input_source[i_src].coordinates[1]))*Tip+np.sin(np.deg2rad(input_source[i_src].coordinates[1]))*Tilt)*self.pupil
                         obj.wfs_measure(phase_in  = input_source[i_src].phase + delta_TT ,integrate = False )
                         output_raw_data += obj.raw_data.copy()
                     obj.raw_data = output_raw_data.copy()
