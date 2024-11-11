@@ -244,7 +244,7 @@ class Telescope:
                 amp_mask = self.amplitude_filtered               
                 phase    = self.phase_filtered
 
-            amp      = amp_mask*self.pupil*self.pupilReflectivity*np.sqrt(input_source[i_src].fluxMap)
+            amp      = amp_mask*self.pupil*np.sqrt(input_source[i_src].fluxMap)
             
             # add a Tip/Tilt for off-axis sources
             [Tip,Tilt]            = np.meshgrid(np.linspace(-np.pi,np.pi,self.resolution),np.linspace(-np.pi,np.pi,self.resolution))            
@@ -289,7 +289,7 @@ class Telescope:
             output_PSF_norma = output_PSF_norma[0]
 
         if self.src.tag == 'sun':
-            pad_img_size = 2 ** np.round(1+np.log2(self.src.subDirs_sun[:,:,0, 0].shape[0] + output_PSF[0].shape[0]))
+            pad_img_size = 2 ** np.round(np.log2(self.src.subDirs_sun[:,:,0, 0].shape[0] + output_PSF[0].shape[0]))
 
             # Coordinates to look the patch inside the zero padded image after the FFT.
             start_FFT = np.round((pad_img_size/2)-(self.src.subDirs_coordinates[2,0,0])/(2*self.src.img_PS)).astype(int)
@@ -316,12 +316,12 @@ class Telescope:
                                    global_corner_y:global_corner_y_end,index] = np.abs(np.fft.fftshift(np.fft.ifft2(Object_O*Coherence_H)))[start_FFT:end_FFT, start_FFT:end_FFT] * self.src.filter_2D[:,:,dirX, dirY]
                     
 
-        sun_PSF_combined = np.sum(sun_psf_tmp_3D,axis=2)
-        
-        offset = np.round(self.src.patch_padding/(2*self.src.img_PS)).astype(int)
+            sun_PSF_combined = np.sum(sun_psf_tmp_3D,axis=2)
+            
+            offset = np.round(self.src.patch_padding/(2*self.src.img_PS)).astype(int)
 
-        sun_PSF_combined_fov = sun_PSF_combined[offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int), 
-                                                offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int)]
+            sun_PSF_combined_fov = sun_PSF_combined[offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int), 
+                                                    offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int)]
         
         if self.src.tag == "sun":
             self.PSF_sun = np.copy(sun_PSF_combined_fov)

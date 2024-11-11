@@ -114,7 +114,7 @@ class ExtendedSource(Source):
             
         self.sun_nopad, self.sun_padded = self.load_sun_img()   # Take sun patch, pad + no pad
 
-        if self.nSubDirs > 5:
+        if self.nSubDirs > 7:
             raise BaseException("Too many directions, processing will not be feasible")
         
         self.subDirs_coordinates, self.subDirs_sun = self.get_subDirs() # Coordinates are in polar [r, theta(radians)] + FoV [arcsec]
@@ -172,7 +172,7 @@ class ExtendedSource(Source):
                     self.filter_2D[-subDir_size//2:,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
                 if (dirX == (self.nSubDirs-1) and dirY == (self.nSubDirs-1)): # bottom-right
                     self.filter_2D[-subDir_size//2:,-subDir_size//2:,dirX,dirY] = np.max(filter_2D_template)
-               
+                       
         self.is_initialized = True
         
     def photometry(self,arg):
@@ -183,9 +183,9 @@ class ExtendedSource(Source):
         # Source: Serpone, Nick & Horikoshi, Satoshi & Emeline, Alexei. (2010). 
         # Microwaves in advanced oxidation processes for environmental applications. A brief review. 
         # Journal of Photochemistry and Photobiology C-photochemistry Reviews - J PHOTOCHEM PHOTOBIOL C-PHOTO. 11. 114-131. 10.1016/j.jphotochemrev.2010.07.003. 
-        phot.V =  [0.500e-6, 0.0, 3.5e20]
-        phot.R =  [0.700e-6, 0.0, 2.25e20]
-        phot.IR = [1.300e-6, 0.0, 0.5e20]
+        phot.V     =  [0.500e-6, 0.0, 3.31e12]#[0.500e-6, 0.0, 3.5e20]
+        phot.R     =  [0.700e-6, 0.0, 2.25e20]
+        phot.IR    =  [1.300e-6, 0.0, 0.5e20]
         
         if isinstance(arg,str):
             if hasattr(phot,arg):
@@ -221,18 +221,23 @@ class ExtendedSource(Source):
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
 
     def load_sun_img(self):
-        tmp_sun = fits.open(self.img_path)[0].data
+        tmp_sun = fits.open(self.img_path)[0].data.astype('<f4')
+        
+        cnt_x = (self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[0]//2
+        cnt_y = (self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[1]//2
 
-        cx = (self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[0]//2
-        cy = (self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[1]//2
+        width_subap_nopad = np.round(self.fov / self.img_PS).astype(int)
+        width_subap_pad = np.round((self.fov+self.patch_padding+self.subDir_margin) / self.img_PS).astype(int)
 
-        width_subap_nopad = self.fov / self.img_PS
-        width_subap_pad = (self.fov+self.patch_padding+self.subDir_margin) / self.img_PS
+        cx_nopad = np.round(cnt_x - width_subap_nopad/2).astype(int)
+        cy_nopad = np.round(cnt_y - width_subap_nopad/2).astype(int)
 
-        sun_nopad = tmp_sun[np.round(cx-width_subap_nopad/2).astype(int):np.round(cx+width_subap_nopad/2).astype(int),
-                            np.round(cy-width_subap_nopad/2).astype(int):np.round(cy+width_subap_nopad/2).astype(int)]
-        sun_pad = tmp_sun[np.round(cx-width_subap_pad/2).astype(int):np.round(cx+width_subap_pad/2).astype(int),
-                          np.round(cy-width_subap_pad/2).astype(int):np.round(cy+width_subap_pad/2).astype(int)]
+        cx_pad = np.round(cnt_x - width_subap_pad/2).astype(int)
+        cy_pad = np.round(cnt_y - width_subap_pad/2).astype(int)
+
+        sun_nopad = tmp_sun[cx_nopad:cx_nopad+width_subap_nopad,cy_nopad:cy_nopad+width_subap_nopad]
+
+        sun_pad = tmp_sun[cx_pad:cx_pad+width_subap_pad,cy_pad:cy_pad+width_subap_pad]
 
         return sun_nopad, sun_pad
     
@@ -279,7 +284,6 @@ class ExtendedSource(Source):
         return subDir_loc, subDir_imgs
 
     def __mul__(self,obj):
-        print("Here I am")
         if obj.tag =='telescope':
 
             if type(obj.OPD) is not list:
@@ -298,8 +302,8 @@ class ExtendedSource(Source):
                 # compute the variance in the pupil
                 self.sun_subDir_ast.src[i].var        = np.var(self.sun_subDir_ast.src[i].phase[np.where(obj.pupil==1)])
                 # assign the source object to the obj object
-        
-                self.sun_subDir_ast.src[i].fluxMap    = (1/self.nSubDirs**2)*self.sun_subDir_ast.src[i].nPhoton*obj.samplingTime*(obj.D/obj.resolution)**2
+
+                self.sun_subDir_ast.src[i].fluxMap    = obj.pupilReflectivity*(1/self.nSubDirs**2)*self.sun_subDir_ast.src[i].nPhoton*obj.samplingTime*(obj.D/obj.resolution)**2
                 if obj.optical_path is None:
                     obj.optical_path = []
                     obj.optical_path.append([self.sun_subDir_ast.src[i].type + '('+self.sun_subDir_ast.src[i].optBand+')',id(self)])
