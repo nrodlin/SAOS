@@ -42,11 +42,8 @@ class CorrelatingShackHartmann:
                  plate_scale:float,
                  telescope,
                  lightRatio:float,
-                 threshold_cog:float = 0.01,
                  ideal_pattern:bool = False, 
                  binning_factor:int = 1,
-                 threshold_convolution:float = 0.05,
-                 shannon_sampling:bool = False,
                  unit_P2V = False,
                  pattern_criteria = None,
                  subaperture_sel = [],
@@ -68,10 +65,6 @@ class CorrelatingShackHartmann:
             This object carries the phase, flux and pupil information.
         lightRatio : float
             Criterion to select the valid subaperture based on flux considerations.
-        threshold_cog : float, optional
-            Threshold (with respect to the maximum value of the image) 
-            to apply to compute the center of gravity of the spots.
-            The default is 0.01.
         idea_pattern : bool, optional
             Flag to enable the geometric WFS. 
             If True, enables the geometric Shack Hartmann (direct measurement of gradient).
@@ -80,13 +73,6 @@ class CorrelatingShackHartmann:
         binning_factor : int, optional
             Binning factor of the detector.
             The default is 1.
-        threshold_convolution : float, optional
-            Threshold considered to force the gaussian spots (elungated spots) to go to zero on the edges.
-            The default is 0.05.
-        shannon_sampling : bool, optional
-            If True, the lenslet array spots are sampled at the same sampling as the FFT (2 pix per FWHM).
-            If False, the sampling is 1 pix per FWHM (default).
-            The default is False.
         unit_P2V : bool, optional
                 If True, the slopes units are calibrated using a Tip/Tilt normalized to 2 Pi peak-to-valley.
                 If False, the slopes units are calibrated using a Tip/Tilt normalized to 1 in the pupil (Default). In that case the slopes are expressed in [rad].
@@ -94,7 +80,7 @@ class CorrelatingShackHartmann:
         pattern_criteria : str, optional
                 None by default, using the ideal pattern
                 If specified, the str defines the method to select the pattern among the subapertures
-                if 'noise', the subaperture with less measurement noise is selected
+                if 'contrast', the subaperture with the highest contrast is selected
                 If 'subap', then the subaperture specified in subaperture_sel is used
         subaperture_sel : list, optional
                 Empty by default, requires pattern_criteria to be 'subap' in order to be used.
@@ -149,11 +135,10 @@ class CorrelatingShackHartmann:
         self.ideal_pattern                  = ideal_pattern
         self.nSubap                         = nSubap
         self.lightRatio                     = lightRatio       
-        self.threshold_convolution          = threshold_convolution
-        self.threshold_cog                  = threshold_cog
-        self.shannon_sampling               = shannon_sampling
         self.unit_P2V                       = unit_P2V
         self.N_brightest                    = N_brightest
+        self.subaperture_sel                = subaperture_sel
+        self.pattern_criteria               = pattern_criteria
         # case where the spots are zeropadded to provide larger fOV
         if self.telescope.src.tag == "sun":
             self.n_pix_lenslet = int((self.telescope.src.fov + self.telescope.src.patch_padding) // self.plate_scale)
@@ -250,7 +235,6 @@ class CorrelatingShackHartmann:
 
         self.subDirs_sun_wfs = np.zeros((self.subDirs_size_wfs,self.subDirs_size_wfs, self.telescope.src.nSubDirs, self.telescope.src.nSubDirs))
         self.filt_2D_wfs = np.zeros((self.subDirs_filt_size_wfs, self.subDirs_filt_size_wfs, self.telescope.src.nSubDirs, self.telescope.src.nSubDirs))
-        self.sun_subap = np.zeros((self.nSubap**2, self.n_pix_subap, self.n_pix_subap))
 
         for i in range(self.telescope.src.nSubDirs):
             for j in range(self.telescope.src.nSubDirs):
@@ -260,12 +244,19 @@ class CorrelatingShackHartmann:
         # WFS initialization
         self.initialize_wfs()
 
-    def get_subap_img(self, apply_atmosphere=True):
+    def get_subap_img(self, apply_atmosphere=True,index=0):
+
+        # Make sure that the phase is updated w.r.t. OPD
+        for i in range(self.telescope.src.nSubDirs**2):
+            if np.ndim(self.telescope.OPD) > 3:
+                self.telescope.src.sun_subDir_ast.src[i].phase = np.squeeze(self.telescope.OPD[i][:,:,index])
+            else:
+                self.telescope.src.sun_subDir_ast.src[i].phase = self.telescope.OPD[i]
 
         # Read phase per subdir and subap
 
         tmp_phase_subDirs = np.asarray([self.telescope.src.sun_subDir_ast.src[i].phase for i in range(self.telescope.src.nSubDirs**2)])
-        
+
         if apply_atmosphere == False: # This means that the user wants the WFS without the atmosphere applied
             tmp_phase_subDirs[np.abs(tmp_phase_subDirs)>0] = 1
         
@@ -295,7 +286,7 @@ class CorrelatingShackHartmann:
                     self.subDirs_sun_wfs_padded[index, 0, :, :] = np.pad(np.squeeze(self.subDirs_sun_wfs[:,:,dirx,diry]), pad_width=((pad_top, pad_bottom), (pad_left, pad_right)))
         
         # Compute and normalize PSF
-        psf_per_subdir_per_subap = np.power(np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j*phase_per_subap), s=(pad_img_size, pad_img_size), axes=(2,3)), axes=(2,3))), 2)
+        psf_per_subdir_per_subap = np.power(np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j*phase_per_subap[:,self.valid_subapertures_1D,:,:]), s=(pad_img_size, pad_img_size), axes=(2,3)), axes=(2,3))), 2)
 
         psf_per_subdir_per_subap = psf_per_subdir_per_subap / np.sum(psf_per_subdir_per_subap[0,0,:,:])  
 
@@ -309,7 +300,7 @@ class CorrelatingShackHartmann:
         # Compute subap image
         subap_padding_fov_px = np.round((self.telescope.src.fov+self.telescope.src.patch_padding)/self.plate_scale).astype(int)
         
-        temp_sun_subap = np.zeros((self.nSubap**2, subap_padding_fov_px, subap_padding_fov_px))
+        temp_sun_subap = np.zeros((self.nValidSubaperture, subap_padding_fov_px, subap_padding_fov_px))
                 
         for dirX in range(self.telescope.src.nSubDirs):
             for dirY in range(self.telescope.src.nSubDirs):
@@ -363,7 +354,8 @@ class CorrelatingShackHartmann:
         self.slopes_units           = 1
         print('Acquiring reference slopes..')
         self.telescope.resetOPD()   
-        self.pseudo_ref_img = self.get_subap_img(False) 
+        pseudo_ref_patch = self.get_subap_img(False) 
+        self.pseudo_ref_img = self.generate_pseudo_reference_img(pseudo_ref_patch)
         self.corrImg = self.wfs_measure(self.pseudo_ref_img, self.pseudo_ref_img) 
         self.references_1D = np.copy(self.signal)
         self.reference_slopes_maps = np.copy(self.signal_2D) 
@@ -384,12 +376,14 @@ class CorrelatingShackHartmann:
         amp = 10e-9
         input_std = np.zeros(5)
         for i in range(5):
-            self.telescope.OPD          = self.telescope.pupil*Tip*(i-2)*amp
-            self.telescope.OPD_no_pupil = Tip*(i-2)*amp
+            for j in range(self.telescope.src.nSubDirs**2):
+                self.telescope.OPD[j]          = self.telescope.pupil*Tip*(i-2)*amp
+                self.telescope.OPD_no_pupil[j] = Tip*(i-2)*amp
 
             self.wfs_measure(True)        
             mean_slope[i] = np.mean(self.signal[:self.nValidSubaperture])
-            input_std[i] = np.std(self.telescope.OPD[self.telescope.pupil])*2*np.pi/self.telescope.src.wavelength
+            temp_phase = np.squeeze(self.telescope.OPD[0])
+            input_std[i] = np.std(temp_phase[self.telescope.pupil])*2*np.pi/self.telescope.src.wavelength
             
         self.p = np.polyfit(np.linspace(-2,2,5)*amp,mean_slope,deg = 1)
         self.slopes_units = np.abs(self.p[0])*(self.telescope.src.wavelength/2/np.pi)
@@ -410,6 +404,20 @@ class CorrelatingShackHartmann:
         centroid_out[:,0]    = np.sum(np.sum(im*X_coord_map,axis=1),axis=1)/norma
         centroid_out[:,1]    = np.sum(np.sum(im*Y_coord_map,axis=1),axis=1)/norma
         return centroid_out
+
+    def generate_pseudo_reference_img(self, imgs_patch):
+        # The selection is done with the criteria specified
+        pseudo_reference_img = np.zeros_like(imgs_patch)
+        ind_sel = 0
+        if self.pattern_criteria == 'contrast':
+            contrast = np.std(imgs_patch, axis=(1,2))
+            ind_sel = np.argmax(contrast)
+        else:
+            ind_sel = self.subaperture_sel[0]*self.nSubap+self.subaperture_sel[1]
+
+        pseudo_reference_img = np.tile(imgs_patch[ind_sel, : ,:], (pseudo_reference_img.shape[0], 1, 1))
+
+        return pseudo_reference_img
     #%% DIFFRACTIVE
 
     def initialize_flux(self,input_flux_map = None):
@@ -441,11 +449,17 @@ class CorrelatingShackHartmann:
             self.current_nPhoton = self.telescope.src.nPhoton 
         return
   
-    def fill_raw_data(self,ind_x,ind_y,I,index_frame=None):
+    def fill_raw_data(self,ind_x,ind_y,I,type='raw', index_frame=None):
         if index_frame is None:
-            self.raw_data[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
+            if type == 'raw':
+                self.raw_data[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
+            else:
+                self.corr_raw_data[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
         else:
-            self.raw_data[index_frame,ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I
+            if type == 'raw':
+                self.raw_data[index_frame,ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I
+            else:
+                self.corr_raw_data[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
 
     def split_raw_data(self):
         raw_data_h_split = np.vsplit((self.cam.frame),self.nSubap)
@@ -455,22 +469,6 @@ class CorrelatingShackHartmann:
             raw_data_v_split = np.hsplit(raw_data_h_split[i],self.nSubap)
             self.maps_intensity[i*self.nSubap:(i+1)*self.nSubap,center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2,center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2] = np.asarray(raw_data_v_split)
         self.maps_intensity = self.maps_intensity[self.valid_subapertures_1D,:,:]
- 
-    def compute_raw_data_multi(self,maps_intensity):   
-        self.ind_frame =np.zeros(maps_intensity.shape[0],dtype=(int))
-        self.maps_intensity = maps_intensity
-        index_x = np.tile(self.index_x[self.valid_subapertures_1D],self.phase_buffer.shape[0])
-        index_y = np.tile(self.index_y[self.valid_subapertures_1D],self.phase_buffer.shape[0])
-        
-        for i in range(self.phase_buffer.shape[0]):
-            self.ind_frame[i*self.nValidSubaperture:(i+1)*self.nValidSubaperture]=i
-        
-        def joblib_fill_raw_data():
-            Q=Parallel(n_jobs=1,prefer='processes')(delayed(self.fill_raw_data)(i,j,k,l) for i,j,k,l in zip(index_x,index_y,self.maps_intensity,self.ind_frame))
-            return Q
-        
-        joblib_fill_raw_data()
-        return
     
 #%% SH Measurement 
     def sh_measure(self,phase_in):
@@ -480,7 +478,7 @@ class CorrelatingShackHartmann:
     
     def wfs_measure(self,phase_in = None,integrate = True):
 
-        if phase_in is not None:
+        if phase_in is not None: # TO DO
             self.telescope.src.phase = phase_in
         
         if self.current_nPhoton != self.telescope.src.nPhoton:
@@ -489,7 +487,8 @@ class CorrelatingShackHartmann:
    
         ##%%%%%%%%%%%%  DIFFRACTIVE SH WFS %%%%%%%%%%%%
 
-        self.raw_data   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+        self.raw_data      = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+        self.corr_raw_data = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
 
         # normalization for FFT
         norma = self.cube.shape[1]
@@ -501,7 +500,7 @@ class CorrelatingShackHartmann:
         else:  
             self.initialize_flux(((self.telescope.amplitude_filtered)**2).T*self.telescope.src.fluxMap.T)
         
-        # Compute WFS image
+        # Compute WFS image, only valid subapertures
         self.wfs_img = self.get_subap_img(True)
         # add photon/readout noise to 2D spots
         if self.cam.photonNoise!=0:
@@ -509,19 +508,17 @@ class CorrelatingShackHartmann:
                 
         if self.cam.readoutNoise!=0:
             self.wfs_img += np.int64(np.round(self.random_state_readout_noise.randn(self.wfs_img.shape[0],self.wfs_img.shape[1],self.wfs_img.shape[2])*self.cam.readoutNoise))
-        
-        # reduce to valid subaperture
-        self.wfs_img_valid = self.wfs_img[self.valid_subapertures_1D,:,:]
                      
         # reset camera frame
-        self.raw_data   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+        self.raw_data      = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+        self.corr_raw_data = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
         
         # bin the 2D spots arrays
-        self.corrImg = np.zeros_like(self.wfs_img_valid)
+        self.corrImg = np.zeros_like(self.wfs_img)
         
         # compute correlation and normalize the energy to 1
 
-        self.corrImg = np.real(np.fft.fftshift(np.fft.ifft2(np.fft.fft2(self.wfs_img_valid*self.hann_window_2D, axes=(1,2)) * np.conj(np.fft.fft2(self.pseudo_ref_img[self.valid_subapertures_1D,:,:]*self.hann_window_2D, axes=(1,2))), axes=(1,2)), axes=(1,2)))
+        self.corrImg = np.real(np.fft.fftshift(np.fft.ifft2(np.fft.fft2(self.wfs_img*self.hann_window_2D, axes=(1,2)) * np.conj(np.fft.fft2(self.pseudo_ref_img*self.hann_window_2D, axes=(1,2))), axes=(1,2)), axes=(1,2)))
 
         self.corrImg = self.corrImg / (self.n_pix_subap**2)
 
@@ -546,6 +543,16 @@ class CorrelatingShackHartmann:
         self.signal_2D = signal_2D/self.slopes_units
 
         self.signal = self.signal_2D[self.valid_slopes_maps].T
+
+        # Save raw frame
+        index_valid = 0
+        for x in range(self.nSubap):
+            for y in range(self.nSubap):
+                if self.valid_subapertures[x,y]:
+                    self.fill_raw_data(x, y, self.corrImg[index_valid, :, :], 'corr')
+                    self.fill_raw_data(x, y, self.wfs_img[index_valid, :, :], 'raw')
+                    index_valid += 1
+
         # plt.plot(self.signal), plt.show()
         # assign camera_fram to sh.cam.frame
         self*self.cam
@@ -562,7 +569,6 @@ class CorrelatingShackHartmann:
 
         if self.is_LGS:    
             print('{: ^20s}'.format('Spot Elungation')    + '{: ^18s}'.format(str(100*np.round(self.elungation_factor,3)))      +'{: ^18s}'.format('% of a subap' ))
-        print('{: ^20s}'.format('Shannon Sampling')    + '{: ^18s}'.format(str(self.shannon_sampling)))
 
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
 

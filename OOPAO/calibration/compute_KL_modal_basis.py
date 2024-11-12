@@ -12,7 +12,12 @@ import OOPAO.calibration.ao_cockpit_psim as aou
 from ..tools.tools import createFolder
 
 def compute_KL_basis(tel,atm,dm,lim = 1e-3,remove_piston = True):
-    
+    if tel.src.tag == 'sun':
+        index = np.round(len(tel.OPD)/2).astype(int)
+        sz_opd = int(2*tel.OPD[index].shape[0])
+    else:
+        sz_opd = int(2*tel.OPD.shape[0])
+
     M2C_KL = compute_M2C(telescope            = tel,\
                         atmosphere         = atm,\
                         deformableMirror   = dm,\
@@ -26,7 +31,7 @@ def compute_KL_basis(tel,atm,dm,lim = 1e-3,remove_piston = True):
                         minimF             = False,\
                         nmo                = None,\
                         ortho_spm          = True,\
-                        SZ                 = int(2*tel.OPD.shape[0]),\
+                        SZ                 = sz_opd,\
                         nZer               = 3,\
                         NDIVL              = 1,\
                         recompute_cov=True,\
@@ -100,7 +105,11 @@ def compute_M2C(telescope, atmosphere, deformableMirror, param = None, nameFolde
         if display:
             print('PREPARING IF_2D...')
             print(' ')
-        IF_2D = np.moveaxis(telescope.OPD,-1,0)
+        if telescope.src.tag == 'sun':
+            index = np.round(len(telescope.OPD)/2).astype(int)
+            IF_2D = np.moveaxis(telescope.OPD[index],-1,0)
+        else:
+            IF_2D = np.moveaxis(telescope.OPD,-1,0)
     
     nact = IF_2D.shape[0]
     if display:

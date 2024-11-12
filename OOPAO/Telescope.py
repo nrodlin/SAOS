@@ -556,7 +556,7 @@ class Telescope:
                     self*obj[i_obj]
         else:    
               # interaction with WFS object: Propagation of the phase screen
-            if obj.tag=='pyramid' or obj.tag == 'double_wfs' or obj.tag=='shackHartmann' or obj.tag == 'bioEdge':
+            if obj.tag=='pyramid' or obj.tag == 'double_wfs' or obj.tag=='shackHartmann' or obj.tag == 'bioEdge' or obj.tag=='correlatingShackHartmann':
                 self.optical_path.append([obj.tag,id(obj)])
                 if self.display_optical_path is True:
                     self.print_optical_path()
@@ -583,20 +583,27 @@ class Telescope:
                     obj.raw_data = output_raw_data.copy()
                     obj.signal_2D,obj.signal = obj.wfs_integrate()    
                 elif self.src.tag == 'sun':
-                    input_source        = copy.deepcopy(self.src.src)
                     output_raw_data     = np.zeros([obj.raw_data.shape[0],obj.raw_data.shape[0]])
+
                     if obj.tag=='pyramid':
                         raise ValueError("Pyramid WFS does not work with solar images.")
-                    obj.telescope       = copy.deepcopy(self)
                     
-                    for i_src in range(len(input_source)):
-                        obj.telescope.src         = input_source[i_src]
-                        [Tip,Tilt]                = np.meshgrid(np.linspace(-np.pi,np.pi,self.resolution),np.linspace(-np.pi,np.pi,self.resolution))               
-                        delta_TT                  = 0*input_source[i_src].coordinates[0]*(1/((180/np.pi)*3600))*(self.D/input_source[i_src].wavelength)*(np.cos(np.deg2rad(input_source[i_src].coordinates[1]))*Tip+np.sin(np.deg2rad(input_source[i_src].coordinates[1]))*Tilt)*self.pupil
-                        obj.wfs_measure(phase_in  = input_source[i_src].phase + delta_TT ,integrate = False )
-                        output_raw_data += obj.raw_data.copy()
-                    obj.raw_data = output_raw_data.copy()
-                    obj.signal_2D,obj.signal = obj.wfs_integrate()                           
+                    obj.telescope       = copy.deepcopy(self)
+                    if np.ndim(self.OPD) == 4: # This occurs during the interaction matrix measurement
+                        obj.signal_list = []
+                        obj.signal_2D_list = []
+                        obj.raw_data_list = []
+                        for j in range(np.asarray(self.OPD).shape[3]):
+                            # Measure
+                            obj.wfs_measure(True,j)
+                            # Add data to buffer
+                            obj.raw_data_list.append(output_raw_data.copy())
+                            obj.signal_2D_list.append(obj.signal_2D.copy())
+                            obj.signal_list.append(obj.signal.copy()) 
+                        # Numpy conversion
+                        obj.signal_list = np.asarray(obj.signal_list).T
+                    else:
+                        obj.wfs_measure()                     
                 else:
                     obj.telescope=self              
                     obj.wfs_measure(phase_in = self.src.phase)               
@@ -660,7 +667,7 @@ class Telescope:
                     if np.ndim(self.OPD_no_pupil) == 2:
                         self.OPD = self.OPD_no_pupil*self.pupil
                     else:
-                        self.OPD =self.OPD_no_pupil*pupil 
+                        self.OPD = self.OPD_no_pupil*pupil 
                 else:           
                     if self.src.tag == 'asterism':
                         if len(self.OPD) == self.src.n_source:
@@ -679,21 +686,23 @@ class Telescope:
                         else:
                             raise TypeError('The lenght of the OPD list ('+str(len(self._OPD_no_pupil))+') does not match the number of sources ('+str(self.src.n_source)+')')
                     if self.src.tag == 'sun':
-                        if len(self.OPD) == self.src.sun_subDir_ast.sun_source:
+                        if len(self.OPD) == self.src.sun_subDir_ast.n_source:
+                            # The DM affects equally to all the subDirs
+                            centralSubDir = np.round((self.src.nSubDirs**2)/2).astype(int)
+                            dmPhase = obj.dm_propagation(self,OPD_in = self.OPD_no_pupil[centralSubDir])
+
+                            self.OPD_no_pupil = np.zeros((self.src.sun_subDir_ast.n_source, self.pupil.shape[0], self.pupil.shape[1], dmPhase.shape[-1]))
+                            self.OPD = np.zeros_like(self.OPD_no_pupil)
+                            
                             for i in range(self.src.sun_subDir_ast.n_source):
-                                if obj.altitude is not None:
-                                    self.OPD_no_pupil[i]  = obj.dm_propagation(self,OPD_in = self.OPD_no_pupil[i], i_source = i  )
-                                else:
-                                    self.OPD_no_pupil[i]  = obj.dm_propagation(self,OPD_in = self.OPD_no_pupil[i] )
-                                if np.ndim(self.OPD_no_pupil[i]) == 2:
-                                    self.OPD[i] = self.OPD_no_pupil[i]*self.pupil
-                                else:
-                                    self.OPD[i] =self.OPD_no_pupil[i]*pupil 
-                            self.OPD = self.OPD
-                            self.OPD_no_pupil = self.OPD_no_pupil
+                                self.OPD_no_pupil[i] = np.copy(dmPhase)
+                                self.OPD[i] = self.OPD_no_pupil[i] * pupil
+
+                            self.OPD = np.copy(self.OPD)
+                            self.OPD_no_pupil = np.copy(self.OPD_no_pupil)
                                  
                         else:
-                            raise TypeError('The lenght of the OPD list ('+str(len(self._OPD_no_pupil))+') does not match the number of subDirs ('+str(self.src.sun_subDir_ast.n_source)+')')
+                            raise TypeError('The lenght of the OPD list (' + str(len(self._OPD_no_pupil))+') does not match the number of subDirs ('+str(self.src.sun_subDir_ast.n_source)+')')
                     else:
                         raise TypeError('The wrong object was attached to the telescope')                                      
         return self

@@ -465,7 +465,6 @@ class DeformableMirror:
             dm_OPD = self.get_OPD_altitude(i_source)
         else:
             dm_OPD = self.OPD
-
         # case where the telescope is paired to an atmosphere
         if telescope.isPaired:
             if telescope.isPetalFree:

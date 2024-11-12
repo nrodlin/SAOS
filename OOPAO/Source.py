@@ -138,7 +138,7 @@ class Source:
             
             if np.ndim(obj.OPD) ==3:
                 obj.resetOPD()
-    
+            print("Source: ", obj.pupil.shape, obj.OPD.shape)
             obj.OPD = obj.OPD*obj.pupil # here to ensure that a new pupil is taken into account
     
             # update the phase of the source

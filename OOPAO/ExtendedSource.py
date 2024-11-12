@@ -93,8 +93,6 @@ class ExtendedSource(Source):
         self.wavelength = tmp[0]                                # wavelength in m
         self.bandwidth  = tmp[1]                                # optical bandwidth
         self.nPhoton    =  tmp[2]                               # photon per m2 per s
-        self.phase      = []                                    # phase of the source 
-        self.phase_no_pupil      = []                           # phase of the source (no pupil)
         self.fluxMap    = []                                    # 2D flux map of the source
         self.tag        = 'sun'                                 # tag of the object
         self.altitude = altitude                                # altitude of the source object in m    
@@ -273,7 +271,6 @@ class ExtendedSource(Source):
 
                 subDir_imgs[:,:,dirX,dirY] = self.sun_padded[np.round(cx-(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int):np.round(cx+(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int),
                                                              np.round(cy-(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int):np.round(cy+(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int)]       
-        print(subDir_imgs.shape)
         """ fig, axs = plt.subplots(self.nSubDirs, self.nSubDirs, squeeze=False)
         print(axs.shape)
         for dirX in range(self.nSubDirs):
@@ -285,15 +282,22 @@ class ExtendedSource(Source):
 
     def __mul__(self,obj):
         if obj.tag =='telescope':
-
-            if type(obj.OPD) is not list:
+            if (type(obj.OPD) is not list) and (np.ndim(obj.OPD) <= 2):
                 tmp_OPD = obj.OPD.copy()
                 obj.OPD = [tmp_OPD for i in range(self.nSubDirs*self.nSubDirs)]
                 
                 tmp_OPD = obj.OPD_no_pupil.copy()
                 obj.OPD_no_pupil = [tmp_OPD for i in range(self.nSubDirs*self.nSubDirs)]
+            else:
+                if np.ndim(obj.OPD) == 4:
+                    obj.resetOPD()
             for i in range(self.nSubDirs*self.nSubDirs):
-                obj.OPD = obj.OPD*obj.pupil # here to ensure that a new pupil is taken into account
+                if np.ndim(obj.OPD) == 4: 
+                    # This occurs during the calibration matrix generation
+                    temp_pupil = obj.pupil[...,np.newaxis]
+                    obj.OPD[i] = obj.OPD[i]*temp_pupil
+                else:
+                    obj.OPD[i] = obj.OPD[i]*obj.pupil # here to ensure that a new pupil is taken into account
 
                 # update the phase of the source
                 self.sun_subDir_ast.src[i].phase = obj.OPD[i]*2*np.pi/self.sun_subDir_ast.src[i].wavelength
@@ -309,7 +313,7 @@ class ExtendedSource(Source):
                     obj.optical_path.append([self.sun_subDir_ast.src[i].type + '('+self.sun_subDir_ast.src[i].optBand+')',id(self)])
                     obj.optical_path.append([obj.tag,id(obj)])
                 else:
-                    obj.optical_path[0] =[self.type + '('+self.sun_subDir_ast.src[i].optBand+')',id(self)]   
+                    obj.optical_path[0] =[self.type + '(' + self.sun_subDir_ast.src[i].optBand + ')', id(self)]   
             # assign the source object to the telescope object
             obj.src   = self
                 

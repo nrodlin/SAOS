@@ -42,7 +42,8 @@ def InteractionMatrix(ngs,
 
     else:
         print('Warning: Keeping the noise configuration for the WFS')    
-    
+    """ if ngs.tag == 'sun' and nMeasurements > 1:
+        raise ValueError("Unsupported nMeasurement > 1 for Calibration using solar images.") """
     # separate tel from ATM
     tel.isPaired = False
     ngs*tel
@@ -81,26 +82,30 @@ def InteractionMatrix(ngs,
                 intMatCommands = np.squeeze(M2C[:,i*nMeasurements:((i+1)*nMeasurements)])
         else:
             intMatCommands = np.squeeze(M2C) 
-            
+
         a= time.time()
 #        push
         dm.coefs = intMatCommands*stroke
         tel*dm
         tel.src.phase+=phaseBuffer
         tel*wfs
-        sp = wfs.signal
-            
-
+        if wfs.tag == "correlatingShackHartmann":
+            sp = wfs.signal_list
+        else:
+            sp = wfs.signal
 #       pull
         if single_pass:
-            sm = 0*wfs.signal
+            sm = 0*sp
             factor = 2
         else:
             dm.coefs=-intMatCommands*stroke
             tel*dm
             tel.src.phase+=phaseBuffer
             tel*wfs
-            sm = wfs.signal
+            if wfs.tag == "correlatingShackHartmann":
+                sm = wfs.signal_list
+            else:
+                sm = wfs.signal
             factor = 1
         if i==nCycle-1:
             if nExtra !=0:
@@ -116,8 +121,6 @@ def InteractionMatrix(ngs,
                     intMat[:,i] = np.squeeze(0.5*(sp-sm)/stroke)      
                  else:
                     intMat[:,-nMeasurements:] =  np.squeeze(0.5*(sp-sm)/stroke)
-
-
         else:
             if nMeasurements==1:
                 intMat[:,i] = np.squeeze(0.5*(sp-sm)/stroke)                
@@ -183,16 +186,22 @@ def InteractionMatrixFromPhaseScreen(ngs,atm,tel,wfs,phasScreens,stroke,phaseOff
             modes_in = np.squeeze(phasScreens)
 
         a= time.time()
-#        push
+#        push 
         tel.OPD = modes_in*stroke
         tel.src.phase+=phaseBuffer
         tel*wfs
-        sp = wfs.signal
+        if wfs.tag == "correlatingShackHartmann":
+            sp = wfs.signal_list
+        else:
+            sp = wfs.signal
 #       pull
         tel.OPD=-modes_in*stroke
         tel.src.phase+=phaseBuffer
         tel*wfs
-        sm = wfs.signal        
+        if wfs.tag == "correlatingShackHartmann":
+            sm = wfs.signal_list
+        else:
+            sm = wfs.signal       
         if i==nCycle-1:
             if nExtra !=0:
                 if nMeasurements==1:
