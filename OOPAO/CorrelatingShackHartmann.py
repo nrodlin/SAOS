@@ -249,9 +249,9 @@ class CorrelatingShackHartmann:
         # Make sure that the phase is updated w.r.t. OPD
         for i in range(self.telescope.src.nSubDirs**2):
             if np.ndim(self.telescope.OPD) > 3:
-                self.telescope.src.sun_subDir_ast.src[i].phase = np.squeeze(self.telescope.OPD[i][:,:,index])
+                self.telescope.src.sun_subDir_ast.src[i].phase = np.squeeze(self.telescope.OPD[i][:,:,index]* (2*np.pi/self.telescope.src.wavelength))
             else:
-                self.telescope.src.sun_subDir_ast.src[i].phase = self.telescope.OPD[i]
+                self.telescope.src.sun_subDir_ast.src[i].phase = self.telescope.OPD[i]* (2*np.pi/self.telescope.src.wavelength)
 
         # Read phase per subdir and subap
 
@@ -259,7 +259,7 @@ class CorrelatingShackHartmann:
 
         if apply_atmosphere == False: # This means that the user wants the WFS without the atmosphere applied
             tmp_phase_subDirs[np.abs(tmp_phase_subDirs)>0] = 1
-        
+
         nPoints_per_subap = tmp_phase_subDirs.shape[1] // self.nSubap
         phase_per_subap = np.zeros((self.telescope.src.nSubDirs**2, self.nSubap**2, nPoints_per_subap, nPoints_per_subap))
 
@@ -353,7 +353,7 @@ class CorrelatingShackHartmann:
         self.reference_slopes_maps  = np.zeros([self.nSubap*2,self.nSubap])
         self.slopes_units           = 1
         print('Acquiring reference slopes..')
-        self.telescope.resetOPD()   
+        self.telescope.resetOPD() 
         pseudo_ref_patch = self.get_subap_img(False) 
         self.pseudo_ref_img = self.generate_pseudo_reference_img(pseudo_ref_patch)
         self.corrImg = self.wfs_measure(self.pseudo_ref_img, self.pseudo_ref_img) 
@@ -361,7 +361,6 @@ class CorrelatingShackHartmann:
         self.reference_slopes_maps = np.copy(self.signal_2D) 
         self.isInitialized = True
         print('Done!')
-        
         print('Setting slopes units..')  
         # normalize to 2 pi p2v
 
@@ -391,7 +390,6 @@ class CorrelatingShackHartmann:
         self.cam.photonNoise        = readoutNoise
         self.cam.readoutNoise       = photonNoise
         self.telescope.resetOPD()
-        
         self.print_properties()
 
     def centroid(self,image):

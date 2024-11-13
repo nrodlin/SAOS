@@ -288,6 +288,8 @@ class ExtendedSource(Source):
                 
                 tmp_OPD = obj.OPD_no_pupil.copy()
                 obj.OPD_no_pupil = [tmp_OPD for i in range(self.nSubDirs*self.nSubDirs)]
+                obj.PSF_sun_norma = self.sun_nopad
+                obj.PSF_sun = self.sun_nopad
             else:
                 if np.ndim(obj.OPD) == 4:
                     obj.resetOPD()

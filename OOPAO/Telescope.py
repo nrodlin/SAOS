@@ -212,17 +212,25 @@ class Telescope:
 
         if img_resolution is None:
             img_resolution = zeroPaddingFactor*self.resolution
+        # Make sure that the phase of the object matches the OPD
+        if self.src.tag == "sun":
+            for i in range(self.src.nSubDirs**2):
+                self.src.sun_subDir_ast.src[i].phase = self.OPD[i] * (2*np.pi/self.src.wavelength)
+        elif self.src.tag == "asterism":
+            for i in range(len(self.src)):
+                self.src.src[i].phase = self.OPD[i] * (2*np.pi/self.src.wavelength)
+        else:
+            self.src.phase = self.OPD * (2*np.pi/self.src.wavelength)
         
         if self.src is None:
             raise AttributeError('The telescope was not coupled to any source object! Make sure to couple it with an src object using src*tel')   
-            
         elif self.src.tag == 'asterism':
             input_source = self.src.src
         elif self.src.tag == "sun":
             input_source = self.src.sun_subDir_ast.src
         else:
             input_source = [self.src]
-
+        
         input_wavelenght = input_source[0].wavelength    
         output_PSF = []
         output_PSF_norma = []
@@ -302,7 +310,7 @@ class Telescope:
             for dirX in range(self.src.nSubDirs):
                 for dirY in range(self.src.nSubDirs):
                     index = dirX*self.src.nSubDirs + dirY
-
+                    print(dirX, dirY, pad_img_size-output_PSF_norma[index].shape, pad_img_size, output_PSF_norma[index].shape)
                     Object_O = np.fft.fft2(np.pad(self.src.subDirs_sun[:,:,dirX, dirY],pad_width=((pad_img_size-self.src.subDirs_sun[:,:,0, 0].shape[0])/2).astype(int))) 
                     Coherence_H = np.fft.fft2(np.pad(output_PSF_norma[index], pad_width=((pad_img_size-output_PSF_norma[index].shape)/2).astype(int)))
 
@@ -476,27 +484,38 @@ class Telescope:
                 if self.src.tag == 'source':
                     self.src.phase = self._OPD*2*np.pi/self.src.wavelength
                     if np.ndim(self.OPD)==2:
-                        self.mean_removed_OPD = (self.OPD - np.mean(self.OPD[np.where(self.pupil ==1)]))*self.pupil
+                        self.mean_removed_OPD = (self._OPD - np.mean(self.OPD[np.where(self.pupil ==1)]))*self.pupil
                 else:
                     if self.src.tag == 'asterism':
+                        self.mean_removed_OPD = self._OPD.copy()
                         for i in range(self.src.n_source):
                             self.src.src[i].phase = self._OPD*2*np.pi/self.src.src[i].wavelength
-                    elif self.src.tag == "sun"                       :
+                            if np.ndim(self.OPD[i])==2:
+                                self.mean_removed_OPD[i] = (self.OPD[i] - np.mean(self.OPD[i][np.where(self.pupil ==1)]))*self.pupil
+                    elif self.src.tag == "sun":
+                        self.mean_removed_OPD = self._OPD.copy()
                         for i in range(self.src.sun_subDir_ast.n_source):
-                            self.src.sun_subDir_ast.src[i].phase = self._OPD*2*np.pi/self.src.sun_subDir_ast.src[i].wavelength                       
+                            self.src.sun_subDir_ast.src[i].phase = self._OPD[i]*2*np.pi/self.src.sun_subDir_ast.src[i].wavelength
+                            if np.ndim(self.OPD[i])==2:
+                                self.mean_removed_OPD[i] = (self._OPD[i] - np.mean(self.OPD[i][np.where(self.pupil ==1)]))*self.pupil                       
                     else:
                         raise TypeError('The wrong object was attached to the telescope')                                      
             else:
                 if self.src.tag == 'asterism':
                     if len(self._OPD)==self.src.n_source:
+                        self.mean_removed_OPD = self.OPD.copy()
                         for i in range(self.src.n_source):
                             self.src.src[i].phase = self._OPD[i]*2*np.pi/self.src.src[i].wavelength
-                    elif self.src.tag == "sun"                       :
-                        for i in range(self.src.sun_subDir_ast.n_source):
-                            self.src.sun_subDir_ast.src[i].phase = self._OPD*2*np.pi/self.src.sun_subDir_ast.src[i].wavelength                         
-                    else:
-                        raise TypeError('A list of OPD cannnot be propagated to a single source')
-                    
+                            if np.ndim(self.OPD[i])==2:
+                                self.mean_removed_OPD[i] = (self.OPD[i] - np.mean(self.OPD[i][np.where(self.pupil ==1)]))*self.pupil 
+                elif self.src.tag == "sun":
+                    self.mean_removed_OPD = self._OPD.copy()
+                    for i in range(self.src.sun_subDir_ast.n_source):
+                        self.src.sun_subDir_ast.src[i].phase = self._OPD[i]*2*np.pi/self.src.sun_subDir_ast.src[i].wavelength
+                        if np.ndim(self.OPD[i])==2:
+                            self.mean_removed_OPD[i] = (self._OPD[i] - np.mean(self._OPD[i][np.where(self.pupil ==1)]))*self.pupil                     
+                else:
+                    raise TypeError('A list of OPD cannnot be propagated to a single source')   
                     
     @property        
     def OPD_no_pupil(self):
@@ -506,17 +525,16 @@ class Telescope:
     def OPD_no_pupil(self,val):
         self._OPD_no_pupil = val
         if self.src is not None:
-
             if type(val) is not list:
                 if self.src.tag == 'source':
                     self.src.phase_no_pupil = self._OPD_no_pupil*2*np.pi/self.src.wavelength
                 else:
                     if self.src.tag == 'asterism':
                         for i in range(self.src.n_source):
-                            self.src.src[i].phase_no_pupil = self._OPD_no_pupil*2*np.pi/self.src.src[i].wavelength
+                            self.src.src[i].phase_no_pupil = self._OPD_no_pupil[i]*2*np.pi/self.src.src[i].wavelength
                     elif self.src.tag == 'sun':
                         for i in range(self.src.sun_subDir_ast.n_source):
-                            self.src.sun_subDir_ast.src[i].phase_no_pupil = self._OPD_no_pupil*2*np.pi/self.src.sun_subDir_ast.src[i].wavelength
+                            self.src.sun_subDir_ast.src[i].phase_no_pupil = self._OPD_no_pupil[i]*2*np.pi/self.src.sun_subDir_ast.src[i].wavelength
                     else:
                         raise TypeError('The wrong object was attached to the telescope')                                      
             else:
@@ -603,7 +621,7 @@ class Telescope:
                         # Numpy conversion
                         obj.signal_list = np.asarray(obj.signal_list).T
                     else:
-                        obj.wfs_measure()                     
+                        obj.wfs_measure()   
                 else:
                     obj.telescope=self              
                     obj.wfs_measure(phase_in = self.src.phase)               
@@ -690,21 +708,24 @@ class Telescope:
                             # The DM affects equally to all the subDirs
                             centralSubDir = np.round((self.src.nSubDirs**2)/2).astype(int)
                             dmPhase = obj.dm_propagation(self,OPD_in = self.OPD_no_pupil[centralSubDir])
-
-                            self.OPD_no_pupil = np.zeros((self.src.sun_subDir_ast.n_source, self.pupil.shape[0], self.pupil.shape[1], dmPhase.shape[-1]))
+                            if np.ndim(dmPhase) > 2 : # This occurs during calibration only
+                                self.OPD_no_pupil = np.zeros((self.src.sun_subDir_ast.n_source, self.pupil.shape[0], self.pupil.shape[1], dmPhase.shape[-1]))
+                            else:
+                                self.OPD_no_pupil = np.zeros((self.src.sun_subDir_ast.n_source, self.pupil.shape[0], self.pupil.shape[1]))
                             self.OPD = np.zeros_like(self.OPD_no_pupil)
-                            
                             for i in range(self.src.sun_subDir_ast.n_source):
                                 self.OPD_no_pupil[i] = np.copy(dmPhase)
-                                self.OPD[i] = self.OPD_no_pupil[i] * pupil
+                                if np.ndim(self.OPD_no_pupil[i]) == 2:
+                                    self.OPD[i] = self.OPD_no_pupil[i] * self.pupil
+                                else:
+                                    self.OPD[i] = self.OPD_no_pupil[i] * pupil
 
                             self.OPD = np.copy(self.OPD)
                             self.OPD_no_pupil = np.copy(self.OPD_no_pupil)
-                                 
                         else:
                             raise TypeError('The lenght of the OPD list (' + str(len(self._OPD_no_pupil))+') does not match the number of subDirs ('+str(self.src.sun_subDir_ast.n_source)+')')
                     else:
-                        raise TypeError('The wrong object was attached to the telescope')                                      
+                        raise TypeError('The wrong object was attached to the telescope')                                    
         return self
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% TELESCOPE METHODS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
     def resetOPD(self):
@@ -853,6 +874,18 @@ class Telescope:
     def __add__(self,obj):
         if obj.tag == 'atmosphere':
             obj*self
+            """ _, axs = plt.subplots(3,3)
+            axs[0,0].imshow(self.OPD[0])
+            axs[0,1].imshow(self.OPD[1])
+            axs[0,2].imshow(self.OPD[2])
+            axs[1,0].imshow(self.OPD[3])
+            axs[1,1].imshow(self.OPD[4])
+            axs[1,2].imshow(self.OPD[5])
+            axs[2,0].imshow(self.OPD[6])
+            axs[2,1].imshow(self.OPD[7])
+            axs[2,2].imshow(self.OPD[8])
+            plt.show() """
+
             if self.isPetalFree:
                     self.removePetalling()  
             print('Telescope and Atmosphere combined!')
