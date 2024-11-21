@@ -297,7 +297,7 @@ class Telescope:
             output_PSF_norma = output_PSF_norma[0]
 
         if self.src.tag == 'sun':
-            pad_img_size = 2 ** np.round(np.log2(self.src.subDirs_sun[:,:,0, 0].shape[0] + output_PSF[0].shape[0]))
+            pad_img_size = 2 ** np.ceil(np.log2(self.src.subDirs_sun[:,:,0, 0].shape[0] + output_PSF[0].shape[0]))
 
             # Coordinates to look the patch inside the zero padded image after the FFT.
             start_FFT = np.round((pad_img_size/2)-(self.src.subDirs_coordinates[2,0,0])/(2*self.src.img_PS)).astype(int)
@@ -310,7 +310,7 @@ class Telescope:
             for dirX in range(self.src.nSubDirs):
                 for dirY in range(self.src.nSubDirs):
                     index = dirX*self.src.nSubDirs + dirY
-
+                    print(pad_img_size, self.src.subDirs_sun[:,:,0, 0].shape[0])
                     Object_O = np.fft.fft2(np.pad(self.src.subDirs_sun[:,:,dirX, dirY],pad_width=((pad_img_size-self.src.subDirs_sun[:,:,0, 0].shape[0])/2).astype(int))) 
                     Coherence_H = np.fft.fft2(np.pad(output_PSF_norma[index], pad_width=((pad_img_size-output_PSF_norma[index].shape)/2).astype(int)))
 
