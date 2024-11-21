@@ -310,7 +310,7 @@ class Telescope:
             for dirX in range(self.src.nSubDirs):
                 for dirY in range(self.src.nSubDirs):
                     index = dirX*self.src.nSubDirs + dirY
-                    print(dirX, dirY, pad_img_size-output_PSF_norma[index].shape, pad_img_size, output_PSF_norma[index].shape)
+
                     Object_O = np.fft.fft2(np.pad(self.src.subDirs_sun[:,:,dirX, dirY],pad_width=((pad_img_size-self.src.subDirs_sun[:,:,0, 0].shape[0])/2).astype(int))) 
                     Coherence_H = np.fft.fft2(np.pad(output_PSF_norma[index], pad_width=((pad_img_size-output_PSF_norma[index].shape)/2).astype(int)))
 
@@ -613,7 +613,7 @@ class Telescope:
                         obj.raw_data_list = []
                         for j in range(np.asarray(self.OPD).shape[3]):
                             # Measure
-                            obj.wfs_measure(True,j)
+                            obj.wfs_measure()
                             # Add data to buffer
                             obj.raw_data_list.append(output_raw_data.copy())
                             obj.signal_2D_list.append(obj.signal_2D.copy())
@@ -624,7 +624,7 @@ class Telescope:
                         obj.wfs_measure()   
                 else:
                     obj.telescope=self              
-                    obj.wfs_measure(phase_in = self.src.phase)               
+                    obj.wfs_measure()               
 
             if obj.tag=='detector':
                 if self.optical_path[-1] != obj.tag: 

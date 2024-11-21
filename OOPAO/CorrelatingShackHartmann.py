@@ -43,10 +43,10 @@ class CorrelatingShackHartmann:
                  telescope,
                  lightRatio:float,
                  ideal_pattern:bool = False, 
-                 binning_factor:int = 1,
                  unit_P2V = False,
                  pattern_criteria = None,
                  subaperture_sel = [],
+                 fov_crop = None,
                  N_brightest = 16):
         
         """SHACK-HARTMANN
@@ -70,9 +70,6 @@ class CorrelatingShackHartmann:
             If True, enables the geometric Shack Hartmann (direct measurement of gradient).
             If False, the diffractive computation is considered.
             The default is False.
-        binning_factor : int, optional
-            Binning factor of the detector.
-            The default is 1.
         unit_P2V : bool, optional
                 If True, the slopes units are calibrated using a Tip/Tilt normalized to 2 Pi peak-to-valley.
                 If False, the slopes units are calibrated using a Tip/Tilt normalized to 1 in the pupil (Default). In that case the slopes are expressed in [rad].
@@ -85,6 +82,9 @@ class CorrelatingShackHartmann:
         subaperture_sel : list, optional
                 Empty by default, requires pattern_criteria to be 'subap' in order to be used.
                 The list contains the 2D position of the subaperture that is selected as pseudo-reference
+        fov_crop : float, optional
+                By default it is None. This parameter is used to crop the window of the subaperture after convoluting the phase by the sun patch. 
+                This is useful to remove difraction from the subapertures. Must be smaller than the FoV of the patch.
         N_brightest : int, optional
                 This parameter sets the N brightest pixels that will be used to clean the correlation image
 
@@ -102,7 +102,6 @@ class CorrelatingShackHartmann:
         _ tel*wfs
         This operation will trigger:
             _ propagation of the tel.src light through the Shack Hartmann detector (phase and flux)
-            _ binning of the SH signals
             _ addition of eventual photon noise and readout noise
             _ computation of the Shack Hartmann signals
         
@@ -136,20 +135,23 @@ class CorrelatingShackHartmann:
         self.nSubap                         = nSubap
         self.lightRatio                     = lightRatio       
         self.unit_P2V                       = unit_P2V
+        self.fov_crop                       = fov_crop
         self.N_brightest                    = N_brightest
         self.subaperture_sel                = subaperture_sel
         self.pattern_criteria               = pattern_criteria
-        # case where the spots are zeropadded to provide larger fOV
+
+        if self.fov_crop is not None:
+            if self.fov_crop > self.telescope.src.fov:
+                raise AttributeError('The crop of the FoV cannot be larger than the base FoV.')
+            else:
+                self.n_pix_fov_crop             = np.round(self.fov_crop / self.plate_scale).astype(int)
+
         if self.telescope.src.tag == "sun":
             self.n_pix_lenslet = int((self.telescope.src.fov + self.telescope.src.patch_padding) // self.plate_scale)
             self.n_pix_subap = int(self.telescope.src.fov // self.plate_scale)
-            self.hann_window_2D = np.outer(hann(self.n_pix_subap),hann(self.n_pix_subap))
         else:
             raise AttributeError('Correlating SH WFS only supports sun objects')
-        
-        ###### TO BE REMOVED AFTER FULL IMPLEMENTATION
-        self.binning_factor                 = binning_factor
-        
+                
         # different resolutions needed
         self.n_pix_subap_init           = int(self.telescope.src.fov // self.plate_scale)
         self.extra_pixel                = (self.n_pix_subap-self.n_pix_subap_init)//2         
@@ -160,7 +162,12 @@ class CorrelatingShackHartmann:
         self.lenslet_frame              = np.zeros([self.n_pix_subap,self.n_pix_subap], dtype =complex)
         self.outerMask                  = np.ones([self.n_pix_subap_init, self.n_pix_subap_init ])
         self.outerMask[1:-1,1:-1]       = 0
-        
+
+        if self.fov_crop is None:
+            self.fft_window_2D = np.outer(hann(self.n_pix_subap),hann(self.n_pix_subap))
+        else:
+            self.fft_window_2D = np.outer(hann(self.n_pix_fov_crop),hann(self.n_pix_fov_crop))
+        self.fft_window_2D = np.ones_like(self.fft_window_2D)
         # Compute camera frame in case of multiple measurements
         self.get_raw_data_multi     = False
         # detector camera
@@ -171,27 +178,22 @@ class CorrelatingShackHartmann:
         self.random_state_photon_noise      = np.random.RandomState(seed=int(time.time()))      # random states to reproduce sequences of noise 
         self.random_state_readout_noise     = np.random.RandomState(seed=int(time.time()))      # random states to reproduce sequences of noise 
         self.random_state_background        = np.random.RandomState(seed=int(time.time()))      # random states to reproduce sequences of noise 
-        
+
         # field of views
         self.fov_lenslet_arcsec         = self.telescope.src.fov
         self.fov_pixel_arcsec           = self.fov_lenslet_arcsec / self.n_pix_subap
         self.fov_pixel_binned_arcsec    = self.fov_lenslet_arcsec / self.n_pix_subap_init
 
-        X_map, Y_map= np.meshgrid(np.arange(self.n_pix_subap//self.binning_factor),np.arange(self.n_pix_subap//self.binning_factor))
+        X_map, Y_map= np.meshgrid(np.arange(self.n_pix_subap),np.arange(self.n_pix_subap))
         self.X_coord_map = np.atleast_3d(X_map).T
         self.Y_coord_map = np.atleast_3d(Y_map).T
-        
-        if telescope.src.type == 'LGS':
-            self.is_LGS                 = True
+
+        # camera frame
+        self.raw_img_spacing    = 2 # in px
+        if self.fov_crop is None:
+            self.raw_data           = np.zeros([(self.n_pix_subap+2*self.raw_img_spacing)*self.nSubap,(self.n_pix_subap+2*self.raw_img_spacing)*self.nSubap], dtype =float)
         else:
-            self.is_LGS                 = False
-        
-        # joblib parameter
-        self.nJobs                  = 1
-        self.joblib_prefer          = 'processes'
-        
-        # camera frame 
-        self.raw_data           = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+            self.raw_data           = np.zeros([(self.n_pix_fov_crop+2*self.raw_img_spacing)*self.nSubap,(self.n_pix_fov_crop+2*self.raw_img_spacing)*self.nSubap], dtype =float)
         # cube of lenslet zero padded
         self.cube                   = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init])
         self.cube_flux              = np.zeros([self.nSubap**2,self.n_pix_subap_init,self.n_pix_subap_init],dtype=(complex))
@@ -318,12 +320,16 @@ class CorrelatingShackHartmann:
                 temp_sun_subap[:,gl_cx:gl_cx_end,gl_cy:gl_cy_end] += np.squeeze(sun_fft_conv[index,:,cx_subDir:cx_subDir+self.subDirs_filt_size_wfs, 
                                                                                                      cy_subDir:cy_subDir+self.subDirs_filt_size_wfs] * self.filt_2D_wfs[:,:,dirX,dirY])
 
-        # Crop central fov, without external padding    
-        cx = (temp_sun_subap.shape[1]- self.n_pix_subap) // 2
-        cy = (temp_sun_subap.shape[2]- self.n_pix_subap) // 2
+        # Crop central fov, without external padding | also consider if the fov_crop is selected
+        if self.fov_crop is not None:
+            cx = (temp_sun_subap.shape[1] - self.n_pix_fov_crop) // 2
+            cy = (temp_sun_subap.shape[2] - self.n_pix_fov_crop) // 2
+            sun_subap = temp_sun_subap[:, cx:cx+self.n_pix_fov_crop, cy:cy+self.n_pix_fov_crop]
 
-        
-        sun_subap = temp_sun_subap[:, cx:cx+self.n_pix_subap, cy:cy+self.n_pix_subap]
+        else:
+            cx = (temp_sun_subap.shape[1]- self.n_pix_subap) // 2
+            cy = (temp_sun_subap.shape[2]- self.n_pix_subap) // 2
+            sun_subap = temp_sun_subap[:, cx:cx+self.n_pix_subap, cy:cy+self.n_pix_subap]
         
         """ subap = 0
         plt.imshow(self.sun_subap[subap,:,:]), plt.show()
@@ -356,8 +362,10 @@ class CorrelatingShackHartmann:
         self.telescope.resetOPD() 
         pseudo_ref_patch = self.get_subap_img(False) 
         self.pseudo_ref_img = self.generate_pseudo_reference_img(pseudo_ref_patch)
-        self.corrImg = self.wfs_measure(self.pseudo_ref_img, self.pseudo_ref_img) 
+        self.corrImg = self.wfs_measure() 
         self.references_1D = np.copy(self.signal)
+        print(np.mean(self.references_1D), np.std(self.references_1D))
+        # plt.plot(self.references_1D), plt.show()
         self.reference_slopes_maps = np.copy(self.signal_2D) 
         self.isInitialized = True
         print('Done!')
@@ -365,7 +373,7 @@ class CorrelatingShackHartmann:
         # normalize to 2 pi p2v
 
         # [Tip,Tilt]                         = np.meshgrid(np.linspace(-np.pi,np.pi,self.telescope.resolution),np.linspace(-np.pi,np.pi,self.telescope.resolution))
-        [Tip, Tilt] = np.meshgrid(np.linspace(0,np.pi,self.telescope.resolution,endpoint=False),np.linspace(0,np.pi,self.telescope.resolution,endpoint=False))
+        """ [Tip, Tilt] = np.meshgrid(np.linspace(0,np.pi,self.telescope.resolution,endpoint=False),np.linspace(0,np.pi,self.telescope.resolution,endpoint=False))
 
         if self.unit_P2V is False:            
             # normalize to 1 m RMS in the pupil
@@ -379,13 +387,13 @@ class CorrelatingShackHartmann:
                 self.telescope.OPD[j]          = self.telescope.pupil*Tip*(i-2)*amp
                 self.telescope.OPD_no_pupil[j] = Tip*(i-2)*amp
 
-            self.wfs_measure(True)        
+            self.wfs_measure()        
             mean_slope[i] = np.mean(self.signal[:self.nValidSubaperture])
             temp_phase = np.squeeze(self.telescope.OPD[0])
             input_std[i] = np.std(temp_phase[self.telescope.pupil])*2*np.pi/self.telescope.src.wavelength
             
         self.p = np.polyfit(np.linspace(-2,2,5)*amp,mean_slope,deg = 1)
-        self.slopes_units = np.abs(self.p[0])*(self.telescope.src.wavelength/2/np.pi)
+        self.slopes_units = np.abs(self.p[0])*(self.telescope.src.wavelength/2/np.pi) """
         print('Done!')
         self.cam.photonNoise        = readoutNoise
         self.cam.readoutNoise       = photonNoise
@@ -448,16 +456,19 @@ class CorrelatingShackHartmann:
         return
   
     def fill_raw_data(self,ind_x,ind_y,I,type='raw', index_frame=None):
+        cx = (2*ind_x+1)*self.raw_img_spacing + ind_x*I.shape[0]
+        cy = (2*ind_y+1)*self.raw_img_spacing + ind_y*I.shape[1]
+
         if index_frame is None:
             if type == 'raw':
-                self.raw_data[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
+                self.raw_data[cx:cx+I.shape[0], cy:cy+I.shape[1]] = I
             else:
-                self.corr_raw_data[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
+                self.corr_raw_data[cx:cx+I.shape[0], cy:cy+I.shape[1]] = I        
         else:
-            if type == 'raw':
-                self.raw_data[index_frame,ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I
+            if type == 'corr':
+                self.raw_data[index_frame,cx:cx+I.shape[0], cy:cy+I.shape[1]] = I
             else:
-                self.corr_raw_data[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
+                self.corr_raw_data[cx:cx+I.shape[0], cy:cy+I.shape[1]] = I        
 
     def split_raw_data(self):
         raw_data_h_split = np.vsplit((self.cam.frame),self.nSubap)
@@ -465,28 +476,24 @@ class CorrelatingShackHartmann:
         center = self.n_pix_subap//2
         for i in range(self.nSubap):
             raw_data_v_split = np.hsplit(raw_data_h_split[i],self.nSubap)
-            self.maps_intensity[i*self.nSubap:(i+1)*self.nSubap,center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2,center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2] = np.asarray(raw_data_v_split)
+            self.maps_intensity[i*self.nSubap:(i+1)*self.nSubap,center - self.n_pix_subap//2:center+self.n_pix_subap//2,center - self.n_pix_subap//2:center+self.n_pix_subap//2] = np.asarray(raw_data_v_split)
         self.maps_intensity = self.maps_intensity[self.valid_subapertures_1D,:,:]
     
 #%% SH Measurement 
-    def sh_measure(self,phase_in):
-        # backward compatibility with previous version
-        self.wfs_measure(phase_in=phase_in)
-        return  
     
-    def wfs_measure(self,phase_in = None,integrate = True):
-
-        if phase_in is not None: # TO DO
-            self.telescope.src.phase = phase_in
+    def wfs_measure(self):
         
         if self.current_nPhoton != self.telescope.src.nPhoton:
             print('updating the flux of the SHWFS object')
             self.initialize_flux()
    
         ##%%%%%%%%%%%%  DIFFRACTIVE SH WFS %%%%%%%%%%%%
-
-        self.raw_data      = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
-        self.corr_raw_data = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+        if self.fov_crop is None:
+            self.raw_data           = np.zeros([(self.n_pix_subap+2*self.raw_img_spacing)*self.nSubap,(self.n_pix_subap+2*self.raw_img_spacing)*self.nSubap], dtype =float)
+            self.corr_raw_data      = np.zeros([(self.n_pix_subap+2*self.raw_img_spacing)*self.nSubap,(self.n_pix_subap+2*self.raw_img_spacing)*self.nSubap], dtype =float)
+        else:
+            self.raw_data           = np.zeros([(self.n_pix_fov_crop+2*self.raw_img_spacing)*self.nSubap,(self.n_pix_fov_crop+2*self.raw_img_spacing)*self.nSubap], dtype =float)
+            self.corr_raw_data      = np.zeros([(self.n_pix_fov_crop+2*self.raw_img_spacing)*self.nSubap,(self.n_pix_fov_crop+2*self.raw_img_spacing)*self.nSubap], dtype =float)
 
         # normalization for FFT
         norma = self.cube.shape[1]
@@ -501,30 +508,51 @@ class CorrelatingShackHartmann:
         # Compute WFS image, only valid subapertures
         self.wfs_img = self.get_subap_img(True)
         # add photon/readout noise to 2D spots
-        if self.cam.photonNoise!=0:
+        """ if self.cam.photonNoise!=0:
             self.wfs_img  = self.random_state_photon_noise.poisson(self.wfs_img)
                 
         if self.cam.readoutNoise!=0:
-            self.wfs_img += np.int64(np.round(self.random_state_readout_noise.randn(self.wfs_img.shape[0],self.wfs_img.shape[1],self.wfs_img.shape[2])*self.cam.readoutNoise))
+            self.wfs_img += np.int64(np.round(self.random_state_readout_noise.randn(self.wfs_img.shape[0],self.wfs_img.shape[1],self.wfs_img.shape[2])*self.cam.readoutNoise)) """
                      
         # reset camera frame
-        self.raw_data      = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
-        self.corr_raw_data = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+
+        if self.fov_crop is None:
+            self.raw_data           = np.zeros([(self.n_pix_subap+2*self.raw_img_spacing)*self.nSubap,(self.n_pix_subap+2*self.raw_img_spacing)*self.nSubap], dtype =float)
+            self.corr_raw_data      = np.zeros([(self.n_pix_subap+2*self.raw_img_spacing)*self.nSubap,(self.n_pix_subap+2*self.raw_img_spacing)*self.nSubap], dtype =float)
+        else:
+            self.raw_data           = np.zeros([(self.n_pix_fov_crop+2*self.raw_img_spacing)*self.nSubap,(self.n_pix_fov_crop+2*self.raw_img_spacing)*self.nSubap], dtype =float)
+            self.corr_raw_data      = np.zeros([(self.n_pix_fov_crop+2*self.raw_img_spacing)*self.nSubap,(self.n_pix_fov_crop+2*self.raw_img_spacing)*self.nSubap], dtype =float)     
         
         # bin the 2D spots arrays
         self.corrImg = np.zeros_like(self.wfs_img)
         
         # compute correlation and normalize the energy to 1
 
-        self.corrImg = np.real(np.fft.fftshift(np.fft.ifft2(np.fft.fft2(self.wfs_img*self.hann_window_2D, axes=(1,2)) * np.conj(np.fft.fft2(self.pseudo_ref_img*self.hann_window_2D, axes=(1,2))), axes=(1,2)), axes=(1,2)))
+        # print("WFS Measure: ", self.wfs_img.shape, self.fft_window_2D.shape, self.pseudo_ref_img.shape)
 
-        self.corrImg = self.corrImg / (self.n_pix_subap**2)
+        self.corrImg = np.real(np.fft.fftshift(np.fft.ifft2(np.fft.fft2(self.wfs_img*self.fft_window_2D, axes=(1,2)) * np.conj(np.fft.fft2(self.pseudo_ref_img*self.fft_window_2D, axes=(1,2))), axes=(1,2)), axes=(1,2)))
+
+        self.corrImg = self.corrImg / (self.corrImg.shape[1]**2)
+
+        """ corrImgTest = np.real(np.fft.fftshift(np.fft.ifft2(np.fft.fft2(self.wfs_img, axes=(1,2)) * np.conj(np.fft.fft2(self.pseudo_ref_img, axes=(1,2))), axes=(1,2)), axes=(1,2)))
+
+        corrImgTest = corrImgTest / (corrImgTest.shape[1]**2)
+        subap = 4*10+5
+        _, axs = plt.subplots(3,2)
+        axs[0,0].imshow(self.wfs_img[subap,:,:])
+        axs[0,1].imshow(self.wfs_img[subap,:,:]*self.fft_window_2D)
+        axs[1,0].imshow(self.pseudo_ref_img[subap,:,:])
+        axs[1,1].imshow(self.pseudo_ref_img[subap,:,:]*self.fft_window_2D)
+        axs[2,0].imshow(self.corrImg[subap,:,:])
+        axs[2,1].imshow(corrImgTest[subap,:,:])
+
+        plt.show() """
 
         # take N brightest
         corr_thresh = np.zeros_like(self.corrImg)
 
         for i in range(self.corrImg.shape[0]):
-            corr_thresh[i,:,:] = np.full((self.n_pix_subap, self.n_pix_subap), np.partition(self.corrImg[i,:,:].flatten(), -self.N_brightest)[-self.N_brightest])
+            corr_thresh[i,:,:] = np.full((self.corrImg.shape[1], self.corrImg.shape[1]), np.partition(self.corrImg[i,:,:].flatten(), -self.N_brightest)[-self.N_brightest])
 
         self.corrImg = np.where(self.corrImg >= corr_thresh, self.corrImg, 0)
 
@@ -536,9 +564,9 @@ class CorrelatingShackHartmann:
         
         self.SX[self.validLenslets_x,self.validLenslets_y] = self.centroid_lenslets[:,0]
         self.SY[self.validLenslets_x,self.validLenslets_y] = self.centroid_lenslets[:,1]
-        signal_2D = np.concatenate((self.SX,self.SY)) - self.reference_slopes_maps - (self.n_pix_subap/2) # we set the origin is at the center of the subap
+        signal_2D = np.concatenate((self.SX,self.SY)) - self.reference_slopes_maps - (self.n_pix_subap/2) # we set the origin at the center of the subap
         signal_2D[~self.valid_slopes_maps] = 0
-        self.signal_2D = signal_2D/self.slopes_units
+        self.signal_2D = signal_2D/1#self.slopes_units
 
         self.signal = self.signal_2D[self.valid_slopes_maps].T
 
@@ -553,6 +581,7 @@ class CorrelatingShackHartmann:
 
         # plt.plot(self.signal), plt.show()
         # assign camera_fram to sh.cam.frame
+        # plt.imshow(self.raw_data), plt.show()
         self*self.cam
 
 
@@ -563,10 +592,7 @@ class CorrelatingShackHartmann:
         print('{: ^20s}'.format('Pixel FoV')            + '{: ^18s}'.format(str(np.round(self.fov_pixel_binned_arcsec,2)))      +'{: ^18s}'.format('[arcsec]'   ))
         print('{: ^20s}'.format('Subapertue FoV')       + '{: ^18s}'.format(str(np.round(self.fov_lenslet_arcsec,2)))           +'{: ^18s}'.format('[arcsec]'  ))
         print('{: ^20s}'.format('Valid Subaperture')    + '{: ^18s}'.format(str(str(self.nValidSubaperture))))                   
-        print('{: ^20s}'.format('Binning Factor')    + '{: ^18s}'.format(str(str(self.binning_factor))))                   
 
-        if self.is_LGS:    
-            print('{: ^20s}'.format('Spot Elungation')    + '{: ^18s}'.format(str(100*np.round(self.elungation_factor,3)))      +'{: ^18s}'.format('% of a subap' ))
 
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
 
