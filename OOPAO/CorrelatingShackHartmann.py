@@ -263,13 +263,14 @@ class CorrelatingShackHartmann:
             tmp_phase_subDirs[np.abs(tmp_phase_subDirs)>0] = 1
 
         nPoints_per_subap = tmp_phase_subDirs.shape[1] // self.nSubap
-        phase_per_subap = np.zeros((self.telescope.src.nSubDirs**2, self.nSubap**2, nPoints_per_subap, nPoints_per_subap))
+        phase_per_subap = np.zeros((self.telescope.src.nSubDirs**2, self.nSubap**2, self.subDirs_size_wfs, self.subDirs_size_wfs))
 
         for i in range(self.nSubap):
             for j in range(self.nSubap):
                 for k in range(self.telescope.src.nSubDirs**2):
                     index = i*self.nSubap + j
-                    phase_per_subap[k, index, :, :] = tmp_phase_subDirs[k, nPoints_per_subap*i:nPoints_per_subap*(i+1), nPoints_per_subap*j:nPoints_per_subap*(j+1)]
+                    phase_per_subap[k, index, :, :] = cv2.resize(tmp_phase_subDirs[k, nPoints_per_subap*i:nPoints_per_subap*(i+1), nPoints_per_subap*j:nPoints_per_subap*(j+1)],
+                                                                  (self.subDirs_size_wfs, self.subDirs_size_wfs), interpolation=cv2.INTER_NEAREST)
 
         # Define padding and image intensity
         pad_img_size = (2 ** np.ceil(np.log2(self.subDirs_size_wfs + nPoints_per_subap))).astype(int)
@@ -330,10 +331,26 @@ class CorrelatingShackHartmann:
             cx = (temp_sun_subap.shape[1]- self.n_pix_subap) // 2
             cy = (temp_sun_subap.shape[2]- self.n_pix_subap) // 2
             sun_subap = temp_sun_subap[:, cx:cx+self.n_pix_subap, cy:cy+self.n_pix_subap]
-        
-        """ subap = 0
-        plt.imshow(self.sun_subap[subap,:,:]), plt.show()
-        print(np.sqrt(np.mean((self.sun_subap[subap,:,:] - np.mean(self.sun_subap[subap,:,:])) ** 2))) """
+
+        """ _, axs = plt.subplots(3,3)
+        axs[0,0].imshow(self.subDirs_sun_wfs[:,:,0,0])
+        axs[0,1].imshow(self.subDirs_sun_wfs[:,:,0,1])
+        axs[0,2].imshow(self.subDirs_sun_wfs[:,:,0,2])
+
+        axs[1,0].imshow(psf_per_subdir_per_subap[0,0,:,:])
+        axs[1,1].imshow(psf_per_subdir_per_subap[1,0,:,:])
+        axs[1,2].imshow(psf_per_subdir_per_subap[2,0,:,:])
+
+        axs[2,0].imshow(sun_fft_conv[0,0,:,:])
+        axs[2,1].imshow(sun_fft_conv[1,0,:,:])
+        axs[2,2].imshow(sun_fft_conv[2,0,:,:])
+
+        plt.show()
+
+        _, axs = plt.subplots(1,2, squeeze=False)
+        axs[0,0].imshow(sun_subap[0,:,:])
+        axs[0,1].imshow(cv2.resize(self.telescope.src.sun_nopad, (sun_subap.shape[1], sun_subap.shape[2])))
+        plt.show()  """       
 
         return sun_subap
         
@@ -364,8 +381,6 @@ class CorrelatingShackHartmann:
         self.pseudo_ref_img = self.generate_pseudo_reference_img(pseudo_ref_patch)
         self.corrImg = self.wfs_measure() 
         self.references_1D = np.copy(self.signal)
-        print(np.mean(self.references_1D), np.std(self.references_1D))
-        # plt.plot(self.references_1D), plt.show()
         self.reference_slopes_maps = np.copy(self.signal_2D) 
         self.isInitialized = True
         print('Done!')
@@ -373,14 +388,14 @@ class CorrelatingShackHartmann:
         # normalize to 2 pi p2v
 
         # [Tip,Tilt]                         = np.meshgrid(np.linspace(-np.pi,np.pi,self.telescope.resolution),np.linspace(-np.pi,np.pi,self.telescope.resolution))
-        """ [Tip, Tilt] = np.meshgrid(np.linspace(0,np.pi,self.telescope.resolution,endpoint=False),np.linspace(0,np.pi,self.telescope.resolution,endpoint=False))
+        [Tip, Tilt] = np.meshgrid(np.linspace(0,np.pi,self.telescope.resolution,endpoint=False),np.linspace(0,np.pi,self.telescope.resolution,endpoint=False))
 
         if self.unit_P2V is False:            
             # normalize to 1 m RMS in the pupil
             Tip *= 1/np.std(Tip[self.telescope.pupil])
 
         mean_slope = np.zeros(5)
-        amp = 10e-9
+        amp = 1000e-9
         input_std = np.zeros(5)
         for i in range(5):
             for j in range(self.telescope.src.nSubDirs**2):
@@ -393,7 +408,8 @@ class CorrelatingShackHartmann:
             input_std[i] = np.std(temp_phase[self.telescope.pupil])*2*np.pi/self.telescope.src.wavelength
             
         self.p = np.polyfit(np.linspace(-2,2,5)*amp,mean_slope,deg = 1)
-        self.slopes_units = np.abs(self.p[0])*(self.telescope.src.wavelength/2/np.pi) """
+        self.slopes_units = np.abs(self.p[0])*(self.telescope.src.wavelength/2/np.pi)
+        print('slopes: ', self.slopes_units)
         print('Done!')
         self.cam.photonNoise        = readoutNoise
         self.cam.readoutNoise       = photonNoise
@@ -508,11 +524,11 @@ class CorrelatingShackHartmann:
         # Compute WFS image, only valid subapertures
         self.wfs_img = self.get_subap_img(True)
         # add photon/readout noise to 2D spots
-        """ if self.cam.photonNoise!=0:
+        if self.cam.photonNoise!=0:
             self.wfs_img  = self.random_state_photon_noise.poisson(self.wfs_img)
                 
         if self.cam.readoutNoise!=0:
-            self.wfs_img += np.int64(np.round(self.random_state_readout_noise.randn(self.wfs_img.shape[0],self.wfs_img.shape[1],self.wfs_img.shape[2])*self.cam.readoutNoise)) """
+            self.wfs_img += np.int64(np.round(self.random_state_readout_noise.randn(self.wfs_img.shape[0],self.wfs_img.shape[1],self.wfs_img.shape[2])*self.cam.readoutNoise))
                      
         # reset camera frame
 
@@ -534,20 +550,6 @@ class CorrelatingShackHartmann:
 
         self.corrImg = self.corrImg / (self.corrImg.shape[1]**2)
 
-        """ corrImgTest = np.real(np.fft.fftshift(np.fft.ifft2(np.fft.fft2(self.wfs_img, axes=(1,2)) * np.conj(np.fft.fft2(self.pseudo_ref_img, axes=(1,2))), axes=(1,2)), axes=(1,2)))
-
-        corrImgTest = corrImgTest / (corrImgTest.shape[1]**2)
-        subap = 4*10+5
-        _, axs = plt.subplots(3,2)
-        axs[0,0].imshow(self.wfs_img[subap,:,:])
-        axs[0,1].imshow(self.wfs_img[subap,:,:]*self.fft_window_2D)
-        axs[1,0].imshow(self.pseudo_ref_img[subap,:,:])
-        axs[1,1].imshow(self.pseudo_ref_img[subap,:,:]*self.fft_window_2D)
-        axs[2,0].imshow(self.corrImg[subap,:,:])
-        axs[2,1].imshow(corrImgTest[subap,:,:])
-
-        plt.show() """
-
         # take N brightest
         corr_thresh = np.zeros_like(self.corrImg)
 
@@ -564,9 +566,9 @@ class CorrelatingShackHartmann:
         
         self.SX[self.validLenslets_x,self.validLenslets_y] = self.centroid_lenslets[:,0]
         self.SY[self.validLenslets_x,self.validLenslets_y] = self.centroid_lenslets[:,1]
-        signal_2D = np.concatenate((self.SX,self.SY)) - self.reference_slopes_maps - (self.n_pix_subap/2) # we set the origin at the center of the subap
+        signal_2D = np.concatenate((self.SX,self.SY)) - self.reference_slopes_maps - (self.corrImg.shape[1]/2) # we set the origin at the center of the subap
         signal_2D[~self.valid_slopes_maps] = 0
-        self.signal_2D = signal_2D/1#self.slopes_units
+        self.signal_2D = signal_2D/self.slopes_units
 
         self.signal = self.signal_2D[self.valid_slopes_maps].T
 
