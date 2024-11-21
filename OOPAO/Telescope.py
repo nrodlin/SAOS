@@ -310,7 +310,7 @@ class Telescope:
             for dirX in range(self.src.nSubDirs):
                 for dirY in range(self.src.nSubDirs):
                     index = dirX*self.src.nSubDirs + dirY
-                    print(pad_img_size, self.src.subDirs_sun[:,:,0, 0].shape[0])
+
                     Object_O = np.fft.fft2(np.pad(self.src.subDirs_sun[:,:,dirX, dirY],pad_width=((pad_img_size-self.src.subDirs_sun[:,:,0, 0].shape[0])/2).astype(int))) 
                     Coherence_H = np.fft.fft2(np.pad(output_PSF_norma[index], pad_width=((pad_img_size-output_PSF_norma[index].shape)/2).astype(int)))
 
