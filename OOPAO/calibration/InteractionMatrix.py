@@ -65,9 +65,7 @@ def InteractionMatrix(ngs,
     else:
         phaseBuffer = phaseOffset
 
-        # for i in tqdm.tqdm(range(nCycle)):  
-    for i in iterate(range(nCycle)):  
-        
+    for i in range(nCycle):  
         if nModes>1:
             if i==nCycle-1:
                 if nExtra != 0:
@@ -87,7 +85,11 @@ def InteractionMatrix(ngs,
 #        push
         dm.coefs = intMatCommands*stroke
         tel*dm
-        tel.src.phase+=phaseBuffer
+        if tel.src.tag == "sun":
+            for j in range(tel.src.nSubDirs**2):
+                tel.src.sun_subDir_ast.src[j].phase += phaseBuffer
+        else:
+            tel.src.phase+=phaseBuffer
         tel*wfs
         if wfs.tag == "correlatingShackHartmann":
             sp = wfs.signal_list
@@ -100,7 +102,11 @@ def InteractionMatrix(ngs,
         else:
             dm.coefs=-intMatCommands*stroke
             tel*dm
-            tel.src.phase+=phaseBuffer
+            if tel.src.tag == "sun":
+                for i in range(tel.src.nSubDirs**2):
+                    tel.src.sun_subDir_ast.src[i].phase += phaseBuffer
+            else:
+                tel.src.phase+=phaseBuffer
             tel*wfs
             if wfs.tag == "correlatingShackHartmann":
                 sm = wfs.signal_list
@@ -132,7 +138,7 @@ def InteractionMatrix(ngs,
             print(str((i+1)*nMeasurements)+'/'+str(nModes))
             b=time.time()
             print('Time elapsed: '+str(b-a)+' s' )
-    
+
     out=CalibrationVault(factor*intMat,invert=invert)
        
     return out
@@ -188,7 +194,11 @@ def InteractionMatrixFromPhaseScreen(ngs,atm,tel,wfs,phasScreens,stroke,phaseOff
         a= time.time()
 #        push 
         tel.OPD = modes_in*stroke
-        tel.src.phase+=phaseBuffer
+        if tel.src.tag == "sun":
+            for i in range(tel.src.nSubDirs**2):
+                tel.src.sun_subDir_ast.src[i].phase += phaseBuffer
+        else:
+            tel.src.phase+=phaseBuffer
         tel*wfs
         if wfs.tag == "correlatingShackHartmann":
             sp = wfs.signal_list
@@ -196,7 +206,11 @@ def InteractionMatrixFromPhaseScreen(ngs,atm,tel,wfs,phasScreens,stroke,phaseOff
             sp = wfs.signal
 #       pull
         tel.OPD=-modes_in*stroke
-        tel.src.phase+=phaseBuffer
+        if tel.src.tag == "sun":
+            for i in range(tel.src.nSubDirs**2):
+                tel.src.sun_subDir_ast.src[i].phase += phaseBuffer
+        else:
+            tel.src.phase+=phaseBuffer
         tel*wfs
         if wfs.tag == "correlatingShackHartmann":
             sm = wfs.signal_list
