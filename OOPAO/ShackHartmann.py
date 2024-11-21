@@ -330,7 +330,6 @@ class ShackHartmann:
     def get_lenslet_em_field(self,phase):
         tmp_phase_h_split = np.hsplit(phase.T,self.nSubap)
         self.cube_em = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init],dtype=complex)
-        print(phase.shape, np.asarray(tmp_phase_h_split).shape, self.cube_em.shape)
         for i in range(self.nSubap):
             tmp_phase_v_split = np.vsplit(tmp_phase_h_split[i],self.nSubap)
             self.cube_em[i*self.nSubap:(i+1)*self.nSubap,self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2,self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2] = np.exp(1j*np.asarray(tmp_phase_v_split))
