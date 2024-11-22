@@ -413,10 +413,6 @@ class Atmosphere:
             layer.phase     = globalTransformation(layer.mapShift,shiftMatrix)[1:-1,1:-1]
 
     def update(self,OPD=None):
-        if type(self.telescope.OPD) is not list:
-            print("Update: ", self.telescope.OPD.shape)
-        else:
-            print("Update (list): ", np.asarray(self.telescope.OPD).shape)
         if OPD is None:
             self.user_defined_opd = False
 
@@ -689,7 +685,6 @@ class Atmosphere:
                     obj.optical_path =[[obj.src.type,id(obj.src)]]
                 obj.optical_path.append([self.tag,id(self)])
                 obj.optical_path.append([obj.tag,id(obj)])
-                print("Atm mul: ", np.asarray(self.OPD).shape)
                 obj.OPD = self.OPD.copy()
                 obj.OPD_no_pupil = self.OPD_no_pupil.copy()
                 obj.isPaired     = True
