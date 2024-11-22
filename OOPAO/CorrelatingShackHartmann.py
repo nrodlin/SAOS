@@ -42,8 +42,7 @@ class CorrelatingShackHartmann:
                  plate_scale:float,
                  telescope,
                  lightRatio:float,
-                 ideal_pattern:bool = False, 
-                 unit_P2V = False,
+                 ideal_pattern:bool = False,
                  pattern_criteria = None,
                  subaperture_sel = [],
                  fov_crop = None,
@@ -134,7 +133,6 @@ class CorrelatingShackHartmann:
         self.ideal_pattern                  = ideal_pattern
         self.nSubap                         = nSubap
         self.lightRatio                     = lightRatio       
-        self.unit_P2V                       = unit_P2V
         self.fov_crop                       = fov_crop
         self.N_brightest                    = N_brightest
         self.subaperture_sel                = subaperture_sel
@@ -309,14 +307,14 @@ class CorrelatingShackHartmann:
             for dirY in range(self.telescope.src.nSubDirs):
                 index = dirX *self.telescope.src.nSubDirs + dirY
 
-                gl_cx = np.round(dirX*self.subDirs_filt_size_wfs/2).astype(int)
-                gl_cy = np.round(dirY*self.subDirs_filt_size_wfs/2).astype(int)
+                gl_cx = np.floor(dirX*self.subDirs_filt_size_wfs/2).astype(int)
+                gl_cy = np.floor(dirY*self.subDirs_filt_size_wfs/2).astype(int)
 
                 gl_cx_end = gl_cx + self.subDirs_filt_size_wfs
                 gl_cy_end = gl_cy + self.subDirs_filt_size_wfs
 
-                cx_subDir = pad_top + int(self.telescope.src.subDir_margin/self.plate_scale)
-                cy_subDir = pad_left + int(self.telescope.src.subDir_margin/self.plate_scale)
+                cx_subDir = pad_top + np.round(self.telescope.src.subDir_margin/self.plate_scale).astype(int)
+                cy_subDir = pad_left + np.round(self.telescope.src.subDir_margin/self.plate_scale).astype(int)
 
                 temp_sun_subap[:,gl_cx:gl_cx_end,gl_cy:gl_cy_end] += np.squeeze(sun_fft_conv[index,:,cx_subDir:cx_subDir+self.subDirs_filt_size_wfs, 
                                                                                                      cy_subDir:cy_subDir+self.subDirs_filt_size_wfs] * self.filt_2D_wfs[:,:,dirX,dirY])
@@ -330,27 +328,7 @@ class CorrelatingShackHartmann:
         else:
             cx = (temp_sun_subap.shape[1]- self.n_pix_subap) // 2
             cy = (temp_sun_subap.shape[2]- self.n_pix_subap) // 2
-            sun_subap = temp_sun_subap[:, cx:cx+self.n_pix_subap, cy:cy+self.n_pix_subap]
-
-        """ _, axs = plt.subplots(3,3)
-        axs[0,0].imshow(self.subDirs_sun_wfs[:,:,0,0])
-        axs[0,1].imshow(self.subDirs_sun_wfs[:,:,0,1])
-        axs[0,2].imshow(self.subDirs_sun_wfs[:,:,0,2])
-
-        axs[1,0].imshow(psf_per_subdir_per_subap[0,0,:,:])
-        axs[1,1].imshow(psf_per_subdir_per_subap[1,0,:,:])
-        axs[1,2].imshow(psf_per_subdir_per_subap[2,0,:,:])
-
-        axs[2,0].imshow(sun_fft_conv[0,0,:,:])
-        axs[2,1].imshow(sun_fft_conv[1,0,:,:])
-        axs[2,2].imshow(sun_fft_conv[2,0,:,:])
-
-        plt.show()
-
-        _, axs = plt.subplots(1,2, squeeze=False)
-        axs[0,0].imshow(sun_subap[0,:,:])
-        axs[0,1].imshow(cv2.resize(self.telescope.src.sun_nopad, (sun_subap.shape[1], sun_subap.shape[2])))
-        plt.show()  """       
+            sun_subap = temp_sun_subap[:, cx:cx+self.n_pix_subap, cy:cy+self.n_pix_subap]     
 
         return sun_subap
         
@@ -374,7 +352,6 @@ class CorrelatingShackHartmann:
         self.SY                     = np.zeros([self.nSubap,self.nSubap])
         # flux per subaperture
         self.reference_slopes_maps  = np.zeros([self.nSubap*2,self.nSubap])
-        self.slopes_units           = 1
         print('Acquiring reference slopes..')
         self.telescope.resetOPD() 
         pseudo_ref_patch = self.get_subap_img(False) 
@@ -384,33 +361,7 @@ class CorrelatingShackHartmann:
         self.reference_slopes_maps = np.copy(self.signal_2D) 
         self.isInitialized = True
         print('Done!')
-        print('Setting slopes units..')  
-        # normalize to 2 pi p2v
 
-        # [Tip,Tilt]                         = np.meshgrid(np.linspace(-np.pi,np.pi,self.telescope.resolution),np.linspace(-np.pi,np.pi,self.telescope.resolution))
-        [Tip, Tilt] = np.meshgrid(np.linspace(0,np.pi,self.telescope.resolution,endpoint=False),np.linspace(0,np.pi,self.telescope.resolution,endpoint=False))
-
-        if self.unit_P2V is False:            
-            # normalize to 1 m RMS in the pupil
-            Tip *= 1/np.std(Tip[self.telescope.pupil])
-
-        mean_slope = np.zeros(5)
-        amp = 1000e-9
-        input_std = np.zeros(5)
-        for i in range(5):
-            for j in range(self.telescope.src.nSubDirs**2):
-                self.telescope.OPD[j]          = self.telescope.pupil*Tip*(i-2)*amp
-                self.telescope.OPD_no_pupil[j] = Tip*(i-2)*amp
-
-            self.wfs_measure()        
-            mean_slope[i] = np.mean(self.signal[:self.nValidSubaperture])
-            temp_phase = np.squeeze(self.telescope.OPD[0])
-            input_std[i] = np.std(temp_phase[self.telescope.pupil])*2*np.pi/self.telescope.src.wavelength
-            
-        self.p = np.polyfit(np.linspace(-2,2,5)*amp,mean_slope,deg = 1)
-        self.slopes_units = np.abs(self.p[0])*(self.telescope.src.wavelength/2/np.pi)
-        print('slopes: ', self.slopes_units)
-        print('Done!')
         self.cam.photonNoise        = readoutNoise
         self.cam.readoutNoise       = photonNoise
         self.telescope.resetOPD()
@@ -556,7 +507,7 @@ class CorrelatingShackHartmann:
         for i in range(self.corrImg.shape[0]):
             corr_thresh[i,:,:] = np.full((self.corrImg.shape[1], self.corrImg.shape[1]), np.partition(self.corrImg[i,:,:].flatten(), -self.N_brightest)[-self.N_brightest])
 
-        self.corrImg = np.where(self.corrImg >= corr_thresh, self.corrImg, 0)
+        self.corrImg = np.where(self.corrImg >= corr_thresh, (self.corrImg-corr_thresh)/np.max(self.corrImg-corr_thresh), 0)
 
         # centroid computation
         self.centroid_lenslets = self.centroid(self.corrImg)
@@ -568,7 +519,7 @@ class CorrelatingShackHartmann:
         self.SY[self.validLenslets_x,self.validLenslets_y] = self.centroid_lenslets[:,1]
         signal_2D = np.concatenate((self.SX,self.SY)) - self.reference_slopes_maps - (self.corrImg.shape[1]/2) # we set the origin at the center of the subap
         signal_2D[~self.valid_slopes_maps] = 0
-        self.signal_2D = signal_2D/self.slopes_units
+        self.signal_2D = signal_2D
 
         self.signal = self.signal_2D[self.valid_slopes_maps].T
 
