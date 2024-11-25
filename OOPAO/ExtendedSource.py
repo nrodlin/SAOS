@@ -12,7 +12,7 @@ class ExtendedSource(Source):
                  display_properties:bool=True,
                  chromatic_shift:list = None,
                  img_path="OOPAO/OOPAO/images/imsol.fits",
-                 img_PS=1/60,
+                 img_PS=0.0139,
                  nSubDirs=1,
                  patch_padding=2,
                  subDir_margin=1.0):
