@@ -216,6 +216,7 @@ class Telescope:
         if self.src.tag == "sun":
             for i in range(self.src.nSubDirs**2):
                 self.src.sun_subDir_ast.src[i].phase = self.OPD[i] * (2*np.pi/self.src.wavelength)
+
         elif self.src.tag == "asterism":
             for i in range(len(self.src)):
                 self.src.src[i].phase = self.OPD[i] * (2*np.pi/self.src.wavelength)
@@ -292,7 +293,7 @@ class Telescope:
             output_PSF.append(self.PSF.copy())
             output_PSF_norma.append(self.PSF_norma.copy())
 
-        if len(output_PSF)==1:
+        if len(output_PSF)==1 and self.src.tag != 'sun':
             output_PSF = output_PSF[0]
             output_PSF_norma = output_PSF_norma[0]
 
@@ -322,7 +323,8 @@ class Telescope:
 
                     sun_psf_tmp_3D[global_corner_x:global_corner_x_end,
                                    global_corner_y:global_corner_y_end,index] = np.abs(np.fft.fftshift(np.fft.ifft2(Object_O*Coherence_H)))[start_FFT:end_FFT, start_FFT:end_FFT] * self.src.filter_2D[:,:,dirX, dirY]
-                    
+
+            print(np.argmax(output_PSF_norma[0])) # REMOVE
 
             sun_PSF_combined = np.sum(sun_psf_tmp_3D,axis=2)
             
@@ -344,7 +346,6 @@ class Telescope:
         self.PSF_norma  = output_PSF_norma.copy()     
 
     def PropagateField(self, amplitude, phase, zeroPaddingFactor, img_resolution = None):
-
         xp                  = np
         oversampling        = 1
         resolution          = self.pupil.shape[0]
@@ -370,7 +371,7 @@ class Telescope:
         img_size = np.ceil(img_resolution * oversampling).astype('int')
         N = np.fix(zeroPaddingFactor * oversampling * resolution).astype('int')
         pad_width = np.ceil((N - resolution) / 2).astype('int')
-
+        
         supportPadded = xp.pad(amplitude * xp.exp(1j * phase),
                                pad_width=((pad_width, pad_width), (pad_width, pad_width)), constant_values=0)
         N = supportPadded.shape[0]  # make sure the number of pxels is correct after the padding

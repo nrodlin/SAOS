@@ -140,7 +140,7 @@ def InteractionMatrix(ngs,
             print('Time elapsed: '+str(b-a)+' s' )
 
     out=CalibrationVault(factor*intMat,invert=invert)
-       
+      
     return out
 
 

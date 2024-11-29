@@ -382,7 +382,7 @@ def cl_plot(list_fig,plt_obj= None, type_fig = None,fig_number = 20,n_subplot = 
                         im_tmp =getattr(plt_obj,'im_'+str(count))
                         plt.colorbar(im_tmp)
       
-           # PLOT     
+           # PLOT
                     if type_fig[count] == 'plot':
                         data_tmp = list_fig[count]
                         if len(data_tmp)==3:
@@ -397,7 +397,7 @@ def cl_plot(list_fig,plt_obj= None, type_fig = None,fig_number = 20,n_subplot = 
                         if len(data_tmp)==2:
                             line_tmp, = sp_tmp.plot(data_tmp[0],data_tmp[1],'-')      
                         if len(data_tmp)==1:
-                            line_tmp, = sp_tmp.plot(data_tmp,'-o')         
+                            line_tmp, = sp_tmp.plot(data_tmp,'-o')
                         setattr(plt_obj,'im_'+str(count),line_tmp)
                         plt.legend(labelcolor='k')
                             
@@ -457,7 +457,6 @@ def cl_plot(list_fig,plt_obj= None, type_fig = None,fig_number = 20,n_subplot = 
                             im_tmp.set_clim(vmin=data.min(),vmax=data.max())
                         else:
                             im_tmp.set_clim(vmin=plt_obj.list_lim[count][0],vmax=plt_obj.list_lim[count][1])
-     
 
                     if getattr(plt_obj,'type_fig_'+str(count)) == 'plot':
                         

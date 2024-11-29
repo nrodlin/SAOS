@@ -271,12 +271,12 @@ class CorrelatingShackHartmann:
                                                                   (self.subDirs_size_wfs, self.subDirs_size_wfs), interpolation=cv2.INTER_NEAREST)
 
         # Define padding and image intensity
-        pad_img_size = (2 ** np.ceil(np.log2(self.subDirs_size_wfs + nPoints_per_subap))).astype(int)
+        pad_img_size = (2 ** np.ceil(np.log2(self.subDirs_size_wfs * 2))).astype(int)
 
         pad_top = (pad_img_size - self.subDirs_sun_wfs.shape[0]) // 2
         pad_bottom = pad_img_size - self.subDirs_sun_wfs.shape[0] - pad_top
         pad_left = (pad_img_size - self.subDirs_sun_wfs.shape[1]) // 2
-        pad_right = pad_img_size - self.subDirs_sun_wfs.shape[0] - pad_left
+        pad_right = pad_img_size - self.subDirs_sun_wfs.shape[1] - pad_left
 
         if (self.subDirs_sun_wfs_padded is None) or (self.subDirs_sun_wfs_padded.shape[-1] != pad_img_size):
             self.subDirs_sun_wfs_padded = np.zeros((self.telescope.src.nSubDirs**2, 1, pad_img_size, pad_img_size))
@@ -287,10 +287,32 @@ class CorrelatingShackHartmann:
                     self.subDirs_sun_wfs_padded[index, 0, :, :] = np.pad(np.squeeze(self.subDirs_sun_wfs[:,:,dirx,diry]), pad_width=((pad_top, pad_bottom), (pad_left, pad_right)))
         
         # Compute and normalize PSF
-        psf_per_subdir_per_subap = np.power(np.abs(np.fft.fftshift(np.fft.fft2(np.exp(1j*phase_per_subap[:,self.valid_subapertures_1D,:,:]), s=(pad_img_size, pad_img_size), axes=(2,3)), axes=(2,3))), 2)
+        x = np.linspace(-self.subDirs_size_wfs // 2, self.subDirs_size_wfs // 2, self.subDirs_size_wfs)
+        y = np.linspace(-self.subDirs_size_wfs // 2, self.subDirs_size_wfs // 2, self.subDirs_size_wfs)
+        X, Y = np.meshgrid(x, y)
+        radio = self.subDirs_size_wfs // 2  # Radio del círculo inscrito
+        circular_mask = np.sqrt(X**2 + Y**2) <= radio
 
-        psf_per_subdir_per_subap = psf_per_subdir_per_subap / np.sum(psf_per_subdir_per_subap[0,0,:,:])  
+        complex_phase = np.exp(1j*(phase_per_subap[:,self.valid_subapertures_1D,:,:]-np.pi))
+        complex_phase_ffted = np.fft.fft2(complex_phase, s=(pad_img_size, pad_img_size), axes=(2,3))
+        complex_phase_ffted_shift = np.fft.fftshift(complex_phase_ffted, axes=(2,3))
 
+        psf_per_subdir_per_subap = np.power(np.abs(complex_phase_ffted_shift), 2)
+
+        psf_per_subdir_per_subap = psf_per_subdir_per_subap / np.sum(psf_per_subdir_per_subap[0,0,:,:])
+        # psf_per_subdir_per_subap = psf_per_subdir_per_subap[:, :, pad_img_size//2:-pad_img_size//2, pad_img_size//2:-pad_img_size//2]  
+        """ print(np.min(phase_per_subap[0,10,:,:]), np.max(phase_per_subap[0,10,:,:]))
+        subap = 75
+        _, axs = plt.subplots(4,2,squeeze=False)
+        axs[0,0].imshow(complex_phase_ffted[0,subap,:,:].real)
+        axs[0,1].imshow(complex_phase_ffted[0,subap,:,:].imag) # expected 3 px of movement
+        axs[1,0].imshow(complex_phase_ffted_shift[0,subap,:,:].real)
+        axs[1,1].imshow(complex_phase_ffted_shift[0,subap,:,:].imag) # expected 3 px of movement
+        axs[2,0].imshow(complex_phase[0,subap,:,:].real)
+        axs[2,1].imshow(complex_phase[0,subap,:,:].imag) # expected 3 px of movement
+        axs[3,0].imshow(phase_per_subap[0,subap,:,:])
+        axs[3,1].imshow(psf_per_subdir_per_subap[0,subap,:,:]) # expected 3 px of movement       
+        plt.show() """
         # Compute subDirs imgs
 
         psf_fft = np.fft.fft2(psf_per_subdir_per_subap, axes=(2,3))
@@ -502,12 +524,28 @@ class CorrelatingShackHartmann:
         self.corrImg = self.corrImg / (self.corrImg.shape[1]**2)
 
         # take N brightest
-        corr_thresh = np.zeros_like(self.corrImg)
+        from scipy.ndimage import convolve
+        kernel = np.ones((5, 5))
 
+        mask_max = np.zeros_like(self.corrImg)
+        
         for i in range(self.corrImg.shape[0]):
-            corr_thresh[i,:,:] = np.full((self.corrImg.shape[1], self.corrImg.shape[1]), np.partition(self.corrImg[i,:,:].flatten(), -self.N_brightest)[-self.N_brightest])
+            # get mask index
+            max_index = np.unravel_index(np.argmax(self.corrImg[i], axis=None), self.corrImg[i].shape)
+            mask = np.zeros_like(self.corrImg[i], dtype=int)
+            mask[max_index] = 1  # Select maximum
+            # Apply the kernel through convolution
+            mask_max[i] = convolve(mask, kernel, mode='constant')
+        mask_max[mask_max == 0] = np.nan
 
-        self.corrImg = np.where(self.corrImg >= corr_thresh, (self.corrImg-corr_thresh)/np.max(self.corrImg-corr_thresh), 0)
+        # Apply the mask to self.corrImg
+        self.corrImg *= mask_max
+
+        # Normalize the 2-D matrices
+        tmp_max = np.nanmax(self.corrImg, axis=(1, 2), keepdims=True)
+        tmp_min = np.nanmin(self.corrImg, axis=(1, 2), keepdims=True)
+        self.corrImg[np.isnan(self.corrImg)]  = 0
+        self.corrImg = np.where(self.corrImg >= tmp_min, (self.corrImg - tmp_min) / (tmp_max - tmp_min), 0)
 
         # centroid computation
         self.centroid_lenslets = self.centroid(self.corrImg)
