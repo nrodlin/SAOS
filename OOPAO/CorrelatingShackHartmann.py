@@ -194,15 +194,6 @@ class CorrelatingShackHartmann:
                                                         j*n_points_per_subap:(j+1)*n_points_per_subap]) / (n_points_per_subap**2)
                 if tmp_pupil == 1: # Criteria: there are phase points at every point of the phase
                     self.valid_subapertures[i, j] = True
-        tmp_valid_subapertures = np.copy(self.valid_subapertures)
-        """ for i in range(self.nSubap):
-            for j in range(self.nSubap):
-                if (j+1 < self.nSubap) and (j-1 >= 0):
-                    if (tmp_valid_subapertures[i, j] == True and tmp_valid_subapertures[i, j-1] == False) or \
-                    (tmp_valid_subapertures[i, j] == True and tmp_valid_subapertures[i, j+1] == False):
-                        self.valid_subapertures[i, j] = False
-                elif (j-1 < 0):
-                    self.valid_subapertures[i, j] = False """
         self.photon_per_subaperture_2D = np.reshape(self.photon_per_subaperture,[self.nSubap,self.nSubap])
         self.valid_subapertures_1D = np.reshape(self.valid_subapertures,[self.nSubap**2])
         [self.validLenslets_x , self.validLenslets_y] = np.where(self.valid_subapertures == True)
