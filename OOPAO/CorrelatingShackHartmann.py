@@ -20,7 +20,6 @@ class CorrelatingShackHartmann:
     def __init__(self,nSubap:float,
                  plate_scale:float,
                  telescope,
-                 lightRatio:float,
                  ideal_pattern:bool = False,
                  pattern_criteria = None,
                  subaperture_sel = [],
@@ -41,8 +40,6 @@ class CorrelatingShackHartmann:
         telescope : TYPE
             The telescope object to which the Shack Hartmann is associated. 
             This object carries the phase, flux and pupil information.
-        lightRatio : float
-            Criterion to select the valid subaperture based on flux considerations.
         idea_pattern : bool, optional
             Flag to enable the geometric WFS. 
             If True, enables the geometric Shack Hartmann (direct measurement of gradient).
@@ -100,9 +97,7 @@ class CorrelatingShackHartmann:
         
         the following properties can be updated on the fly:
             _ wfs.cam.photonNoise       : Photon noise can be set to True or False
-            _ wfs.cam.readoutNoise      : Readout noise can be set to True or False
-            _ wfs.lightRatio            : reset the valid subaperture selection considering the new value
-        
+            _ wfs.cam.readoutNoise      : Readout noise can be set to True or False        
         """ 
         self.tag                            = 'correlatingShackHartmann'
         self.plate_scale                    = plate_scale
@@ -111,7 +106,6 @@ class CorrelatingShackHartmann:
             raise AttributeError('The telescope was not coupled to any source object! Make sure to couple it with an src object using src*tel')
         self.ideal_pattern                  = ideal_pattern
         self.nSubap                         = nSubap
-        self.lightRatio                     = lightRatio       
         self.fov_crop                       = fov_crop
         self.kernel_size                    = kernel_size
         self.subaperture_sel                = subaperture_sel
@@ -584,34 +578,6 @@ class CorrelatingShackHartmann:
             if self.isInitialized:
                 print('Re-initializing WFS...')
                 self.initialize_wfs()      
-    @property
-    def lightRatio(self):
-        return self._lightRatio
-    
-    @lightRatio.setter
-    def lightRatio(self,val):
-        self._lightRatio = val
-        if hasattr(self,'isInitialized'):
-            if self.isInitialized:
-                print('Selecting valid subapertures based on flux considerations..')
-
-                self.valid_subapertures = np.reshape(self.photon_per_subaperture >= self.lightRatio*np.max(self.photon_per_subaperture), [self.nSubap,self.nSubap])
-        
-                self.valid_subapertures_1D = np.reshape(self.valid_subapertures,[self.nSubap**2])
-
-                [self.validLenslets_x , self.validLenslets_y] = np.where(self.photon_per_subaperture_2D >= self.lightRatio*np.max(self.photon_per_subaperture))
-        
-                # index of valid slopes X and Y
-                self.valid_slopes_maps = np.concatenate((self.valid_subapertures,self.valid_subapertures))
-        
-                # number of valid lenslet
-                self.nValidSubaperture = int(np.sum(self.valid_subapertures))
-        
-                self.nSignal = 2*self.nValidSubaperture
-                
-                print('Re-initializing WFS...')
-                self.initialize_wfs()
-                print('Done!')
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% WFS INTERACTIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     def __mul__(self,obj): 
