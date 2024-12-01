@@ -8,10 +8,12 @@ Created on Thu May 20 17:52:09 2021
 import inspect
 import time
 
+import torch
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
 from scipy.ndimage import convolve
+
 
 from .Detector import Detector
 from .tools.tools import bin_ndarray
@@ -265,29 +267,27 @@ class CorrelatingShackHartmann:
                     self.subDirs_sun_wfs_padded[index, 0, :, :] = np.pad(np.squeeze(self.subDirs_sun_wfs[:,:,dirx,diry]), pad_width=((pad_top, pad_bottom), (pad_left, pad_right)))
         
         # Compute and normalize PSF
-        #phase_valid = phase_per_subap[0,self.valid_subapertures_1D,:,:]
-        #plt.imshow(phase_valid[0,:,:]), plt.show()
-        #plt.imshow(phase_valid[1,:,:]), plt.show()
-        #plt.imshow(phase_valid[8,:,:]), plt.show()
-        complex_phase = np.exp(1j*(phase_per_subap[:,self.valid_subapertures_1D,:,:]-np.pi))
-        complex_phase_ffted = np.fft.fft2(complex_phase, s=(pad_img_size, pad_img_size), axes=(2,3))
-        complex_phase_ffted_shift = np.fft.fftshift(complex_phase_ffted, axes=(2,3))
 
-        psf_per_subdir_per_subap = np.power(np.abs(complex_phase_ffted_shift), 2)
+        phase_per_subap = torch.from_numpy(phase_per_subap)
+        complex_phase = torch.exp(1j*(phase_per_subap[:,self.valid_subapertures_1D,:,:]-np.pi))
+        complex_phase_ffted = torch.fft.fft2(complex_phase, s=(pad_img_size, pad_img_size), dim=(2,3))
+        complex_phase_ffted_shift = torch.fft.fftshift(complex_phase_ffted, dim=(2,3))
 
-        psf_per_subdir_per_subap = psf_per_subdir_per_subap / np.sum(psf_per_subdir_per_subap[0,0,:,:])
+        psf_per_subdir_per_subap = torch.pow(np.abs(complex_phase_ffted_shift), 2)
+
+        psf_per_subdir_per_subap = psf_per_subdir_per_subap / torch.sum(psf_per_subdir_per_subap[0,0,:,:])
 
         # Compute subDirs imgs
 
-        psf_fft = np.fft.fft2(psf_per_subdir_per_subap, axes=(2,3))
-        sun_fft = np.fft.fft2(self.subDirs_sun_wfs_padded, axes=(2,3))
+        psf_fft = torch.fft.fft2(psf_per_subdir_per_subap, dim=(2,3))
+        sun_fft = torch.fft.fft2(torch.from_numpy(self.subDirs_sun_wfs_padded), dim=(2,3))
 
-        sun_fft_conv = np.abs(np.fft.fftshift(np.fft.ifft2(sun_fft*psf_fft, axes=(2,3)), axes=(2,3)))
+        sun_fft_conv = torch.abs(torch.fft.fftshift(torch.fft.ifft2(sun_fft*psf_fft, dim=(2,3)), dim=(2,3)))
 
         # Compute subap image
         subap_padding_fov_px = np.round((self.telescope.src.fov+self.telescope.src.patch_padding)/self.plate_scale).astype(int)
         
-        temp_sun_subap = np.zeros((self.nValidSubaperture, subap_padding_fov_px, subap_padding_fov_px))
+        temp_sun_subap = torch.zeros((self.nValidSubaperture, subap_padding_fov_px, subap_padding_fov_px))
                 
         for dirX in range(self.telescope.src.nSubDirs):
             for dirY in range(self.telescope.src.nSubDirs):
@@ -302,19 +302,19 @@ class CorrelatingShackHartmann:
                 cx_subDir = pad_top + np.round(self.telescope.src.subDir_margin/self.plate_scale).astype(int)
                 cy_subDir = pad_left + np.round(self.telescope.src.subDir_margin/self.plate_scale).astype(int)
 
-                temp_sun_subap[:,gl_cx:gl_cx_end,gl_cy:gl_cy_end] += np.squeeze(sun_fft_conv[index,:,cx_subDir:cx_subDir+self.subDirs_filt_size_wfs, 
+                temp_sun_subap[:,gl_cx:gl_cx_end,gl_cy:gl_cy_end] += torch.squeeze(sun_fft_conv[index,:,cx_subDir:cx_subDir+self.subDirs_filt_size_wfs, 
                                                                                                      cy_subDir:cy_subDir+self.subDirs_filt_size_wfs] * self.filt_2D_wfs[:,:,dirX,dirY])
 
         # Crop central fov, without external padding | also consider if the fov_crop is selected
         if self.fov_crop is not None:
             cx = (temp_sun_subap.shape[1] - self.n_pix_fov_crop) // 2
             cy = (temp_sun_subap.shape[2] - self.n_pix_fov_crop) // 2
-            sun_subap = temp_sun_subap[:, cx:cx+self.n_pix_fov_crop, cy:cy+self.n_pix_fov_crop]
+            sun_subap = temp_sun_subap[:, cx:cx+self.n_pix_fov_crop, cy:cy+self.n_pix_fov_crop].detach().numpy()
 
         else:
             cx = (temp_sun_subap.shape[1]- self.n_pix_subap) // 2
             cy = (temp_sun_subap.shape[2]- self.n_pix_subap) // 2
-            sun_subap = temp_sun_subap[:, cx:cx+self.n_pix_subap, cy:cy+self.n_pix_subap]     
+            sun_subap = temp_sun_subap[:, cx:cx+self.n_pix_subap, cy:cy+self.n_pix_subap].detach().numpy()
 
         return sun_subap
         
@@ -494,7 +494,7 @@ class CorrelatingShackHartmann:
 
         # print("WFS Measure: ", self.wfs_img.shape, self.pseudo_ref_img.shape)
 
-        self.corrImg = np.real(np.fft.fftshift(np.fft.ifft2(np.fft.fft2(self.wfs_img, axes=(1,2)) * np.conj(np.fft.fft2(self.pseudo_ref_img, axes=(1,2))), axes=(1,2)), axes=(1,2)))
+        self.corrImg = torch.real(torch.fft.fftshift(torch.fft.ifft2(torch.fft.fft2(torch.from_numpy(self.wfs_img), dim=(1,2)) * torch.conj(torch.fft.fft2(torch.from_numpy(self.pseudo_ref_img), dim=(1,2))), dim=(1,2)), dim=(1,2))).detach().numpy()
 
         self.corrImg = self.corrImg / (self.corrImg.shape[1]**2)
 
