@@ -10,6 +10,7 @@ import inspect
 import matplotlib.pyplot as plt
 import numpy as np
 import copy
+import torch
 try:
     import cupy as cp
     from cupyx.scipy import signal as csg
@@ -304,16 +305,16 @@ class Telescope:
             start_FFT = np.round((pad_img_size/2)-(self.src.subDirs_coordinates[2,0,0])/(2*self.src.img_PS)).astype(int)
             end_FFT = start_FFT + np.round((self.src.subDirs_coordinates[2,0,0])/self.src.img_PS).astype(int)
 
-            sun_PSF_combined = np.zeros(np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int), np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int))
-            sun_psf_tmp_3D = np.zeros((np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int), np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int), self.src.nSubDirs*self.src.nSubDirs))
+            sun_PSF_combined = torch.zeros(np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int), np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int))
+            sun_psf_tmp_3D = torch.zeros((np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int), np.round((self.src.fov+self.src.patch_padding)/self.src.img_PS).astype(int), self.src.nSubDirs*self.src.nSubDirs))
 
             # Mix the subdirs into a unique PSF
             for dirX in range(self.src.nSubDirs):
                 for dirY in range(self.src.nSubDirs):
                     index = dirX*self.src.nSubDirs + dirY
 
-                    Object_O = np.fft.fft2(np.pad(self.src.subDirs_sun[:,:,dirX, dirY],pad_width=((pad_img_size-self.src.subDirs_sun[:,:,0, 0].shape[0])/2).astype(int))) 
-                    Coherence_H = np.fft.fft2(np.pad(output_PSF_norma[index], pad_width=((pad_img_size-output_PSF_norma[index].shape)/2).astype(int)))
+                    Object_O = torch.fft.fft2(torch.from_numpy(np.pad(torch.from_numpy(self.src.subDirs_sun[:,:,dirX, dirY]),pad_width=((pad_img_size-self.src.subDirs_sun[:,:,0, 0].shape[0])/2).astype(int))))
+                    Coherence_H = torch.fft.fft2(torch.from_numpy(np.pad(torch.from_numpy(output_PSF_norma[index]), pad_width=((pad_img_size-output_PSF_norma[index].shape)/2).astype(int))))
 
                     global_corner_x = np.round(dirX*((self.src.subDirs_coordinates[2,0,0])/(2*self.src.img_PS))).astype(int)
                     global_corner_y = np.round(dirY*((self.src.subDirs_coordinates[2,0,0])/(2*self.src.img_PS))).astype(int)
@@ -322,25 +323,18 @@ class Telescope:
                     global_corner_y_end = global_corner_y + np.round((self.src.subDirs_coordinates[2,0,0])/(self.src.img_PS)).astype(int)
 
                     sun_psf_tmp_3D[global_corner_x:global_corner_x_end,
-                                   global_corner_y:global_corner_y_end,index] = np.abs(np.fft.fftshift(np.fft.ifft2(Object_O*Coherence_H)))[start_FFT:end_FFT, start_FFT:end_FFT] * self.src.filter_2D[:,:,dirX, dirY]
+                                   global_corner_y:global_corner_y_end,index] = torch.abs(torch.fft.fftshift(torch.fft.ifft2(Object_O*Coherence_H)))[start_FFT:end_FFT, start_FFT:end_FFT] * torch.from_numpy(self.src.filter_2D[:,:,dirX, dirY])
 
-            print(np.argmax(output_PSF_norma[0])) # REMOVE
-
-            sun_PSF_combined = np.sum(sun_psf_tmp_3D,axis=2)
+            sun_PSF_combined = torch.sum(sun_psf_tmp_3D,axis=2)
             
             offset = np.round(self.src.patch_padding/(2*self.src.img_PS)).astype(int)
 
             sun_PSF_combined_fov = sun_PSF_combined[offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int), 
-                                                    offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int)]
+                                                    offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int)].detach().numpy()
         
         if self.src.tag == "sun":
             self.PSF_sun = np.copy(sun_PSF_combined_fov)
             self.PSF_sun_norma = np.copy(sun_PSF_combined_fov)
-        
-        """ _,axs = plt.subplots(1,2)
-        axs[0].imshow(self.src.sun_nopad, 'gray')
-        axs[1].imshow(sun_PSF_combined_fov, 'gray')
-        plt.show() """
 
         self.PSF        = output_PSF.copy()
         self.PSF_norma  = output_PSF_norma.copy()     
