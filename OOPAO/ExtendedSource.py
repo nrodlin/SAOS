@@ -14,7 +14,7 @@ class ExtendedSource(Source):
                  img_path="OOPAO/OOPAO/images/imsol.fits",
                  img_PS=1/60,
                  nSubDirs=1,
-                 patch_padding=2,
+                 patch_padding=5,
                  subDir_margin=1.0):
         """SOURCE
         A extended source object shares the implementation of the Source class, but the photometry varies for the Sun. 
