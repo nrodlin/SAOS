@@ -52,8 +52,6 @@ def InteractionMatrix(ngs,
     except:
         nModes = 1
     intMat = np.zeros([wfs.nSignal,nModes])
-    nCycle = int(np.ceil(nModes/nMeasurements))
-    nExtra = int(nModes%nMeasurements)
     if nMeasurements>nModes:
         nMeasurements = nModes
     
@@ -65,23 +63,9 @@ def InteractionMatrix(ngs,
     else:
         phaseBuffer = phaseOffset
 
-    for i in range(nCycle):  
-        if nModes>1:
-            if i==nCycle-1:
-                if nExtra != 0:
-                    intMatCommands  = np.squeeze(M2C[:,-nExtra:])                
-                    try:               
-                        phaseBuffer     = np.tile(phaseOffset[...,None],(1,1,intMatCommands.shape[-1]))
-                    except:
-                        phaseBuffer     = phaseOffset
-                else:
-                    intMatCommands = np.squeeze(M2C[:,i*nMeasurements:((i+1)*nMeasurements)])
-            else:
-                intMatCommands = np.squeeze(M2C[:,i*nMeasurements:((i+1)*nMeasurements)])
-        else:
-            intMatCommands = np.squeeze(M2C) 
-
+    for i in range(nMeasurements):
         a= time.time()
+        intMatCommands = np.squeeze(M2C[:,i])
 #        push
         dm.coefs = intMatCommands*stroke
         tel*dm
@@ -92,13 +76,10 @@ def InteractionMatrix(ngs,
             tel.src.phase+=phaseBuffer
         tel*wfs
         if wfs.tag == "correlatingShackHartmann":
-            sp = wfs.signal_list
-        else:
             sp = wfs.signal
 #       pull
         if single_pass:
-            sm = 0*sp
-            factor = 2
+            intMat[:,i] = np.squeeze(sp/stroke)
         else:
             dm.coefs=-intMatCommands*stroke
             tel*dm
@@ -109,37 +90,17 @@ def InteractionMatrix(ngs,
                 tel.src.phase+=phaseBuffer
             tel*wfs
             if wfs.tag == "correlatingShackHartmann":
-                sm = wfs.signal_list
-            else:
                 sm = wfs.signal
-            factor = 1
-        if i==nCycle-1:
-            if nExtra !=0:
-                if nMeasurements==1:
-                    intMat[:,i] = np.squeeze(0.5*(sp-sm)/stroke)                
-                else:
-                    if nExtra ==1:
-                        intMat[:,-nExtra] =  np.squeeze(0.5*(sp-sm)/stroke)
-                    else:
-                        intMat[:,-nExtra:] =  np.squeeze(0.5*(sp-sm)/stroke)
-            else:
-                 if nMeasurements==1:
-                    intMat[:,i] = np.squeeze(0.5*(sp-sm)/stroke)      
-                 else:
-                    intMat[:,-nMeasurements:] =  np.squeeze(0.5*(sp-sm)/stroke)
-        else:
-            if nMeasurements==1:
-                intMat[:,i] = np.squeeze(0.5*(sp-sm)/stroke)                
-            else:
-                intMat[:,i*nMeasurements:((i+1)*nMeasurements)] = np.squeeze(0.5*(sp-sm)/stroke)
-        intMat = np.squeeze(intMat)
+        
+            intMat[:,i] = np.squeeze((sp-sm)/(2*stroke))
 
         if print_time:
-            print(str((i+1)*nMeasurements)+'/'+str(nModes))
+            print(str((i+1))+'/'+str(nModes))
             b=time.time()
             print('Time elapsed: '+str(b-a)+' s' )
 
-    out=CalibrationVault(factor*intMat,invert=invert)
+    print(intMat.shape)
+    out=CalibrationVault(intMat,invert=invert)
       
     return out
 
