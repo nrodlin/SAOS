@@ -10,7 +10,6 @@ class ExtendedSource(Source):
                  fov=10,
                  altitude:float = np.inf, 
                  display_properties:bool=True,
-                 chromatic_shift:list = None,
                  img_path="OOPAO/OOPAO/images/imsol.fits",
                  img_PS=1/60,
                  nSubDirs=1,
@@ -33,8 +32,6 @@ class ExtendedSource(Source):
             DESCRIPTION. The default is np.inf.
         display_properties : bool, optional
             DESCRIPTION. The default is True.
-        chromatic_shift : list, optional
-            DESCRIPTION. The default is None.
         img_path: str, optional
             DESCRIPTION. Sun pattern that shall be uploaded, expected FITS file.
         img_PS: str, optional
@@ -70,7 +67,6 @@ class ExtendedSource(Source):
         _ src.nPhoton   : number of photons per m2 per s, can be updated online. 
         _ src.fluxMap   : 2D map of the number of photons per pixel per frame (depends on the loop frequency defined by tel.samplingTime)  
         _ src.display_properties : display the properties of the src object
-        _ src.chromatic_shift : list of shift in arcesc to be applied to the pupil footprint at each layer of the atmosphere object. 
         
         The main properties of the object can be displayed using :
             src.print_properties()
@@ -97,7 +93,6 @@ class ExtendedSource(Source):
         self.tag        = 'sun'                                 # tag of the object
         self.altitude = altitude                                # altitude of the source object in m    
         self.coordinates = coordinates                          # polar coordinates [r,theta] 
-        self.chromatic_shift = chromatic_shift                  # shift in arcsec to be applied to the atmospheric phase screens (one value for each layer) to simulate a chromatic effect
         self.fov = fov                                          # Field of View in arcsec of the patch selected
         self.img_path = img_path                                # Sun pattern that shall be uploaded, expected FITS file.
         self.img_PS = img_PS                                    # Plate Scale in "/px of the input image, default matches the default img_path PS

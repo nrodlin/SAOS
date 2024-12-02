@@ -44,13 +44,9 @@ class CorrelatingShackHartmann:
             This object carries the phase, flux and pupil information.
         idea_pattern : bool, optional
             Flag to enable the geometric WFS. 
-            If True, enables the geometric Shack Hartmann (direct measurement of gradient).
-            If False, the diffractive computation is considered.
+            If True, the pseudo-reference image does not contain photon and readout noise
+            If False, photon and readout noise are considered during the psuedo-reference image generation.
             The default is False.
-        unit_P2V : bool, optional
-                If True, the slopes units are calibrated using a Tip/Tilt normalized to 2 Pi peak-to-valley.
-                If False, the slopes units are calibrated using a Tip/Tilt normalized to 1 in the pupil (Default). In that case the slopes are expressed in [rad].
-                The default is False.
         pattern_criteria : str, optional
                 None by default, using the ideal pattern
                 If specified, the str defines the method to select the pattern among the subapertures
@@ -324,9 +320,12 @@ class CorrelatingShackHartmann:
         readoutNoise = np.copy(self.cam.readoutNoise)
         photonNoise = np.copy(self.cam.photonNoise)
         
-        self.cam.photonNoise        = 0
-        self.cam.readoutNoise       = 0       
-        
+        if self.ideal_pattern:
+            self.cam.photonNoise        = 0
+            self.cam.readoutNoise       = 0       
+        else:
+            self.cam.photonNoise        = 0.01
+            self.cam.readoutNoise       = 0 
         # reference signal
         self.sx0                    = np.zeros([self.nSubap,self.nSubap])
         self.sy0                    = np.zeros([self.nSubap,self.nSubap])

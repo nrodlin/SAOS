@@ -18,7 +18,7 @@ def InteractionMatrix(ngs,
                       M2C,
                       stroke,
                       phaseOffset=0,
-                      nMeasurements=50,
+                      nMeasurements=None,
                       noise='off',
                       invert=True,
                       print_time=False,
@@ -51,6 +51,8 @@ def InteractionMatrix(ngs,
         nModes = M2C.shape[1]
     except:
         nModes = 1
+    if nMeasurements is None:
+        nMeasurements = nModes
     intMat = np.zeros([wfs.nSignal,nModes])
     if nMeasurements>nModes:
         nMeasurements = nModes
@@ -64,6 +66,8 @@ def InteractionMatrix(ngs,
         phaseBuffer = phaseOffset
 
     for i in range(nMeasurements):
+        if (i%10) == 0:
+            print("Mode ", i, " out of ", nMeasurements)
         a= time.time()
         intMatCommands = np.squeeze(M2C[:,i])
 #        push
@@ -75,8 +79,8 @@ def InteractionMatrix(ngs,
         else:
             tel.src.phase+=phaseBuffer
         tel*wfs
-        if wfs.tag == "correlatingShackHartmann":
-            sp = wfs.signal
+        
+        sp = wfs.signal
 #       pull
         if single_pass:
             intMat[:,i] = np.squeeze(sp/stroke)
@@ -89,11 +93,12 @@ def InteractionMatrix(ngs,
             else:
                 tel.src.phase+=phaseBuffer
             tel*wfs
-            if wfs.tag == "correlatingShackHartmann":
-                sm = wfs.signal
+            
+            sm = wfs.signal
         
             intMat[:,i] = np.squeeze((sp-sm)/(2*stroke))
-
+        #import matplotlib.pyplot as plt
+        #plt.plot(wfs.signal), plt.show()
         if print_time:
             print(str((i+1))+'/'+str(nModes))
             b=time.time()
