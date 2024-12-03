@@ -139,7 +139,6 @@ OOPAO/M4_model/*.fits
 
 # json files 
 *.json
-*.fits
 *.filepart
 
 # pkl files
