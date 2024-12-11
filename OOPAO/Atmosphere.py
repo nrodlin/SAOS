@@ -318,16 +318,21 @@ class Atmosphere:
     def set_pupil_footprint(self):
         
         for i_layer in range(self.nLayer):
-            layer = getattr(self,'layer_'+str(i_layer+1)) 
+            layer = getattr(self,'layer_'+str(i_layer+1))
+            
             if self.asterism is None:
-                if self.telescope.src.chromatic_shift is not None:                    
-                    if len(self.telescope.src.chromatic_shift) == self.nLayer:
-                        chromatic_shift = self.telescope.src.chromatic_shift[i_layer]
-                    else:
-                        raise ValueError('The chromatic_shift property is expected to be the same length as the number of atmospheric layer. ')    
-                else:
+                if self.telescope.src.tag is "sun":
                     chromatic_shift = 0
-                [x_z,y_z] = pol2cart(layer.altitude*np.tan(np.deg2rad(self.telescope.src.coordinates[0]+chromatic_shift)/206265) * layer.resolution / layer.D,np.deg2rad(self.telescope.src.coordinates[1]))
+                else:
+                    if self.telescope.src.chromatic_shift is not None:                    
+                        if len(self.telescope.src.chromatic_shift) == self.nLayer:
+                            chromatic_shift = self.telescope.src.chromatic_shift[i_layer]
+                        else:
+                            raise ValueError('The chromatic_shift property is expected to be the same length as the number of atmospheric layer. ')    
+                    else:
+                        chromatic_shift = 0
+                [x_z,y_z] = pol2cart(layer.altitude*np.tan(np.deg2rad(+chromatic_shift)/206265) * layer.resolution / layer.D,np.deg2rad(self.telescope.src.coordinates[1]))
+                print('Layer coordinates: ', x_z, y_z, self.telescope.src.coordinates[0], self.telescope.src.coordinates[1])
                 layer.extra_sx = int(x_z)-x_z
                 layer.extra_sy = int(y_z)-y_z
                 
@@ -342,6 +347,7 @@ class Atmosphere:
                 layer.extra_sy = []
                 for i in range(self.asterism.n_source):
                     [x_z,y_z] = pol2cart(layer.altitude*np.tan(np.deg2rad(self.asterism.coordinates[i][0])/206265) * layer.resolution / layer.D,np.deg2rad(self.asterism.coordinates[i][1]))
+                    print(x_z, y_z, self.asterism.coordinates[i][0], self.asterism.coordinates[i][1])
                     layer.extra_sx.append(int(x_z)-x_z)
                     layer.extra_sy.append( int(y_z)-y_z)
                     center_x = int(y_z)+layer.resolution//2
@@ -644,7 +650,7 @@ class Atmosphere:
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
         
     def __mul__(self,obj):
-        if obj.tag == 'telescope':
+        if obj.tag == 'telescope' or obj.tag == 'source' or obj.tag == 'asterism' or obj.tag == 'sun':
             if obj.tag == 'telescope':
                 if self.fov == obj.fov:   
                     self.telescope = obj
@@ -652,42 +658,48 @@ class Atmosphere:
                     print('Re-initializing the atmosphere to match the new telescope fov')
                     self.hasNotBeenInitialized = True
                     self.initializeAtmosphere(obj)
-                if obj.src.tag == 'source':                
-                    if obj.src.coordinates[0] <= self.fov/2:
-                        obj                 = self.telescope
-                        self.asterism       = None
-                    else:
-                        raise ValueError('The source object zenith ('+str(obj.coordinates[0])+'") is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
-                elif obj.src.tag =='asterism':
-                    c_ = np.asarray(obj.src.coordinates)
-                    if np.max(c_[:,0]) <= self.fov/2:
-                        self.asterism       = obj.src
-                    else:
-                        raise ValueError('One of the source is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
-                elif obj.src.tag =='sun':
-                    c_ = np.asarray(obj.src.sun_subDir_ast.coordinates)
-                    if np.max(c_[:,0]) <= self.fov/2:
-                        self.asterism       = obj.src.sun_subDir_ast
-                    else:
-                        raise ValueError('One of the source is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
-                if self.user_defined_opd is False:
-                    self.telescope.resetOPD()
-                    self.set_pupil_footprint()    
-                    phase_support = self.initialize_phase_support()
-                    for i_layer in range(self.nLayer):
-                        tmpLayer = getattr(self,'layer_'+str(i_layer+1))
-                        phase_support = self.fill_phase_support(tmpLayer, phase_support, i_layer)
-                    self.set_OPD(phase_support)
-                
-                if obj.src.tag == 'source':
-                    obj.optical_path =[[obj.src.type + '('+obj.src.optBand+')',id(obj.src)]]
+            elif obj.tag == 'source':                
+                if obj.coordinates[0] <= self.fov/2:
+                    self.telescope.src  = obj
+                    obj                 = self.telescope
+                    self.asterism       = None
                 else:
-                    obj.optical_path =[[obj.src.type,id(obj.src)]]
-                obj.optical_path.append([self.tag,id(self)])
-                obj.optical_path.append([obj.tag,id(obj)])
-                obj.OPD = self.OPD.copy()
-                obj.OPD_no_pupil = self.OPD_no_pupil.copy()
-                obj.isPaired     = True
+                    raise ValueError('The source object zenith ('+str(obj.coordinates[0])+'") is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
+            elif obj.tag =='asterism':
+                c_ = np.asarray(obj.coordinates)
+                if np.max(c_[:,0]) <= self.fov/2:
+                    self.telescope.src  = obj
+                    self.asterism       = obj
+                    obj                 = self.telescope
+                else:
+                    raise ValueError('One of the source is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
+            elif obj.tag =='sun':
+                c_ = np.asarray(obj.sun_subDir_ast.coordinates)
+                if np.max(c_[:,0]) <= self.fov/2:
+                    self.telescope.src  = obj
+                    self.asterism       = obj.src.sun_subDir_ast
+                    obj                 = self.telescope
+                else:
+                    raise ValueError('One of the source is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
+            if self.user_defined_opd is False:
+                print('updating phase')
+                self.telescope.resetOPD()
+                self.set_pupil_footprint()    
+                phase_support = self.initialize_phase_support()
+                for i_layer in range(self.nLayer):
+                    tmpLayer = getattr(self,'layer_'+str(i_layer+1))
+                    phase_support = self.fill_phase_support(tmpLayer, phase_support, i_layer)
+                self.set_OPD(phase_support)
+                
+            if obj.src.tag == 'source':
+                obj.optical_path =[[obj.src.type + '('+obj.src.optBand+')',id(obj.src)]]
+            else:
+                obj.optical_path =[[obj.src.type,id(obj.src)]]
+            obj.optical_path.append([self.tag,id(self)])
+            obj.optical_path.append([obj.tag,id(obj)])
+            obj.OPD = self.OPD.copy()
+            obj.OPD_no_pupil = self.OPD_no_pupil.copy()
+            obj.isPaired     = True
             return obj
         else:
             raise AttributeError('The atmosphere can be multiplied only with a Telescope or a Source object!')

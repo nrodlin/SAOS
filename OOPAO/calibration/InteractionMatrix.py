@@ -66,8 +66,8 @@ def InteractionMatrix(ngs,
         phaseBuffer = phaseOffset
 
     for i in range(nMeasurements):
-        if (i%10) == 0:
-            print("Mode ", i, " out of ", nMeasurements)
+        if (i%10) == 0 and i < (nMeasurements-1):
+            print("Mode ", i, " out of ", nMeasurements, '. Measuring...')
         a= time.time()
         intMatCommands = np.squeeze(M2C[:,i])
 #        push
@@ -97,8 +97,7 @@ def InteractionMatrix(ngs,
             sm = wfs.signal
         
             intMat[:,i] = np.squeeze((sp-sm)/(2*stroke))
-        #import matplotlib.pyplot as plt
-        #plt.plot(wfs.signal), plt.show()
+
         if print_time:
             print(str((i+1))+'/'+str(nModes))
             b=time.time()

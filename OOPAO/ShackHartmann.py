@@ -219,7 +219,8 @@ class ShackHartmann:
                 self.index_y.append(j)
         self.current_nPhoton = self.telescope.src.nPhoton
         self.index_x = np.asarray(self.index_x)
-        self.index_y = np.asarray(self.index_y)        
+        self.index_y = np.asarray(self.index_y)
+        self.flux_flag = False        
         print('Selecting valid subapertures based on flux considerations..')
         self.photon_per_subaperture_2D = np.reshape(self.photon_per_subaperture,[self.nSubap,self.nSubap])
         self.valid_subapertures = np.reshape(self.photon_per_subaperture >= self.lightRatio*np.max(self.photon_per_subaperture), [self.nSubap,self.nSubap])
@@ -563,7 +564,8 @@ class ShackHartmann:
                 
                 self.sum_I   = np.sum(I,axis=0)
                 self.edge_subaperture_criterion = np.sum(I*self.outerMask)/np.sum(I)
-                if self.edge_subaperture_criterion>0.05:
+                if (self.edge_subaperture_criterion>0.05) and (self.flux_flag == False):
+                    self.flux_flag = True
                     print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
                     print('WARNING !!!! THE LIGHT IN THE SUBAPERTURE IS MAYBE WRAPPING !!!'+str(np.round(100*self.edge_subaperture_criterion,1))+' % of the total flux detected on the edges of the subapertures. You may want to lower the seeing value or increase the resolution')
                     print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
