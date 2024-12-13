@@ -225,7 +225,7 @@ class Atmosphere:
         layer.center = layer.resolution//2
         
         if self.asterism is None:
-            [x_z,y_z] = pol2cart(layer.altitude*np.tan(np.deg2rad(self.telescope.src.coordinates[0])/206265) * layer.resolution / layer.D, np.deg2rad(self.telescope.src.coordinates[1]))
+            [x_z,y_z] = pol2cart(layer.altitude*np.tan((self.telescope.src.coordinates[0])/206265) * layer.resolution / layer.D, np.deg2rad(self.telescope.src.coordinates[1]))
 
             center_x = int(y_z)+layer.resolution//2
             center_y = int(x_z)+layer.resolution//2
@@ -237,7 +237,7 @@ class Atmosphere:
             layer.extra_sx      = []
             layer.extra_sy      = []
             for i in range(self.asterism.n_source):
-                 [x_z,y_z] = pol2cart(layer.altitude*np.tan(np.deg2rad(self.asterism.coordinates[i][0])/206265) * layer.resolution / layer.D,np.deg2rad(self.asterism.coordinates[i][1]))
+                 [x_z,y_z] = pol2cart(layer.altitude*np.tan((self.asterism.coordinates[i][0])/206265) * layer.resolution / layer.D,np.deg2rad(self.asterism.coordinates[i][1]))
                  layer.extra_sx.append(int(x_z)-x_z)
                  layer.extra_sy.append( int(y_z)-y_z)
                  center_x = int(y_z)+layer.resolution//2
@@ -331,7 +331,7 @@ class Atmosphere:
                             raise ValueError('The chromatic_shift property is expected to be the same length as the number of atmospheric layer. ')    
                     else:
                         chromatic_shift = 0
-                [x_z,y_z] = pol2cart(layer.altitude*np.tan(np.deg2rad(+chromatic_shift)/206265) * layer.resolution / layer.D,np.deg2rad(self.telescope.src.coordinates[1]))
+                [x_z,y_z] = pol2cart(layer.altitude*np.tan((self.telescope.src.coordinates[0]+chromatic_shift)/206265) * layer.resolution / layer.D,np.deg2rad(self.telescope.src.coordinates[1]))
                 print('Layer coordinates: ', x_z, y_z, self.telescope.src.coordinates[0], self.telescope.src.coordinates[1])
                 layer.extra_sx = int(x_z)-x_z
                 layer.extra_sy = int(y_z)-y_z
@@ -346,7 +346,7 @@ class Atmosphere:
                 layer.extra_sx = []
                 layer.extra_sy = []
                 for i in range(self.asterism.n_source):
-                    [x_z,y_z] = pol2cart(layer.altitude*np.tan(np.deg2rad(self.asterism.coordinates[i][0])/206265) * layer.resolution / layer.D,np.deg2rad(self.asterism.coordinates[i][1]))
+                    [x_z,y_z] = pol2cart(layer.altitude*np.tan((self.asterism.coordinates[i][0])/206265) * layer.resolution / layer.D,np.deg2rad(self.asterism.coordinates[i][1]))
                     print(x_z, y_z, self.asterism.coordinates[i][0], self.asterism.coordinates[i][1])
                     layer.extra_sx.append(int(x_z)-x_z)
                     layer.extra_sy.append( int(y_z)-y_z)
@@ -683,7 +683,7 @@ class Atmosphere:
                     raise ValueError('One of the source is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
             if self.user_defined_opd is False:
                 print('updating phase')
-                self.telescope.resetOPD()
+                # self.telescope.resetOPD()
                 self.set_pupil_footprint()    
                 phase_support = self.initialize_phase_support()
                 for i_layer in range(self.nLayer):
@@ -771,7 +771,7 @@ class Atmosphere:
                     else:
                         chromatic_shift = 0
                     
-                    [x_z,y_z] = pol2cart(tmpLayer.altitude*np.tan(np.deg2rad(list_src[i_source].coordinates[0]+chromatic_shift)/206265) ,np.deg2rad(list_src[i_source].coordinates[1]))
+                    [x_z,y_z] = pol2cart(tmpLayer.altitude*np.tan((list_src[i_source].coordinates[0]+chromatic_shift)/206265) ,np.deg2rad(list_src[i_source].coordinates[1]))
                     center = 0
                     [x_c,y_c] = pol2cart(tmpLayer.D_fov/2, np.linspace(0,2*np.pi,100,endpoint=True))  
                     nm = (list_src[i_source].type) +'@'+str(list_src[i_source].coordinates[0])+'"'
@@ -798,7 +798,7 @@ class Atmosphere:
                     chromatic_shift = 0
                     
                     
-                [x_z,y_z] = pol2cart((self.telescope.src.coordinates[0]+chromatic_shift)*np.tan(np.deg2rad(self.telescope.src.coordinates[0]+chromatic_shift)/206265) * tmpLayer.resolution / tmpLayer.D,np.deg2rad(self.telescope.src.coordinates[1]))
+                [x_z,y_z] = pol2cart((self.telescope.src.coordinates[0]+chromatic_shift)*np.tan((self.telescope.src.coordinates[0]+chromatic_shift)/206265) * tmpLayer.resolution / tmpLayer.D,np.deg2rad(self.telescope.src.coordinates[1]))
             
                 center = 0
                 [x_c,y_c] = pol2cart(tmpLayer.D_fov/2, np.linspace(0,2*np.pi,100,endpoint=True))  
