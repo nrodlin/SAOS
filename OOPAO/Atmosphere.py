@@ -332,7 +332,6 @@ class Atmosphere:
                     else:
                         chromatic_shift = 0
                 [x_z,y_z] = pol2cart(layer.altitude*np.tan((self.telescope.src.coordinates[0]+chromatic_shift)/206265) * layer.resolution / layer.D,np.deg2rad(self.telescope.src.coordinates[1]))
-                print('Layer coordinates: ', x_z, y_z, self.telescope.src.coordinates[0], self.telescope.src.coordinates[1])
                 layer.extra_sx = int(x_z)-x_z
                 layer.extra_sy = int(y_z)-y_z
                 
