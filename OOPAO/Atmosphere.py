@@ -681,8 +681,6 @@ class Atmosphere:
                 else:
                     raise ValueError('One of the source is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
             if self.user_defined_opd is False:
-                print('updating phase')
-                # self.telescope.resetOPD()
                 self.set_pupil_footprint()    
                 phase_support = self.initialize_phase_support()
                 for i_layer in range(self.nLayer):
