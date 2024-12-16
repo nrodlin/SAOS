@@ -316,7 +316,6 @@ class Atmosphere:
         return onePixelShiftedPhaseScreen
 
     def set_pupil_footprint(self):
-        
         for i_layer in range(self.nLayer):
             layer = getattr(self,'layer_'+str(i_layer+1))
             
@@ -354,8 +353,7 @@ class Atmosphere:
                     
                     pupil_footprint = np.zeros([layer.resolution,layer.resolution])
                     pupil_footprint[center_x-self.telescope.resolution//2:center_x+self.telescope.resolution//2,center_y-self.telescope.resolution//2:center_y+self.telescope.resolution//2 ] = 1
-                    layer.pupil_footprint.append(pupil_footprint)   
-  
+                    layer.pupil_footprint.append(pupil_footprint)     
     def updateLayer(self,layer,shift = None):
         if self.compute_covariance is False:
             raise AttributeError('The computation of the covariance matrices was set to False in the atmosphere initialisation. Set it to True to provide moving layers.')
@@ -651,6 +649,18 @@ class Atmosphere:
     def __mul__(self,obj):
         if obj.tag == 'telescope' or obj.tag == 'source' or obj.tag == 'asterism' or obj.tag == 'sun':
             if obj.tag == 'telescope':
+                if obj.src.tag == 'sun':
+                    c_ = np.asarray(obj.src.sun_subDir_ast.coordinates)
+                    if np.max(c_[:,0]) <= self.fov/2:
+                        self.asterism       = obj.src.sun_subDir_ast
+                    else:
+                        raise ValueError('One of the sources is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
+                elif obj.src.tag == 'asterism':
+                    c_ = np.asarray(obj.src.coordinates)
+                    if np.max(c_[:,0]) <= self.fov/2:
+                        self.asterism       = obj.src
+                    else:
+                        raise ValueError('One of the sources is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
                 if self.fov == obj.fov:   
                     self.telescope = obj
                 else:          
@@ -671,15 +681,15 @@ class Atmosphere:
                     self.asterism       = obj
                     obj                 = self.telescope
                 else:
-                    raise ValueError('One of the source is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
+                    raise ValueError('One of the sources is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
             elif obj.tag =='sun':
                 c_ = np.asarray(obj.sun_subDir_ast.coordinates)
                 if np.max(c_[:,0]) <= self.fov/2:
                     self.telescope.src  = obj
-                    self.asterism       = obj.src.sun_subDir_ast
+                    self.asterism       = obj.sun_subDir_ast
                     obj                 = self.telescope
                 else:
-                    raise ValueError('One of the source is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
+                    raise ValueError('One of the sources is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
             if self.user_defined_opd is False:
                 self.set_pupil_footprint()    
                 phase_support = self.initialize_phase_support()
