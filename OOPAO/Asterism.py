@@ -106,6 +106,7 @@ class Asterism:
             return obj
         elif obj.tag == 'atmosphere':
             obj*self
+            return obj
         else:
              raise AttributeError('The Source can only be paired to a Telescope!')
     

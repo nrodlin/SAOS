@@ -173,7 +173,8 @@ class Telescope:
         self.coronagraph_diameter        = None                         # perfect coronograph diameter (circular)
         self.print_properties()
 
-        self.isInitialized= True
+        self.isInitialized               = True
+        self.warning_src                 = False
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% PSF COMPUTATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
 
     def set_pupil(self):
@@ -219,8 +220,8 @@ class Telescope:
                 self.src.sun_subDir_ast.src[i].phase = self.OPD[i] * (2*np.pi/self.src.wavelength)
 
         elif self.src.tag == "asterism":
-            for i in range(len(self.src)):
-                self.src.src[i].phase = self.OPD[i] * (2*np.pi/self.src.wavelength)
+            for i in range(len(self.src.src)):
+                self.src.src[i].phase = self.OPD[i] * (2*np.pi/self.src.src[i].wavelength)
         else:
             self.src.phase = self.OPD * (2*np.pi/self.src.wavelength)
         
@@ -236,7 +237,6 @@ class Telescope:
         input_wavelenght = input_source[0].wavelength    
         output_PSF = []
         output_PSF_norma = []
-        warning_src = False
         
         for i_src in range(len(input_source)):
             if input_wavelenght == input_source[i_src].wavelength:
@@ -253,7 +253,6 @@ class Telescope:
             else:
                 amp_mask = self.amplitude_filtered               
                 phase    = self.phase_filtered
-
             amp      = amp_mask*self.pupil*np.sqrt(input_source[i_src].fluxMap)
             
             # add a Tip/Tilt for off-axis sources
@@ -278,14 +277,14 @@ class Telescope:
                 diagonal_semi_length = np.sqrt(self.xPSF_arcsec[0]**2 + self.yPSF_arcsec[0]**2)
                 farthest_corner = input_source[i_src].coordinates[0] + diagonal_semi_length
                 if farthest_corner > self.fov:
-                    if warning_src is False:
+                    if self.warning_src is False:
                         print('Warning : Some Sources are outside of the field of view of the telescope (' + str(farthest_corner) + ' arcsec) -- Wrapping effects will appear')
-                        warning_src = True                
+                        self.warning_src = True                
             else:
                 if input_source[i_src].coordinates[0] > max(self.xPSF_arcsec):
-                    if warning_src is False:
+                    if self.warning_src is False:
                         print('Warning : Some Sources are outside of the field of view of the detector (' + str(self.xPSF_arcsec[1]) + ' arcsec) -- Wrapping effects will appear')
-                        warning_src = True
+                        self.warning_src = True
     
             self.PropagateField(amplitude = amp , phase = phase+self.delta_TT*factor, zeroPaddingFactor = zeroPaddingFactor,img_resolution=img_resolution)
 
