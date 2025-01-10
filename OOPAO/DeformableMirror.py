@@ -52,7 +52,9 @@ class DeformableMirror:
                  altitude:float = None,
                  flip = False,
                  flip_lr = False,
-                 sign = 1):
+                 sign = 1,
+                 valid_act_thresh_outer = None, 
+                 valid_act_thresh_inner = None):
         """DEFORMABLE MIRROR
         A Deformable Mirror object consists in defining the 2D maps of influence functions of the actuators. 
         By default, the actuator grid is cartesian in a Fried Geometry with respect to the nSubap parameter. 
@@ -115,6 +117,10 @@ class DeformableMirror:
             If set to 32, uses float32 precision to save memory. The default is 64.
         altitude : float, optional
             Altitude to which the DM is conjugated. The default is None and corresponds to a DM conjugated to the ground.
+        valid_act_thresh_inner : float, optional
+            Maximum distance from one actuator to the edge of the mirror in the obscuration inner circle so that it is consider valid.
+        valid_act_thresh_inner : float, optional
+            Maximum distance from one actuator to the edge of the mirror in the outer circle so that it is consider valid.
 
         Returns
         -------
@@ -304,8 +310,13 @@ class DeformableMirror:
             
             # select valid actuators (central and outer obstruction)
             r = np.sqrt(self.xIF0**2 + self.yIF0**2)
-            validActInner = r>(telescope.centralObstruction*self.D/2-0.5*self.pitch)
-            validActOuter = r<=(self.D/2+0.7533*self.pitch)
+            if valid_act_thresh_outer is None: 
+                valid_act_thresh_outer = self.D/2+0.7533*self.pitch
+            if valid_act_thresh_inner is None:
+                valid_act_thresh_inner = telescope.centralObstruction*self.D/2-0.5*self.pitch
+            
+            validActInner = r > valid_act_thresh_inner
+            validActOuter = r <= valid_act_thresh_outer
     
             self.validAct = validActInner*validActOuter
             self.nValidAct = sum(self.validAct) 
