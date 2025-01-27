@@ -130,6 +130,7 @@ mis_registration_monitoring
 dataAnalysis
 pwfs_model
 user
+.idea/
 
 # M4 fits files
 AO_modules/M4_model/influence_functions/*.fits
