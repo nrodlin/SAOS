@@ -11,11 +11,10 @@ import subprocess
 
 import jsonpickle
 import numpy as np
-import skimage.transform as sk
 from astropy.io import fits as pfits
 from OOPAO.tools import *
 import matplotlib.pyplot as plt
-
+import cv2
 
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% USEFUL FUNCTIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -209,11 +208,13 @@ def pol2cart(rho, phi):
     
 def translationImageMatrix(image,shift):
     # translate the image with the corresponding shift value
-    tf_shift = sk.SimilarityTransform(translation=shift)    
+    tf_shift = np.array([[1, 0, shift[0]],
+                         [0, 1, shift[1]],
+                         [0, 0, 1]], dtype=np.float32)
     return tf_shift
 
 def globalTransformation(image,shiftMatrix,order=3):
-        output  = sk.warp(image,(shiftMatrix).inverse,order=order)
+        output = cv2.warpAffine(image, np.linalg.inv(shiftMatrix)[0:2,:], (image.shape[1], image.shape[0]), flags=cv2.INTER_LINEAR)
         return output
 
 

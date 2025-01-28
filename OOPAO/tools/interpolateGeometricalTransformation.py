@@ -6,7 +6,6 @@ Created on Fri Jul 31 14:35:31 2020
 """
 
 import numpy as np
-import skimage.transform as sk
 import cv2
 from joblib import Parallel, delayed
 
@@ -15,36 +14,67 @@ from ..MisRegistration import MisRegistration
 
 
 # Rotation with respect to te center of the image
-def rotateImageMatrix(image,angle):
-    # compute the shift value to center the image around 0
+def rotateImageMatrix(image, angle):
+    # Compute the shift value to center the image around 0
     shift_y, shift_x = np.array(image.shape[:2]) / 2.
-    # apply the rotation
-    tf_rotate = sk.SimilarityTransform(rotation=np.deg2rad(angle))
-    # center the image around 0
-    tf_shift = sk.SimilarityTransform(translation=[-shift_x, -shift_y])
-    # re-center the image
-    tf_shift_inv = sk.SimilarityTransform(translation=[shift_x, shift_y])
     
-    return ((tf_shift + (tf_rotate + tf_shift_inv)))
+    # Create the rotation matrix
+    rotation_matrix = np.array([
+        [np.cos(np.deg2rad(angle)), -np.sin(np.deg2rad(angle)), 0],
+        [np.sin(np.deg2rad(angle)), np.cos(np.deg2rad(angle)), 0],
+        [0, 0, 1]], dtype=np.float32)
+    
+    # Create the shift matrices
+    translation_matrix_to_zero = np.array([
+        [1, 0, -shift_x],
+        [0, 1, -shift_y],
+        [0, 0, 1]], dtype=np.float32)
+
+    translation_matrix_back = np.array([
+        [1, 0, shift_x],
+        [0, 1, shift_y],
+        [0, 0, 1]], dtype=np.float32)
+    
+    # Combine the transformations (Translation -> Rotation -> Translation)
+    combined_matrix = translation_matrix_back @ rotation_matrix @ translation_matrix_to_zero
+    
+    return combined_matrix
 
 
 # Differential scaling in X and Y with respect to the center of the image
-def scalingImageMatrix(image,scaling):
-    # compute the shift value to center the image around 0
+def scalingImageMatrix(image, scaling):
+    # Compute the shift value to center the image around 0
     shift_y, shift_x = np.array(image.shape[:2]) / 2.
-    # apply the scaling in X and Y
-    tf_scaling = sk.SimilarityTransform(scale=scaling)
-    # center the image around 0
-    tf_shift = sk.SimilarityTransform(translation=[-shift_x, -shift_y])
-    # re-center the image
-    tf_shift_inv = sk.SimilarityTransform(translation=[shift_x, shift_y])
     
-    return ((tf_shift + (tf_scaling + tf_shift_inv)))
+    # Create the scaling matrix
+    scaling_matrix = np.array([
+        [scaling[0], 0, 0],
+        [0, scaling[1], 0],
+        [0, 0, 1]], dtype=np.float32)
+    
+    # Create the shift matrices
+    translation_matrix_to_zero = np.array([
+        [1, 0, -shift_x],
+        [0, 1, -shift_y],
+        [0, 0, 1]], dtype=np.float32)
+
+    translation_matrix_back = np.array([
+        [1, 0, shift_x],
+        [0, 1, shift_y],
+        [0, 0, 1]], dtype=np.float32)
+    
+    # Combine the transformations (Translation -> Scaling -> Translation)
+    combined_matrix = translation_matrix_back @ scaling_matrix @ translation_matrix_to_zero
+    
+    return combined_matrix
 
 # Shift in X and Y
 def translationImageMatrix(image,shift):
     # translate the image with the corresponding shift value
-    tf_shift = sk.SimilarityTransform(translation=shift)    
+    tf_shift = np.array(np.array([
+        [1, 0, shift[0]],
+        [0, 1, shift[1]],
+        [0, 0, 1]], dtype=np.float32))  
     return tf_shift
 
 # Anamorphosis = composition of a rotation, a scaling in X and Y and an anti-rotation
@@ -125,7 +155,7 @@ def interpolateGeometricalTransformation(data,misReg=0, order =3):
     data = np.moveaxis(np.asarray(data),-1,0)
 
     def globalTransformation(image):
-            output  = sk.warp(image,(transformationMatrix).inverse,order=order,mode='constant',cval = 0)
+            output = cv2.warpAffine(image, np.linalg.inv(transformationMatrix)[0:2,:], (nx,ny), flags=cv2.INTER_LINEAR)
             return output
     
     def joblib_transformation():
@@ -188,7 +218,7 @@ def interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out, sha
     transformationMatrix    = downScaling + anamMatrix + rotMatrix + shiftMatrix + alignmentMatrix
     
     def globalTransformation(image):
-            output  = sk.warp(image,(transformationMatrix).inverse,output_shape = [resolution_out,resolution_out],order=order)
+            output = cv2.warpAffine(image, np.linalg.inv(transformationMatrix)[0:2,:], (nx,ny), flags=cv2.INTER_LINEAR)
             return output
     
     # definition of the function that is run in parallel for each 
@@ -242,7 +272,7 @@ def interpolate_image(image_in, pixel_size_in, pixel_size_out,resolution_out, ro
         transformationMatrix    = downScaling + anamMatrix + rotMatrix + shiftMatrix + alignmentMatrix
 
         def globalTransformation(image):
-                output = cv2.warpAffine(image, transformationMatrix.params[0:2,:], (resolution_out,resolution_out), flags=cv2.INTER_LINEAR)
+                output = cv2.warpAffine(image, np.linalg.inv(transformationMatrix)[0:2,:], (resolution_out,resolution_out), flags=cv2.INTER_LINEAR)
                 return output
         
         # definition of the function that is run in parallel for each 
@@ -297,7 +327,7 @@ def binning_optimized(cube_in,binning_factor):
         transformationMatrix    = downScaling + anamMatrix + alignmentMatrix
         
         def globalTransformation(image):
-                output  = sk.warp(image,(transformationMatrix).inverse,output_shape = [resolution_out,resolution_out],order=1)
+                output = cv2.warpAffine(image, np.linalg.inv(transformationMatrix)[0:2,:], (nx,ny), flags=cv2.INTER_LINEAR)
                 return output
         
         # definition of the function that is run in parallel for each 
@@ -354,13 +384,6 @@ def interpolate_cube_special(cube_in, sx, sy, pixel_size_in, pixel_size_out, res
     
     # Shift of half a pixel to center the images on an even number of pixels
     alignmentMatrix         = translationImageMatrix(influMap,[extra-nCrop,extra-nCrop])
-        
-    # 3) Global transformation matrix
-    # transformationMatrix    = downScaling + anamMatrix + rotMatrix + shiftMatrix + alignmentMatrix
-    
-    # def globalTransformation(image,sx,sy):
-    #         output  = sk.warp(image,(transformationMatrix).inverse,output_shape = [resolution_out,resolution_out],order=order)
-    #         return output
     
     # definition of the function that is run in parallel for each 
     def reconstruction(map_2D,sx,sy):
@@ -369,7 +392,7 @@ def interpolate_cube_special(cube_in, sx, sy, pixel_size_in, pixel_size_out, res
 
         shiftMatrix             = translationImageMatrix(influMap,[mis_registration.shiftY/pixel_size_out,mis_registration.shiftX/pixel_size_out]) #units are in m
         transformationMatrix    = downScaling + anamMatrix + rotMatrix + shiftMatrix + alignmentMatrix
-        output =  sk.warp(map_2D,(transformationMatrix).inverse,output_shape = [resolution_out,resolution_out],order=order)
+        output = cv2.warpAffine(map_2D, np.linalg.inv(transformationMatrix)[0:2,:], (nx,ny), flags=cv2.INTER_LINEAR)
         return output
     
     # print('interpolating... ')    
