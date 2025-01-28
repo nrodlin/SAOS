@@ -15,11 +15,83 @@ import numpy as np
 from numpy.random import RandomState
 import matplotlib.gridspec as gridspec
 
+import copy
+from joblib import Parallel, delayed
+
 from .phaseStats import ft_phase_screen, ft_sh_phase_screen, makeCovarianceMatrix
 from .tools.displayTools import getColorOrder,makeSquareAxes
 from .tools.interpolateGeometricalTransformation import interpolate_cube, interpolate_image
-from .tools.tools import createFolder, emptyClass, globalTransformation, pol2cart, translationImageMatrix
+from .tools.tools import createFolder, globalTransformation, pol2cart, translationImageMatrix
 
+class LayerClass:
+    def __init__(self):
+        # Scalar variables 
+        self.D = 0
+        self.D_fov = 0
+        self.altitude = 0
+        self.center = 0
+        self.d0 = 0
+        self.direction = 0
+        self.extra_sx = 0
+        self.extra_sy = 0
+        self.nExtra = 0
+        self.nPixel = 0
+        self.notDoneOnce = False
+        self.resolution = 0
+        self.resolution_fov = 0
+        self.seed = 0
+        self.vX = 0
+        self.vY = 0
+        self.windSpeed = 0
+        # Arrays 
+        self.A = np.array([])
+        self.B = np.array([])
+        self.BBt = np.array([])
+        self.XXt = np.array([])
+        self.XXt_r0 = np.array([])
+        self.ZXt = np.array([])
+        self.ZXt_r0 = np.array([])
+        self.ZZt = np.array([])
+        self.ZZt_inv = np.array([])
+        self.ZZT_inv_r0 = np.array([])
+        self.ZZT_r0 = np.array([])
+        self.initialPhase = np.array([])
+        self.innerMask = np.array([])
+        self.innerZ = np.array([])
+        self.mapShift = np.array([])
+        self.outerMask = np.array([])
+        self.outerZ = np.array([])
+        self.phase = np.array([])
+        self.pupil_footprint = np.array([])
+        self.ratio = np.zeros(2)
+        self.randomState = RandomState(0)
+    def copy(self):
+        new_obj = copy.copy(self)
+        #  numpy arrays must be handle individually
+        new_obj.A = self.A.copy()
+        self.B.copy()
+        new_obj.B = self.B.copy()
+        new_obj.BBt = self.BBt.copy()
+        new_obj.XXt = self.XXt.copy()
+        new_obj.XXt_r0 = self.XXt_r0.copy()
+        new_obj.ZXt = self.ZXt.copy()
+        new_obj.ZXt_r0 = self.ZXt_r0.copy()
+        new_obj.ZZt = self.ZZt.copy()
+        new_obj.ZZt_inv = self.ZZt_inv.copy()
+        new_obj.ZZt_inv_r0 = self.ZZt_inv_r0.copy()
+        new_obj.ZZt_r0 = self.ZZt_r0.copy()
+        new_obj.initialPhase = self.initialPhase.copy()
+        new_obj.innerMask = self.innerMask.copy()
+        new_obj.innerZ = self.innerZ.copy()
+        new_obj.mapShift = self.mapShift.copy()
+        new_obj.outerMask = self.outerMask.copy()
+        new_obj.outerZ = self.outerZ.copy()
+        new_obj.phase = self.phase.copy()
+        new_obj.pupil_footprint = self.pupil_footprint.copy()
+        new_obj.ratio = self.ratio.copy()
+       # the seed is another special case 
+        new_obj.randomState = RandomState(new_obj.seed)
+        return new_obj
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CLASS INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 class Atmosphere:
@@ -155,7 +227,7 @@ class Atmosphere:
                 tmpLayer=self.buildLayer(telescope,self.r0_def,self.L0,i_layer = i_layer,compute_covariance=self.compute_covariance)
                 setattr(self,'layer_'+str(i_layer+1),tmpLayer)
                 
-                phase_support = self.fill_phase_support(tmpLayer,phase_support,i_layer)
+                phase_support = self.fill_phase_support(tmpLayer, i_layer, phase_support.shape)
                 tmpLayer.phase_support = phase_support
                 tmpLayer.phase *= self.wavelength/2/np.pi
 
@@ -178,7 +250,7 @@ class Atmosphere:
 
                 setattr(self,'layer_'+str(i_layer+1),tmpLayer) 
                 
-                phase_support = self.fill_phase_support(tmpLayer,phase_support,i_layer)
+                phase_support = self.fill_phase_support(tmpLayer, i_layer, phase_support.shape)
 
                 # wavelenfth scaling
                 tmpLayer.phase *= self.wavelength/2/np.pi
@@ -198,7 +270,7 @@ class Atmosphere:
 
     
         # initialize layer object
-        layer               = emptyClass()
+        layer               = LayerClass()
         # create a random state to allow reproductible sequences of phase screens
         layer.randomState   = RandomState(42+i_layer*1000)
         
@@ -320,7 +392,7 @@ class Atmosphere:
             layer = getattr(self,'layer_'+str(i_layer+1))
             
             if self.asterism is None:
-                if self.telescope.src.tag is "sun":
+                if self.telescope.src.tag == "sun":
                     chromatic_shift = 0
                 else:
                     if self.telescope.src.chromatic_shift is not None:                    
@@ -354,25 +426,27 @@ class Atmosphere:
                     pupil_footprint[center_x-self.telescope.resolution//2:center_x+self.telescope.resolution//2,center_y-self.telescope.resolution//2:center_y+self.telescope.resolution//2 ] = 1
                     layer.pupil_footprint.append(pupil_footprint)     
     def updateLayer(self,layer,shift = None):
+        updatedLayer = layer
+
         if self.compute_covariance is False:
             raise AttributeError('The computation of the covariance matrices was set to False in the atmosphere initialisation. Set it to True to provide moving layers.')
-        self.ps_loop    = layer.D / (layer.resolution)
-        ps_turb_x       = layer.vX*self.telescope.samplingTime 
-        ps_turb_y       = layer.vY*self.telescope.samplingTime 
+        self.ps_loop    = updatedLayer.D / (updatedLayer.resolution)
+        ps_turb_x       = updatedLayer.vX*self.telescope.samplingTime 
+        ps_turb_y       = updatedLayer.vY*self.telescope.samplingTime 
         
-        if layer.vX==0 and layer.vY==0 and shift is None:
-            layer.phase = layer.phase
+        if updatedLayer.vX==0 and updatedLayer.vY==0 and shift is None:
+            updatedLayer.phase = updatedLayer.phase
             
         else:
-            if layer.notDoneOnce:
-                layer.notDoneOnce = False
-                layer.ratio = np.zeros(2)
-                layer.ratio[0] = ps_turb_x/self.ps_loop  
-                layer.ratio[1] = ps_turb_y/self.ps_loop
-                layer.buff = np.zeros(2)
+            if updatedLayer.notDoneOnce:
+                updatedLayer.notDoneOnce = False
+                updatedLayer.ratio = np.zeros(2)
+                updatedLayer.ratio[0] = ps_turb_x/self.ps_loop  
+                updatedLayer.ratio[1] = ps_turb_y/self.ps_loop
+                updatedLayer.buff = np.zeros(2)
             
             if shift is None:
-                ratio = layer.ratio
+                ratio = updatedLayer.ratio
             else:
                  ratio = shift    # shift in pixels
             tmpRatio = np.abs(ratio)
@@ -387,44 +461,47 @@ class Atmosphere:
                 stepInPixel[0]=1
                 stepInPixel[1]=1
                 stepInPixel=stepInPixel*np.sign(ratio)
-                layer.phase = self.add_row(layer,stepInPixel)
+                updatedLayer.phase = self.add_row(updatedLayer,stepInPixel)
                 
             for j in range(nScreens.max()-nScreens.min()):   
                 stepInPixel[0]=1
                 stepInPixel[1]=1
                 stepInPixel=stepInPixel*np.sign(ratio)
                 stepInPixel[np.where(nScreens==nScreens.min())]=0
-                layer.phase = self.add_row(layer,stepInPixel)
+                updatedLayer.phase = self.add_row(updatedLayer,stepInPixel)
             
             
             stepInSubPixel[0] =  (np.abs(ratio[0])%1)*np.sign(ratio[0])
             stepInSubPixel[1] =  (np.abs(ratio[1])%1)*np.sign(ratio[1])
             
-            layer.buff += stepInSubPixel
-            if np.abs(layer.buff[0])>=1 or np.abs(layer.buff[1])>=1:   
-                stepInPixel[0] = 1*np.sign(layer.buff[0])
-                stepInPixel[1] = 1*np.sign(layer.buff[1])
-                stepInPixel[np.where(np.abs(layer.buff)<1)]=0    
+            updatedLayer.buff += stepInSubPixel
+            if np.abs(updatedLayer.buff[0])>=1 or np.abs(updatedLayer.buff[1])>=1:   
+                stepInPixel[0] = 1*np.sign(updatedLayer.buff[0])
+                stepInPixel[1] = 1*np.sign(updatedLayer.buff[1])
+                stepInPixel[np.where(np.abs(updatedLayer.buff)<1)]=0    
                 
-                layer.phase = self.add_row(layer,stepInPixel)
+                updatedLayer.phase = self.add_row(updatedLayer,stepInPixel)
     
-            layer.buff[0]   =  (np.abs(layer.buff[0])%1)*np.sign(layer.buff[0])
-            layer.buff[1]   =  (np.abs(layer.buff[1])%1)*np.sign(layer.buff[1])
+            updatedLayer.buff[0]   =  (np.abs(updatedLayer.buff[0])%1)*np.sign(updatedLayer.buff[0])
+            updatedLayer.buff[1]   =  (np.abs(updatedLayer.buff[1])%1)*np.sign(updatedLayer.buff[1])
                 
-            shiftMatrix     = translationImageMatrix(layer.mapShift,[layer.buff[0],layer.buff[1]]) #units are in pixel of the M1            
-            layer.phase     = globalTransformation(layer.mapShift,shiftMatrix)[1:-1,1:-1]
+            shiftMatrix     = translationImageMatrix(updatedLayer.mapShift,[updatedLayer.buff[0],updatedLayer.buff[1]]) #units are in pixel of the M1            
+            updatedLayer.phase     = globalTransformation(updatedLayer.mapShift,shiftMatrix)[1:-1,1:-1]
+        return updatedLayer
 
     def update(self,OPD=None):
         if OPD is None:
             self.user_defined_opd = False
-
             phase_support = self.initialize_phase_support()
-            for i_layer in range(self.nLayer):
-                tmpLayer=getattr(self,'layer_'+str(i_layer+1))
-                self.updateLayer(tmpLayer)
-                # tmpLayer.phase *= self.wavelength/2/np.pi
-    
-                phase_support = self.fill_phase_support(tmpLayer,phase_support,i_layer)
+            # Update each layer at a different process to speed up the computation
+            results = Parallel(n_jobs=self.nLayer, prefer="threads")(
+                delayed(self.updateLayer)(getattr(self,'layer_'+str(i_layer+1))) for i_layer in range(self.nLayer))
+            
+            results_phase_support = Parallel(n_jobs=self.nLayer, prefer="threads")(
+                delayed(self.fill_phase_support)(results[i_layer], i_layer, phase_support.shape) for i_layer in range(self.nLayer))
+
+            phase_support = np.sum(results_phase_support,axis=0)
+
             self.set_OPD(phase_support)
         else:
             self.user_defined_opd = True
@@ -444,7 +521,7 @@ class Atmosphere:
             for i in range(self.asterism.n_source):
                 phase_support.append(np.zeros([self.telescope.resolution,self.telescope.resolution]))
         return phase_support
-    def fill_phase_support(self,tmpLayer,phase_support,i_layer):
+    def fill_phase_support(self,tmpLayer, i_layer, phase_support_shape):
         if self.asterism is None:
             _im = tmpLayer.phase.copy()
 
@@ -454,8 +531,7 @@ class Atmosphere:
                 pixel_size_out  = 1
                 resolution_out  = _im.shape[0]
                 _im = np.squeeze(interpolate_image(_im, pixel_size_in, pixel_size_out, resolution_out,shift_x =tmpLayer.extra_sx, shift_y= tmpLayer.extra_sy  ))
-                    
-            phase_support+= np.reshape(_im[np.where(tmpLayer.pupil_footprint==1)],[self.telescope.resolution,self.telescope.resolution])* np.sqrt(self.fractionalR0[i_layer])
+            phase_support = np.reshape(_im[np.where(tmpLayer.pupil_footprint==1)],[self.telescope.resolution,self.telescope.resolution])* np.sqrt(self.fractionalR0[i_layer])
         else:
             for i in range(self.asterism.n_source):
                 _im = tmpLayer.phase.copy()
@@ -466,7 +542,9 @@ class Atmosphere:
                     pixel_size_out  = 1
                     resolution_out  = _im.shape[0]
                     _im = np.squeeze(interpolate_image(_im, pixel_size_in, pixel_size_out, resolution_out,shift_x =tmpLayer.extra_sx[i], shift_y= tmpLayer.extra_sy[i]  ))
-                    
+
+                phase_support = np.zeros(phase_support_shape)
+
                 if self.asterism.src[i].type == 'LGS':
                     sub_im = np.reshape(_im[np.where(tmpLayer.pupil_footprint[i]==1)],[self.telescope.resolution,self.telescope.resolution])
                     alpha_cone = np.arctan(self.telescope.D/2/self.asterism.altitude[i])
@@ -602,7 +680,7 @@ class Atmosphere:
                 tmpLayer.notDoneOnce = True
 
             setattr(self,'layer_'+str(i_layer+1),tmpLayer )
-            phase_support = self.fill_phase_support(tmpLayer,phase_support,i_layer)
+            phase_support = self.fill_phase_support(tmpLayer,i_layer, phase_support.shape)
         self.set_OPD(phase_support)
         if self.telescope.isPaired:
             self*self.telescope
@@ -694,7 +772,7 @@ class Atmosphere:
                 phase_support = self.initialize_phase_support()
                 for i_layer in range(self.nLayer):
                     tmpLayer = getattr(self,'layer_'+str(i_layer+1))
-                    phase_support = self.fill_phase_support(tmpLayer, phase_support, i_layer)
+                    phase_support = self.fill_phase_support(tmpLayer, i_layer, phase_support.shape)
                 self.set_OPD(phase_support)
                 
             if obj.src.tag == 'source':
