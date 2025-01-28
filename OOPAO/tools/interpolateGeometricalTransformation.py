@@ -7,6 +7,7 @@ Created on Fri Jul 31 14:35:31 2020
 
 import numpy as np
 import skimage.transform as sk
+import cv2
 from joblib import Parallel, delayed
 
 from .tools import bin_ndarray
@@ -148,7 +149,6 @@ Created on Tue Mar 16 10:04:46 2021
 @author: cheritie
 """
 
-
 def interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out, shape_out = None, mis_registration = None, order = 1, joblib_prefer = 'threads', joblib_nJobs = 4):
     if mis_registration is None:
         mis_registration = MisRegistration()
@@ -203,11 +203,9 @@ def interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out, sha
     
     cube_out =  np.asarray(joblib_reconstruction())
     # print('...Done!')    
-
     return cube_out
-
+import time
 def interpolate_image(image_in, pixel_size_in, pixel_size_out,resolution_out, rotation_angle = 0, shift_x = 0,shift_y = 0,anamorphosisAngle=0,tangentialScaling=0,radialScaling=0, shape_out = None, order = 1):
-
         nx, ny = image_in.shape  
                  
         # size of the influence functions maps
@@ -242,9 +240,9 @@ def interpolate_image(image_in, pixel_size_in, pixel_size_out,resolution_out, ro
             
         # 3) Global transformation matrix
         transformationMatrix    = downScaling + anamMatrix + rotMatrix + shiftMatrix + alignmentMatrix
-        
+
         def globalTransformation(image):
-                output  = sk.warp(image,(transformationMatrix).inverse,output_shape = [resolution_out,resolution_out],order=order)
+                output = cv2.warpAffine(image, transformationMatrix.params[0:2,:], (resolution_out,resolution_out), flags=cv2.INTER_LINEAR)
                 return output
         
         # definition of the function that is run in parallel for each 
@@ -254,12 +252,7 @@ def interpolate_image(image_in, pixel_size_in, pixel_size_out,resolution_out, ro
                 
         image_out =  reconstruction(image_in)
         # print('...Done!')    
-    
-        return image_out
-    
-    
-    
-    
+        return image_out    
     
 def binning_optimized(cube_in,binning_factor):
     n_im, nx,ny = np.shape(cube_in)
