@@ -465,13 +465,10 @@ class DeformableMirror:
 
 
 
-        
+    import time
     def dm_propagation(self,telescope,OPD_in = None, i_source = None):
-        if self.coefs.all() == self.current_coefs.all():
-           self.coefs = self.coefs  
         if OPD_in is None:
             OPD_in = telescope.OPD_no_pupil
-        
         if i_source is not None:
             dm_OPD = self.get_OPD_altitude(i_source)
         else:
@@ -485,8 +482,7 @@ class DeformableMirror:
                 OPD_out_no_pupil    = OPD_in + dm_OPD
             # case with multiple OPD
             else:
-                OPD_out_no_pupil    = np.tile(OPD_in[...,None],(1,1,self.OPD.shape[2]))+dm_OPD
-                    
+                OPD_out_no_pupil    = np.tile(OPD_in[...,None],(1,1,self.OPD.shape[2]))+dm_OPD     
         # case where the telescope is separated from a telescope object
         else:
                 OPD_out_no_pupil    = dm_OPD

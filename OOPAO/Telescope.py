@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import copy
 import torch
+import time
 try:
     import cupy as cp
     from cupyx.scipy import signal as csg
@@ -567,13 +568,13 @@ class Telescope:
                 for i_obj in range(len(obj)):
                     self*obj[i_obj]
         else:    
-              # interaction with WFS object: Propagation of the phase screen
+            # interaction with WFS object: Propagation of the phase screen
             if obj.tag=='pyramid' or obj.tag == 'double_wfs' or obj.tag=='shackHartmann' or obj.tag == 'bioEdge' or obj.tag=='correlatingShackHartmann':
+                t0 = time.time()
                 self.optical_path.append([obj.tag,id(obj)])
                 if self.display_optical_path is True:
                     self.print_optical_path()
                 self.optical_path = self.optical_path[:-1]
-                
                 if self.src.tag == 'asterism':
                     input_source        = copy.deepcopy(self.src.src)
                     output_raw_data     = np.zeros([obj.raw_data.shape[0],obj.raw_data.shape[0]])
@@ -617,10 +618,12 @@ class Telescope:
                     else:
                         obj.wfs_measure()   
                 else:
-                    obj.telescope=self              
-                    obj.wfs_measure()               
-
+                    obj.telescope=self       
+                    obj.wfs_measure()
+                print('WFS: ', time.time()-t0)            
+            
             if obj.tag=='detector':
+                t0 = time.time()
                 if self.optical_path[-1] != obj.tag: 
                     self.optical_path.append([obj.tag,id(obj)])
 
@@ -637,20 +640,20 @@ class Telescope:
                     obj.integrate(self.PSF)
                 
                 self.PSF = obj.frame
-         
+                print('Detector: ', time.time()-t0)
+
             if obj.tag=='OPD_map':
                 self.optical_path.append([obj.tag,id(obj)])
 
                 self.OPD += obj.OPD
-                self.OPD_no_pupil += obj.OPD
-                
+                self.OPD_no_pupil += obj.OPD  
+            
             if obj.tag=='NCPA':
                 self.optical_path.append([obj.tag,id(obj)])
 
                 self.OPD += obj.OPD
                 self.OPD_no_pupil += obj.OPD
-
-                    
+            
             if obj.tag=='spatialFilter':
                 self.optical_path.append([obj.tag,id(obj)])
 
@@ -667,13 +670,15 @@ class Telescope:
                 
                 self.amplitude_filtered  = np.abs(self.em_field_filtered)
                 return self
-            
-            if obj.tag=='deformableMirror':  
+
+           
+            if obj.tag=='deformableMirror':
+                t0 = time.time()
                 if  self.optical_path[-1][1]!=id(obj):
                     self.optical_path.append([obj.tag,id(obj)])
 
                 pupil = np.atleast_3d(self.pupil)
-                
+
                 if self.src.tag == 'source':
                     self.OPD_no_pupil = obj.dm_propagation(self)
                     if np.ndim(self.OPD_no_pupil) == 2:
@@ -720,6 +725,7 @@ class Telescope:
                             raise TypeError('The lenght of the OPD list (' + str(len(self._OPD_no_pupil))+') does not match the number of subDirs ('+str(self.src.sun_subDir_ast.n_source)+')')
                     else:
                         raise TypeError('The wrong object was attached to the telescope')                                    
+                print('DM: ', time.time()-t0)
         return self
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% TELESCOPE METHODS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
     def resetOPD(self):
