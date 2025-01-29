@@ -425,8 +425,7 @@ class Atmosphere:
                     pupil_footprint = np.zeros([layer.resolution,layer.resolution])
                     pupil_footprint[center_x-self.telescope.resolution//2:center_x+self.telescope.resolution//2,center_y-self.telescope.resolution//2:center_y+self.telescope.resolution//2 ] = 1
                     layer.pupil_footprint.append(pupil_footprint)     
-    def updateLayer(self,layer,shift = None):
-        updatedLayer = layer
+    def updateLayer(self,updatedLayer,shift = None):
 
         if self.compute_covariance is False:
             raise AttributeError('The computation of the covariance matrices was set to False in the atmosphere initialisation. Set it to True to provide moving layers.')
