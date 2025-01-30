@@ -8,6 +8,7 @@ Created on Fri Aug 14 10:59:02 2020
 import inspect
 import json
 import time
+import logging
 
 import jsonpickle
 import matplotlib.pyplot as plt
@@ -104,7 +105,7 @@ class Atmosphere:
                  windDirection:list,
                  altitude:list,
                  mode:float=2,
-                 param = None,
+                 data_folder = None,
                  asterism = None):
         """ ATMOSPHERE.
         An Atmosphere is made of one or several layer of turbulence that follow the Van Karmann statistics. 
@@ -137,7 +138,7 @@ class Atmosphere:
             1 : using aotools dependency
             2 : using OOPAO dependancy
             The default is 2.
-        param : Parameter File Object, optional
+        data_folder : Parameter File Object, optional
             Parameter file of the system. Once computed, the covariance matrices are saved in the calibration data folder and loaded instead of re-computed evry time.
             The default is None.
         asterism : Asterism, optional
@@ -195,67 +196,44 @@ class Atmosphere:
         self.hasNotBeenInitialized  = True
         self.r0_def                 = 0.15              # Fried Parameter in m 
         self.r0                     = r0                # Fried Parameter in m 
-        self.fractionalR0           = fractionalR0      # Cn2 square profile
+        self.fractionalR0           = fractionalR0      # CFractional Cn2 profile of the turbulence
         self.L0                     = L0                # Outer Scale in m
         self.altitude               = altitude          # altitude of the layers
-        self.nLayer                 = len(fractionalR0)     # number of layer
+        self.nLayer                 = len(fractionalR0) # number of layer
         self.windSpeed              = windSpeed         # wind speed of the layers in m/s
         self.windDirection          = windDirection     # wind direction in degrees
         self.tag                    = 'atmosphere'      # Tag of the object
         self.nExtra                 = 2                 # number of extra pixel to generate the phase screens
         self.wavelength             = 500*1e-9          # Wavelengt used to define the properties of the atmosphere
-        self.telescope              = telescope         # associated telescope object
-        self.user_defined_opd       = False             # default value to update phase screens at each iteration 
-        if self.telescope.src is None:
-            raise AttributeError('The telescope was not coupled to any source object! Make sure to couple it with an src object using src*tel')
-        self.mode                   = mode              # DEBUG -> first phase screen generation mode
+        self.cn2 = (self.r0**(-5. / 3) / (0.423 * (2*np.pi/self.wavelength)**2))/np.max([1, np.max(self.altitude)])      # Cn2 m^(-2/3)
         self.seeingArcsec           = 206265*(self.wavelength/self.r0)
-        self.asterism               = asterism          # case when multiple sources are considered (LGS and NGS)
-        self.param                  = param
+        self.data_folder            = data_folder
         
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ATM INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-    def initializeAtmosphere(self,telescope,compute_covariance =True):
+    def initializeAtmosphere(self,telescope,compute_covariance =True, randomState=None):
         self.compute_covariance = compute_covariance
-        phase_support = self.initialize_phase_support()
+
+        logging.info('Atmosphere::initializeAtmosphere - Taking key parameters from the telescope.')
+        self.resolution = telescope.resolution
+        self.D = telescope.D
+        self.samplingTime = telescope.samplingTime
+
         self.fov      = telescope.fov
         self.fov_rad  = telescope.fov_rad
+
         if self.hasNotBeenInitialized:
             self.initial_r0 = self.r0
-            for i_layer in range(self.nLayer):       
-                # create the layer
-                print('Creation of layer' + str(i_layer+1) + '/' + str(self.nLayer) + ' ...' )
-                tmpLayer=self.buildLayer(telescope,self.r0_def,self.L0,i_layer = i_layer,compute_covariance=self.compute_covariance)
-                setattr(self,'layer_'+str(i_layer+1),tmpLayer)
-                
-                phase_support = self.fill_phase_support(tmpLayer, i_layer, phase_support.shape)
-                tmpLayer.phase_support = phase_support
-                tmpLayer.phase *= self.wavelength/2/np.pi
-
+            logging.info('Atmosphere::initializeAtmosphere - Creating layers...')
+            results_layers = Parallel(n_jobs=self.nLayer, prefer="threads")(delayed(self.buildLayer)(i_layer, randomState) for i_layer in range(self.nLayer))
+            for i_layer in range(self.nLayer):
+                setattr(self,'layer_'+str(i_layer+1),results_layers[i_layer])
         else:
-            print('Re-setting the atmosphere to its initial state...' )
-            self.r0 = self.initial_r0
-            for i_layer in range(self.nLayer):       
-                print('Updating layer' + str(i_layer+1) + '/' + str(self.nLayer) + ' ...' )
-                tmpLayer = getattr(self,'layer_'+str(i_layer+1))
-                tmpLayer.phase          = tmpLayer.initialPhase/self.wavelength*2*np.pi
-                tmpLayer.randomState    = RandomState(42+i_layer*1000)
-               
-                Z = tmpLayer.phase[tmpLayer.innerMask[1:-1,1:-1]!=0]
-                X = np.matmul(tmpLayer.A,Z) + np.matmul(tmpLayer.B,tmpLayer.randomState.normal( size=tmpLayer.B.shape[1]))
-                
-                tmpLayer.mapShift[tmpLayer.outerMask!=0] = X
-                tmpLayer.mapShift[tmpLayer.outerMask==0] = np.reshape(tmpLayer.phase,tmpLayer.resolution*tmpLayer.resolution)
-                
-                tmpLayer.notDoneOnce = True                
-
-                setattr(self,'layer_'+str(i_layer+1),tmpLayer) 
-                
-                phase_support = self.fill_phase_support(tmpLayer, i_layer, phase_support.shape)
-
-                # wavelenfth scaling
-                tmpLayer.phase *= self.wavelength/2/np.pi
-        self.generateNewPhaseScreen(seed=0)             
-        self.hasNotBeenInitialized  = False        
+            logging.warning('Atmosphere::initializeAtmosphere - The atmosphere has already been initialized.')
+            return True
+            
+        self.generateNewPhaseScreen(seed=None)             
+        self.hasNotBeenInitialized  = False 
+        # REMOVE       
         if self.compute_covariance:
             # move of one time step to create the atm variables 
             self.update()   
@@ -263,16 +241,22 @@ class Atmosphere:
         self.set_OPD(phase_support)
         self.print_properties()
             
-    def buildLayer(self,telescope,r0,L0,i_layer,compute_covariance = True):
+    def buildLayer(self,i_layer, randomState = None):
         """
             Generation of phase screens using the method introduced in Assemat et al (2006)
         """
-
+        logging.debug('Atmosphere::buildLayer - layer '+str(i_layer+1))
     
         # initialize layer object
         layer               = LayerClass()
         # create a random state to allow reproductible sequences of phase screens
-        layer.randomState   = RandomState(42+i_layer*1000)
+        if randomState is not None:
+            seed = randomState
+            layer.randomState   = RandomState(randomState+i_layer*1000)
+        else:
+            t = time.localtime()
+            seed = t.tm_hour*3600 + t.tm_min*60 + t.tm_sec
+            layer.randomState   = RandomState(seed+i_layer*1000)
         
         # gather properties of the atmosphere
         layer.altitude      = self.altitude[i_layer]       
@@ -287,53 +271,24 @@ class Atmosphere:
         
         # Diameter and resolution of the layer including the Field Of View and the number of extra pixels
         
-        layer.D_fov             = self.telescope.D+2*np.tan(self.fov_rad/2)*layer.altitude
-        layer.resolution_fov    = int(np.ceil((self.telescope.resolution/self.telescope.D)*layer.D_fov))
+        layer.D_fov             = self.D+2*np.tan(self.fov_rad/2)*layer.altitude
+        layer.resolution_fov    = int(np.ceil((self.resolution/self.D)*layer.D_fov))
         layer.resolution        = layer.resolution_fov + 4 #4 pixels are added as a margin for the edges
-        layer.D                 = layer.resolution *self.telescope.D/ self.telescope.resolution
-
-
-        
-        layer.center = layer.resolution//2
-        
-        if self.asterism is None:
-            [x_z,y_z] = pol2cart(layer.altitude*np.tan((self.telescope.src.coordinates[0])/206265) * layer.resolution / layer.D, np.deg2rad(self.telescope.src.coordinates[1]))
-
-            center_x = int(y_z)+layer.resolution//2
-            center_y = int(x_z)+layer.resolution//2
-        
-            layer.pupil_footprint = np.zeros([layer.resolution,layer.resolution])
-            layer.pupil_footprint[center_x-self.telescope.resolution//2:center_x+self.telescope.resolution//2,center_y-self.telescope.resolution//2:center_y+self.telescope.resolution//2 ] = 1
-        else:
-            layer.pupil_footprint= []
-            layer.extra_sx      = []
-            layer.extra_sy      = []
-            for i in range(self.asterism.n_source):
-                 [x_z,y_z] = pol2cart(layer.altitude*np.tan((self.asterism.coordinates[i][0])/206265) * layer.resolution / layer.D,np.deg2rad(self.asterism.coordinates[i][1]))
-                 layer.extra_sx.append(int(x_z)-x_z)
-                 layer.extra_sy.append( int(y_z)-y_z)
-                 center_x = int(y_z)+layer.resolution//2
-                 center_y = int(x_z)+layer.resolution//2
-            
-                 pupil_footprint = np.zeros([layer.resolution,layer.resolution])
-                 pupil_footprint[center_x-self.telescope.resolution//2:center_x+self.telescope.resolution//2,center_y-self.telescope.resolution//2:center_y+self.telescope.resolution//2 ] = 1
-                 layer.pupil_footprint.append(pupil_footprint)   
-        # layer pixel size
-        layer.d0            = layer.D/layer.resolution
+        layer.D                 = layer.resolution * self.D/ self.resolution
         
         # number of pixel for the phase screens computation
         layer.nExtra        = self.nExtra
         layer.nPixel        = int(1+np.round(layer.D/layer.d0))
-        print('-> Computing the initial phase screen...')  
+        logging.info('Atmosphere::buildLayer - Creating layer '+str(i_layer+1))    
         a=time.time()
-        if self.mode == 2:
-            layer.phase        = ft_sh_phase_screen(self,layer.resolution,layer.D/layer.resolution,seed=i_layer)
+        if self.mode == 1:  # with subharmonics
+            layer.phase        = ft_sh_phase_screen(self, layer.resolution, layer.D/layer.resolution, seed=seed)
         else: 
-                layer.phase         = ft_phase_screen(self,layer.resolution,layer.D/layer.resolution,seed=i_layer)                    
+            layer.phase        = ft_phase_screen(self, layer.resolution, layer.D/layer.resolution, seed=seed)                    
         layer.initialPhase = layer.phase.copy()
         layer.seed = i_layer
         b=time.time()
-        print('initial phase screen : ' +str(b-a) +' s')
+        logging.info('Atmosphere::buildLayer - elapsed time to generate the phase screen : ' +str(b-a) +' s')
         
         # Outer ring of pixel for the phase screens update 
         layer.outerMask             = np.ones([layer.resolution+layer.nExtra,layer.resolution+layer.nExtra])
@@ -369,11 +324,9 @@ class Atmosphere:
             layer.mapShift[layer.outerMask==0] = np.reshape(layer.phase,layer.resolution*layer.resolution)
             layer.notDoneOnce                  = True
 
-        print('Done!')
-        
+        logging.info('Atmosphere::buildLayer - Layer '+str(i_layer+1)+' created.')      
     
         return layer
-    
     
     def add_row(self,layer,stepInPixel,map_full = None):
         if map_full is None:
@@ -595,13 +548,13 @@ class Atmosphere:
             c=time.time()        
             self.ZZt = makeCovarianceMatrix(layer.innerZ,layer.innerZ,self)
             
-            if self.param is None:
+            if self.data_folder is None:
                 self.ZZt_inv = np.linalg.pinv(self.ZZt)
             else:
                 try:
                     print('Loading pre-computed data...')            
                     name_data       = 'ZZt_inv_spider_L0_'+str(self.L0)+'_m_r0_'+str(self.r0_def)+'_shape_'+str(self.ZZt.shape[0])+'x'+str(self.ZZt.shape[1])+'.json'
-                    location_data   = self.param['pathInput'] + self.param['name'] + '/sk_v/'
+                    location_data   = self.data_folder['pathInput'] + self.data_folder['name'] + '/sk_v/'
                     try:
                         with open(location_data+name_data ) as f:
                             C = json.load(f)
@@ -616,7 +569,7 @@ class Atmosphere:
                 except: 
                     print('Something went wrong.. re-computing ZZt_inv ...')
                     name_data       = 'ZZt_inv_spider_L0_'+str(self.L0)+'_m_r0_'+str(self.r0_def)+'_shape_'+str(self.ZZt.shape[0])+'x'+str(self.ZZt.shape[1])+'.json'
-                    location_data   = self.param['pathInput'] + self.param['name'] + '/sk_v/'
+                    location_data   = self.data_folder['pathInput'] + self.data_folder['name'] + '/sk_v/'
                     createFolder(location_data)
                     
                     self.ZZt_inv = np.linalg.pinv(self.ZZt)
@@ -644,39 +597,6 @@ class Atmosphere:
             self.ZZt_inv_r0 = self.ZZt_inv/((self.r0_def/self.r0)**(5/3))
         return self.ZZt, self.ZXt, self.XXt, self.ZZt_inv
         
-    def generateNewPhaseScreen(self,seed = None):
-        if seed is None:
-            t = time.localtime()
-            seed = t.tm_hour*3600 + t.tm_min*60 + t.tm_sec
-        phase_support = self.initialize_phase_support()
-        for i_layer in range(self.nLayer):
-            tmpLayer=getattr(self,'layer_'+str(i_layer+1))
-            
-            if self.mode ==1:
-                raise DeprecationWarning("The dependency to the aotools package has been depreciated.")
-            else:
-                if self.mode == 2:
-                    # with subharmonics
-                    phase = ft_sh_phase_screen(self,tmpLayer.resolution,tmpLayer.D/tmpLayer.resolution,seed=seed+i_layer)
-                else: 
-                    phase         = ft_phase_screen(self,tmpLayer.resolution,tmpLayer.D/tmpLayer.resolution,seed=seed+i_layer)
-            
-            tmpLayer.phase = phase
-            tmpLayer.randomState    = RandomState(seed+i_layer*1000)
-            if self.compute_covariance:
-                Z = tmpLayer.phase[tmpLayer.innerMask[1:-1,1:-1]!=0]
-                X = np.matmul(tmpLayer.A,Z) + np.matmul(tmpLayer.B,tmpLayer.randomState.normal( size=tmpLayer.B.shape[1]))
-            
-                tmpLayer.mapShift[tmpLayer.outerMask!=0] = X
-                tmpLayer.mapShift[tmpLayer.outerMask==0] = np.reshape(tmpLayer.phase,tmpLayer.resolution*tmpLayer.resolution)
-                tmpLayer.notDoneOnce = True
-
-            setattr(self,'layer_'+str(i_layer+1),tmpLayer )
-            phase_support = self.fill_phase_support(tmpLayer,i_layer, phase_support.shape)
-        self.set_OPD(phase_support)
-        if self.telescope.isPaired:
-            self*self.telescope
-
 
     def print_atm_at_wavelength(self,wavelength):
 
@@ -766,16 +686,6 @@ class Atmosphere:
                     delayed(self.fill_phase_support)(getattr(self,'layer_'+str(i_layer+1)), i_layer, phase_support.shape) for i_layer in range(self.nLayer))
                 phase_support = np.sum(results_phase_support,axis=0)
                 self.set_OPD(phase_support)
-                
-            if obj.src.tag == 'source':
-                obj.optical_path =[[obj.src.type + '('+obj.src.optBand+')',id(obj.src)]]
-            else:
-                obj.optical_path =[[obj.src.type,id(obj.src)]]
-            obj.optical_path.append([self.tag,id(self)])
-            obj.optical_path.append([obj.tag,id(obj)])
-            obj.OPD = self.OPD.copy()
-            obj.OPD_no_pupil = self.OPD_no_pupil.copy()
-            obj.isPaired     = True
             return obj
         else:
             raise AttributeError('The atmosphere can be multiplied only with a Telescope or a Source object!')
