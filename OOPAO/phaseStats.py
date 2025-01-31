@@ -84,90 +84,12 @@ def makeCovarianceMatrix(rho1,rho2,atm):
     u = 2*np.pi*rho[index]/atm.L0
 
     
-    if atm.param is None:
-        sp_kv = sp.special.kv(5./6,u)
-
-    else:
-        try:
-            print('Loading pre-computed data...')            
-            name_data       = 'sp_kv_L0_'+str(atm.param['L0'])+'_m_shape_'+str(len(rho1))+'x'+str(len(rho2))+'.json'
-
-            location_data   = atm.param['pathInput'] + atm.param['name'] + '/sk_v/'
-
-            try:
-                with open(location_data+name_data ) as f:
-                    C = json.load(f)
-                data_loaded = jsonpickle.decode(C)               
-            except:
-                createFolder(location_data)
-                with open(location_data+name_data ) as f:
-                    C = json.load(f)
-                data_loaded = jsonpickle.decode(C)  
-                
-            sp_kv = data_loaded['sp_kv']
-           
-                        
-        except: 
-            print('Something went wrong.. re-computing sp_kv ...')
-            name_data       = 'sp_kv_L0_'+str(atm.param['L0'])+'_m_shape_'+str(len(rho1))+'x'+str(len(rho2))+'.json'
-            location_data   = atm.param['pathInput'] + atm.param['name'] + '/sk_v/'
-            
-            sp_kv = sp.special.kv(5./6,u)
-            
-            print('saving for future...')
-            data = dict()
-            data['sp_kv'] = sp_kv
-            data_encoded  = jsonpickle.encode(data)
-
-            try: 
-                with open(location_data+name_data, 'w') as f:
-                    json.dump(data_encoded, f)
-            except:
-                createFolder(location_data)
-                with open(location_data+name_data, 'w') as f:
-                    json.dump(data_encoded, f)
-                
-            
+    sp_kv = sp.special.kv(5./6,u)
     
     out[index] = cst*u**(5./6)*sp_kv
 
 
     return out
-
-#def fourierPhaseScreen(atm,D,resolution):
-#    
-#    N = int(8* resolution)
-#    
-#    L = (N-1)*D/(resolution-1)
-#    
-#    
-#    fx = np.fft.fftshift(np.fft.fftfreq(N))
-#    fy = np.fft.fftshift(np.fft.fftfreq(N))
-#    
-#    fx,fy = np.meshgrid(fx,fy)
-#    f_r,f_phi = cart2pol(fx,fx)
-#    
-#    f_r = np.fft.fftshift(f_r*(N-1)/L/2)
-#    f_r+=f_r.T
-#    
-#    psdRoot = np.sqrt(spectrum(f_r,atm))   
-#    index = np.where(f_r==0)
-#    psdRoot[index]=0
-#    
-#    # low order correc
-#    
-#    fourierSampling = 1./L
-#    
-#    u = np.arange(resolution+1)
-#    WNF = np.fft.fft2(np.random.randn(N,N))/N
-#    
-#    outMap = psdRoot*WNF   
-#    outMap = np.real(np.fft.ifft2(outMap))*fourierSampling*N**2
-#    
-#    out = outMap[u[0]:u[-1],u[0]:u[-1]]
-#
-#    
-#    return out
 
 def ift2(G, delta_f):
     """
