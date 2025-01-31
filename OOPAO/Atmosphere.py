@@ -9,6 +9,8 @@ import inspect
 import json
 import time
 import logging
+import logging.handlers
+from queue import Queue
 
 import jsonpickle
 import matplotlib.pyplot as plt
@@ -27,6 +29,7 @@ from .tools.tools import createFolder, globalTransformation, pol2cart, translati
 class LayerClass:
     def __init__(self):
         # Scalar variables 
+        self.id = 0
         self.D = 0
         self.D_fov = 0
         self.altitude = 0
@@ -104,8 +107,8 @@ class Atmosphere:
                  fractionalR0:list,
                  windDirection:list,
                  altitude:list,
-                 mode:float=2,
-                 data_folder = None,
+                 mode:float=1,
+                 param = None,
                  asterism = None):
         """ ATMOSPHERE.
         An Atmosphere is made of one or several layer of turbulence that follow the Van Karmann statistics. 
@@ -135,10 +138,10 @@ class Atmosphere:
             List of altitude for each layer in [m].
         mode : float, optional
             Method to compute the atmospheric spectrum from which are computed the atmospheric phase screens. 
-            1 : using aotools dependency
-            2 : using OOPAO dependancy
-            The default is 2.
-        data_folder : Parameter File Object, optional
+            1 : using OOPAO depencancy with subharmonics
+            otherwisw : using OOPAO dependancy without subharmonics
+            The default is 1.
+        param : Parameter File Object, optional
             Parameter file of the system. Once computed, the covariance matrices are saved in the calibration data folder and loaded instead of re-computed evry time.
             The default is None.
         asterism : Asterism, optional
@@ -187,12 +190,13 @@ class Atmosphere:
 
         _ atm.update()                              : update the OPD of the atmosphere for each layer according to the time step defined by tel.samplingTime  
         _ atm.update(OPD)                           : update the OPD of the atmosphere using a user defined OPD                   
-        _ atm.generateNewPhaseScreen(seed)          : generate a new phase screen for the atmosphere OPD
         _ atm.print_atm_at_wavelength(wavelength)   : prompt seeing and r0 at specified wavelength
         _ atm.print_atm()                           : prompt the main properties of the atm object
         _ display_atm_layers(layer_index)           : imshow the OPD of each layer with the intersection beam for each source
         
-        """        
+        """
+        self.queue_listerner = self.setup_logging()
+        self.logger = logging.getLogger()
         self.hasNotBeenInitialized  = True
         self.r0_def                 = 0.15              # Fried Parameter in m 
         self.r0                     = r0                # Fried Parameter in m 
@@ -207,13 +211,14 @@ class Atmosphere:
         self.wavelength             = 500*1e-9          # Wavelengt used to define the properties of the atmosphere
         self.cn2 = (self.r0**(-5. / 3) / (0.423 * (2*np.pi/self.wavelength)**2))/np.max([1, np.max(self.altitude)])      # Cn2 m^(-2/3)
         self.seeingArcsec           = 206265*(self.wavelength/self.r0)
-        self.data_folder            = data_folder
+        self.param            = param
+        self.mode = mode
         
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ATM INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
     def initializeAtmosphere(self,telescope,compute_covariance =True, randomState=None):
         self.compute_covariance = compute_covariance
 
-        logging.info('Atmosphere::initializeAtmosphere - Taking key parameters from the telescope.')
+        self.logger.info('Atmosphere::initializeAtmosphere - Taking key parameters from the telescope.')
         self.resolution = telescope.resolution
         self.D = telescope.D
         self.samplingTime = telescope.samplingTime
@@ -223,32 +228,27 @@ class Atmosphere:
 
         if self.hasNotBeenInitialized:
             self.initial_r0 = self.r0
-            logging.info('Atmosphere::initializeAtmosphere - Creating layers...')
+            self.logger.info('Atmosphere::initializeAtmosphere - Creating layers...')
             results_layers = Parallel(n_jobs=self.nLayer, prefer="threads")(delayed(self.buildLayer)(i_layer, randomState) for i_layer in range(self.nLayer))
             for i_layer in range(self.nLayer):
                 setattr(self,'layer_'+str(i_layer+1),results_layers[i_layer])
         else:
-            logging.warning('Atmosphere::initializeAtmosphere - The atmosphere has already been initialized.')
+            self.logger.warning('Atmosphere::initializeAtmosphere - The atmosphere has already been initialized.')
             return True
-            
-        self.generateNewPhaseScreen(seed=None)             
+        
         self.hasNotBeenInitialized  = False 
-        # REMOVE       
-        if self.compute_covariance:
-            # move of one time step to create the atm variables 
-            self.update()   
-        # save the resulting phase screen in OPD  
-        self.set_OPD(phase_support)
         self.print_properties()
+        return True
             
     def buildLayer(self,i_layer, randomState = None):
         """
             Generation of phase screens using the method introduced in Assemat et al (2006)
         """
-        logging.debug('Atmosphere::buildLayer - layer '+str(i_layer+1))
+        self.logger.debug('Atmosphere::buildLayer - layer '+str(i_layer+1))
     
         # initialize layer object
         layer               = LayerClass()
+        layer.id            = i_layer
         # create a random state to allow reproductible sequences of phase screens
         if randomState is not None:
             seed = randomState
@@ -275,11 +275,12 @@ class Atmosphere:
         layer.resolution_fov    = int(np.ceil((self.resolution/self.D)*layer.D_fov))
         layer.resolution        = layer.resolution_fov + 4 #4 pixels are added as a margin for the edges
         layer.D                 = layer.resolution * self.D/ self.resolution
-        
+        # layer pixel size
+        layer.d0 = layer.D/layer.resolution        
         # number of pixel for the phase screens computation
         layer.nExtra        = self.nExtra
         layer.nPixel        = int(1+np.round(layer.D/layer.d0))
-        logging.info('Atmosphere::buildLayer - Creating layer '+str(i_layer+1))    
+        self.logger.info('Atmosphere::buildLayer - Creating layer '+str(i_layer+1))    
         a=time.time()
         if self.mode == 1:  # with subharmonics
             layer.phase        = ft_sh_phase_screen(self, layer.resolution, layer.D/layer.resolution, seed=seed)
@@ -288,7 +289,7 @@ class Atmosphere:
         layer.initialPhase = layer.phase.copy()
         layer.seed = i_layer
         b=time.time()
-        logging.info('Atmosphere::buildLayer - elapsed time to generate the phase screen : ' +str(b-a) +' s')
+        self.logger.info('Atmosphere::buildLayer - elapsed time to generate the phase screen : ' +str(b-a) +' s')
         
         # Outer ring of pixel for the phase screens update 
         layer.outerMask             = np.ones([layer.resolution+layer.nExtra,layer.resolution+layer.nExtra])
@@ -306,15 +307,10 @@ class Atmosphere:
         layer.outerZ = u[layer.outerMask!=0] + 1j*v[layer.outerMask!=0]
         if self.compute_covariance:
 
-            layer.ZZt, layer.ZXt, layer.XXt, layer.ZZt_inv =  self.get_covariance_matrices(layer)                            
-
-            layer.ZZt_r0 = self.ZZt_r0.copy()     
-            layer.ZXt_r0 = self.ZXt_r0.copy()     
-            layer.XXt_r0 = self.XXt_r0.copy()     
-            layer.ZZt_inv_r0 =  self.ZZt_inv_r0.copy()                           
+            self.get_covariance_matrices(layer) # Computes: XXt_r0, ZXt_r0, ZZt_r0, ZZt_inv, ZZt_inv_r0 an their non r0 counter-part                                           
             
             layer.A         = np.matmul(layer.ZXt_r0.T,layer.ZZt_inv_r0)    
-            layer.BBt             = layer.XXt_r0 -  np.matmul(layer.A,layer.ZXt_r0)
+            layer.BBt       = layer.XXt_r0 -  np.matmul(layer.A,layer.ZXt_r0)
             layer.B         = np.linalg.cholesky(layer.BBt)
             layer.mapShift  = np.zeros([layer.nPixel+1,layer.nPixel+1])        
             Z               = layer.phase[layer.innerMask[1:-1,1:-1]!=0]
@@ -324,7 +320,7 @@ class Atmosphere:
             layer.mapShift[layer.outerMask==0] = np.reshape(layer.phase,layer.resolution*layer.resolution)
             layer.notDoneOnce                  = True
 
-        logging.info('Atmosphere::buildLayer - Layer '+str(i_layer+1)+' created.')      
+        self.logger.info('Atmosphere::buildLayer - Layer '+str(i_layer+1)+' created.')      
     
         return layer
     
@@ -527,34 +523,22 @@ class Atmosphere:
         compute_covariance_matrices = True
 
         if self.fov_rad == 0: 
-            try:
-                c=time.time()        
-                self.ZZt_r0 = self.ZZt_r0
-                d=time.time()
-                print('ZZt.. : ' +str(d-c) +' s')
-                self.ZXt_r0 = self.ZXt_r0
-                e=time.time()
-                print('ZXt.. : ' +str(e-d) +' s')
-                self.XXt_r0 = self.XXt_r0
-                f=time.time()
-                print('XXt.. : ' +str(f-e) +' s')
-                self.ZZt_inv_r0 = self.ZZt_inv_r0
-    
-                print('SCAO system considered: covariance matrices were already computed!')
+            if (layer.ZZt_r0 is not None) and (layer.ZXt_r0 is not None) and (layer.XXt_r0 is not None) and (layer.ZZt_inv_r0 is not None):
+                self.logger.info('Atmosphere::get_covariance_matrices - SCAO system considered: covariance matrices were already computed!')
                 compute_covariance_matrices = False
-            except:                        
+            else:                        
                 compute_covariance_matrices = True
         if compute_covariance_matrices:
             c=time.time()        
-            self.ZZt = makeCovarianceMatrix(layer.innerZ,layer.innerZ,self)
+            layer.ZZt = makeCovarianceMatrix(layer.innerZ,layer.innerZ,self)
             
-            if self.data_folder is None:
-                self.ZZt_inv = np.linalg.pinv(self.ZZt)
+            if self.param is None:
+                layer.ZZt_inv = np.linalg.pinv(layer.ZZt)
             else:
                 try:
-                    print('Loading pre-computed data...')            
-                    name_data       = 'ZZt_inv_spider_L0_'+str(self.L0)+'_m_r0_'+str(self.r0_def)+'_shape_'+str(self.ZZt.shape[0])+'x'+str(self.ZZt.shape[1])+'.json'
-                    location_data   = self.data_folder['pathInput'] + self.data_folder['name'] + '/sk_v/'
+                    self.logger.info('Atmosphere::get_covariance_matrices - Loading pre-computed data...')            
+                    name_data       = 'ZZt_inv_spider_L0_'+str(self.L0)+'_m_r0_'+str(self.r0_def)+'_shape_'+str(layer.ZZt.shape[0])+'x'+str(layer.ZZt.shape[1])+'.json'
+                    location_data   = self.param['pathInput'] + self.param['name'] + '/sk_v/'
                     try:
                         with open(location_data+name_data ) as f:
                             C = json.load(f)
@@ -564,38 +548,37 @@ class Atmosphere:
                         with open(location_data+name_data ) as f:
                             C = json.load(f)
                         data_loaded = jsonpickle.decode(C)                    
-                    self.ZZt_inv = data_loaded['ZZt_inv']
+                    layer.ZZt_inv = data_loaded['ZZt_inv']
                     
                 except: 
-                    print('Something went wrong.. re-computing ZZt_inv ...')
-                    name_data       = 'ZZt_inv_spider_L0_'+str(self.L0)+'_m_r0_'+str(self.r0_def)+'_shape_'+str(self.ZZt.shape[0])+'x'+str(self.ZZt.shape[1])+'.json'
-                    location_data   = self.data_folder['pathInput'] + self.data_folder['name'] + '/sk_v/'
+                    self.logger.warning('Atmosphere::get_covariance_matrices - File not found.. re-computing ZZt_inv ...')
+                    name_data       = 'ZZt_inv_spider_L0_'+str(self.L0)+'_m_r0_'+str(self.r0_def)+'_shape_'+str(layer.ZZt.shape[0])+'x'+str(layer.ZZt.shape[1])+'.json'
+                    location_data   = self.param['pathInput'] + self.param['name'] + '/sk_v/'
                     createFolder(location_data)
                     
-                    self.ZZt_inv = np.linalg.pinv(self.ZZt)
+                    layer.ZZt_inv = np.linalg.pinv(layer.ZZt)
                 
-                    print('saving for future...')
+                    self.logger.warning('Atmosphere::get_covariance_matrices - saving for future...')
                     data = dict()
-                    data['pupil'] = self.telescope.pupil
-                    data['ZZt_inv'] = self.ZZt_inv
+                    data['ZZt_inv'] = layer.ZZt_inv
                             
                     data_encoded  = jsonpickle.encode(data)
                     with open(location_data+name_data, 'w') as f:
                         json.dump(data_encoded, f)
             d=time.time()
-            print('ZZt.. : ' +str(d-c) +' s')
-            self.ZXt = makeCovarianceMatrix(layer.innerZ,layer.outerZ,self)
+            self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' ZZt.. : ' +str(d-c) +' s')
+            layer.ZXt = makeCovarianceMatrix(layer.innerZ,layer.outerZ,self)
             e=time.time()
-            print('ZXt.. : ' +str(e-d) +' s')
-            self.XXt = makeCovarianceMatrix(layer.outerZ,layer.outerZ,self)
+            self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' ZXt.. : ' +str(e-d) +' s')
+            layer.XXt = makeCovarianceMatrix(layer.outerZ,layer.outerZ,self)
             f=time.time()
-            print('XXt.. : ' +str(f-e) +' s')
+            self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' XXt.. : ' +str(f-e) +' s')
             
-            self.ZZt_r0     = self.ZZt*(self.r0_def/self.r0)**(5/3)
-            self.ZXt_r0     = self.ZXt*(self.r0_def/self.r0)**(5/3)
-            self.XXt_r0     = self.XXt*(self.r0_def/self.r0)**(5/3)
-            self.ZZt_inv_r0 = self.ZZt_inv/((self.r0_def/self.r0)**(5/3))
-        return self.ZZt, self.ZXt, self.XXt, self.ZZt_inv
+            layer.ZZt_r0     = layer.ZZt*(self.r0_def/self.r0)**(5/3)
+            layer.ZXt_r0     = layer.ZXt*(self.r0_def/self.r0)**(5/3)
+            layer.XXt_r0     = layer.XXt*(self.r0_def/self.r0)**(5/3)
+            layer.ZZt_inv_r0 = layer.ZZt_inv/((self.r0_def/self.r0)**(5/3))
+        return True
         
 
     def print_atm_at_wavelength(self,wavelength):
@@ -603,38 +586,33 @@ class Atmosphere:
         r0_wvl              = self.r0*((wavelength/self.wavelength)**(5/3))
         seeingArcsec_wvl    = 206265*(wavelength/r0_wvl)
 
-        print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ATMOSPHERE AT '+str(wavelength)+' nm %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-        print('r0 \t\t'+str(r0_wvl) + ' \t [m]') 
-        print('Seeing \t' + str(np.round(seeingArcsec_wvl,2)) + str('\t ["]'))
-        print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-        return
-    
-    def print_atm(self):
-             # Keep this ancient function name for compatibility
-             self.print_properties()
-             
+        self.logger.info('Atmosphere::print_atm_at_wavelength - ATMOSPHERE AT '+str(wavelength)+' nm %%%%%%%%')
+        self.logger.info('r0 \t\t'+str(r0_wvl) + ' \t [m]') 
+        self.logger.info('Seeing \t' + str(np.round(seeingArcsec_wvl,2)) + str('\t ["]'))
+        self.logger.info('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+        return True            
        
     def print_properties(self):
-        print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ATMOSPHERE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-        print('{: ^12s}'.format('Layer') + '{: ^12s}'.format('Direction')+ '{: ^12s}'.format('Speed')+ '{: ^12s}'.format('Altitude')+ '{: ^12s}'.format('Cn2')+ '{: ^12s}'.format('Diameter') )
-        print('{: ^12s}'.format('') + '{: ^12s}'.format('[deg]')+ '{: ^12s}'.format('[m/s]')+ '{: ^12s}'.format('[m]')+ '{: ^12s}'.format('[m-2/3]') + '{: ^12s}'.format('[m]'))
+        self.logger.info('%%%%%%%%%%%Atmosphere::print_properties - ATMOSPHERE%%%%%%%%%%%%')
+        self.logger.info('{: ^12s}'.format('Layer') + '{: ^12s}'.format('Direction')+ '{: ^12s}'.format('Speed')+ '{: ^12s}'.format('Altitude')+ '{: ^12s}'.format('Cn2')+ '{: ^12s}'.format('Diameter') )
+        self.logger.info('{: ^12s}'.format('') + '{: ^12s}'.format('[deg]')+ '{: ^12s}'.format('[m/s]')+ '{: ^12s}'.format('[m]')+ '{: ^12s}'.format('[m-2/3]') + '{: ^12s}'.format('[m]'))
 
-        print('======================================================================')
+        self.logger.info('======================================================================')
         
         for i_layer in range(self.nLayer):
-            print('{: ^12s}'.format(str(i_layer+1)) + '{: ^12s}'.format(str(self.windDirection[i_layer]))+ '{: ^12s}'.format(str(self.windSpeed[i_layer]))+ '{: ^12s}'.format(str(self.altitude[i_layer]))+ '{: ^12s}'.format(str(self.fractionalR0[i_layer]) ) + '{: ^12s}'.format(str(getattr(self,'layer_'+str(i_layer+1)).D )))
+            self.logger.info('{: ^12s}'.format(str(i_layer+1)) + '{: ^12s}'.format(str(self.windDirection[i_layer]))+ '{: ^12s}'.format(str(self.windSpeed[i_layer]))+ '{: ^12s}'.format(str(self.altitude[i_layer]))+ '{: ^12s}'.format(str(self.fractionalR0[i_layer]) ) + '{: ^12s}'.format(str(getattr(self,'layer_'+str(i_layer+1)).D )))
             if i_layer<self.nLayer-1:
-                print('----------------------------------------------------------------------')
+                self.logger.info('----------------------------------------------------------------------')
 
-        print('======================================================================')
+        self.logger.info('======================================================================')
 
+        self.logger.info('{: ^18s}'.format('r0 @500 nm') + '{: ^18s}'.format(str(self.r0)+' [m]' ))
+        self.logger.info('{: ^18s}'.format('L0') + '{: ^18s}'.format(str(self.L0)+' [m]' ))
+        self.logger.info('{: ^18s}'.format('Seeing @500nm') + '{: ^18s}'.format(str(np.round(self.seeingArcsec,2))+' ["]'))
+        self.logger.info('{: ^18s}'.format('Frequency') + '{: ^18s}'.format(str(np.round(1/self.samplingTime,2))+' [Hz]' ))
+        self.logger.info('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+        return True
 
-        print('{: ^18s}'.format('r0 @500 nm') + '{: ^18s}'.format(str(self.r0)+' [m]' ))
-        print('{: ^18s}'.format('L0') + '{: ^18s}'.format(str(self.L0)+' [m]' ))
-        print('{: ^18s}'.format('Seeing @500nm') + '{: ^18s}'.format(str(np.round(self.seeingArcsec,2))+' ["]'))
-        print('{: ^18s}'.format('Frequency') + '{: ^18s}'.format(str(np.round(1/self.telescope.samplingTime,2))+' [Hz]' ))
-        print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-        
     def __mul__(self,obj):
         if obj.tag == 'telescope' or obj.tag == 'source' or obj.tag == 'asterism' or obj.tag == 'sun':
             if obj.tag == 'telescope':
@@ -814,8 +792,9 @@ class Atmosphere:
          self._r0 = val
 
          if self.hasNotBeenInitialized is False:
-             print('Updating the Atmosphere covariance matrices...')             
-             self.seeingArcsec           = 206265*(self.wavelength/val)             
+             self.logger.info('Atmosphere::r0.setter - Updating the Atmosphere covariance matrices...')             
+             self.seeingArcsec           = 206265*(self.wavelength/val)
+             self.cn2 = (self.r0**(-5. / 3) / (0.423 * (2*np.pi/self.wavelength)**2))/np.max([1, np.max(self.altitude)]) # Cn2 m^(-2/3)             
              for i_layer in range(self.nLayer):
                  tmpLayer = getattr(self,'layer_'+str(i_layer+1))
 
@@ -834,7 +813,7 @@ class Atmosphere:
     def L0(self,val):
          self._L0 = val
          if self.hasNotBeenInitialized is False:
-             print('Updating the Atmosphere covariance matrices...')
+             self.logger.info('Atmosphere::L0.setter - Updating the Atmosphere covariance matrices...')
 
              self.hasNotBeenInitialized = True
              del self.ZZt
@@ -852,9 +831,9 @@ class Atmosphere:
 
         if self.hasNotBeenInitialized is False:
             if len(val)!= self.nLayer:
-                print('Error! Wrong value for the wind-speed! Make sure that you inpute a wind-speed for each layer')
+                self.logger.error('Atmosphere::windSpeed.setter - Error! Wrong value for the wind-speed! Make sure that you input a wind-speed for each layer')
             else:
-                print('Updating the wind speed...')
+                self.logger.info('Atmosphere::windSpeed.setter - Updating the wind speed...')
                 for i_layer in range(self.nLayer):
                     tmpLayer = getattr(self,'layer_'+str(i_layer+1))
                     tmpLayer.windSpeed = val[i_layer]
@@ -865,7 +844,6 @@ class Atmosphere:
                     tmpLayer.ratio[0] = ps_turb_x/self.ps_loop
                     tmpLayer.ratio[1] = ps_turb_y/self.ps_loop
                     setattr(self,'layer_'+str(i_layer+1),tmpLayer )
-                # self.print_atm()
                 
     @property
     def windDirection(self):
@@ -877,12 +855,11 @@ class Atmosphere:
 
         if self.hasNotBeenInitialized is False:
             if len(val)!= self.nLayer:
-                print('Error! Wrong value for the wind-speed! Make sure that you inpute a wind-speed for each layer')
+                self.logger.error('Atmosphere::windSpeed.setter - Error! Wrong value for the wind-speed! Make sure that you inpute a wind-speed for each layer')
             else:
-                print('Updating the wind direction...')
+                self.logger.info('Atmosphere::windSpeed.setter - Updating the wind direction...')
                 for i_layer in range(self.nLayer):
                     tmpLayer = getattr(self,'layer_'+str(i_layer+1))
-                    # tmpLayer.notDoneOnce = True
                     tmpLayer.direction = val[i_layer]
                     tmpLayer.vY            = tmpLayer.windSpeed*np.cos(np.deg2rad(tmpLayer.direction))                    
                     tmpLayer.vX            = tmpLayer.windSpeed*np.sin(np.deg2rad(tmpLayer.direction))
@@ -890,11 +867,7 @@ class Atmosphere:
                     ps_turb_y = tmpLayer.vY*self.telescope.samplingTime
                     tmpLayer.ratio[0] = ps_turb_x/self.ps_loop
                     tmpLayer.ratio[1] = ps_turb_y/self.ps_loop
-                    setattr(self,'layer_'+str(i_layer+1),tmpLayer )
-                # self.print_atm()
-
-
-                          
+                    setattr(self,'layer_'+str(i_layer+1),tmpLayer )                
              
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
  
@@ -918,15 +891,28 @@ class Atmosphere:
         self.print_properties()
         return ' '
                             
-class Layer:
-    pass
+    def setup_logging(self, logging_level=logging.INFO):
+        #
+        #  Setup of logging at the main process using QueueHandler
+        log_queue = Queue()
+        queue_handler = logging.handlers.QueueHandler(log_queue)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging_level)  # Minimum log level
 
+        # Setup of the formatting
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
+        )
 
-        
-        
-            
-            
-            
-            
-    
-        
+        # Output to terminal
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+
+        # Qeue handler captures the messages from the different logs and serialize them
+        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
+        root_logger.addHandler(queue_handler)
+        queue_listener.start()
+
+        return queue_listener
+    def __del__(self):
+        self.queue_listerner.stop()
