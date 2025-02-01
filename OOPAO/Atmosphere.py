@@ -17,6 +17,7 @@ import datetime
 from joblib import Parallel, delayed
 import numpy as np
 from numpy.random import RandomState
+import math
 
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
@@ -414,7 +415,40 @@ class Atmosphere:
                 self.logger.info(f"Atmosphere::load - All layers finished. You should check that your telescope matches this atmosphere using Atmosphere::matchParameters()")     
             else:
                 self.logger.error(f"Atmosphere::load - Could not initialize the atmosphere, check the input file content and formatting.")     
+    
+    # Checks the parameters of the atmosphere object to see if they match the parameters of the telescope
+    # If returns False, the telescope does not match the content inside the atmosphere.
+    def matchParameters(self, telescope):
+        self.logger.info('Atmosphere::matchParameters - Checking parameters')
+        if self.hasNotBeenInitialized:
+            self.logger.error('Atmosphere::matchParameters - The atmosphere is not initialized.')
+            return False
 
+        comp_tol = 1e-5
+
+        if not math.isclose(telescope.resolution, self.resolution, rel_tol=comp_tol):
+            self.logger.warning('Atmosphere::matchParameters - Resolution does not match.')
+            return False
+        
+        if not math.isclose(telescope.samplingTime, self.samplingTime, rel_tol=comp_tol):
+            self.logger.warning('Atmosphere::matchParameters - Sampling Time does not match.')
+            return False
+
+        if not math.isclose(telescope.D, self.D, rel_tol=comp_tol):
+            self.logger.warning('Atmosphere::matchParameters - Diameter does not match.')
+            return False
+
+        if not math.isclose(telescope.fov, self.fov, rel_tol=comp_tol):
+            self.logger.warning('Atmosphere::matchParameters - Field of View (FoV) does not match.')
+            return False
+
+        if not math.isclose(telescope.fov_rad, self.fov_rad, rel_tol=comp_tol):
+            self.logger.warning('Atmosphere::matchParameters - Field of View (FoV) in [rad] does not match.')
+            return False
+        
+        self.logger.info('Atmosphere::matchParameters - All the parameters between both objects match.')
+        
+        return True
 
     def update(self,OPD=None):
         if OPD is None:

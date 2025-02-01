@@ -112,6 +112,15 @@ class LightPath:
             self.OPD = 0*tel.pupil.astype(float)
             self.OPD_no_pupil = 0*tel.pupil.astype(float)
         
+        self.src = src
+        self.tel = tel
+        
+        logging.debug("LightPath::create_optical_path - Considering atmosphere.")
+
+        if atm is not None:
+            if atm.hasNotBeenInitialized:
+                atm.initializeAtmosphere(self.tel)
+            self.atm = atm
 
         timing and logging.warning(f"LightPath::create_optical_path - Time elapsed: {time.time()-t0} s")
         return True
