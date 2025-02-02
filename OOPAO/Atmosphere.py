@@ -186,7 +186,6 @@ class Atmosphere:
         self.seeingArcsec           = 206265*(self.wavelength/self.r0)
         self.mode = mode
         
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ATM INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
     def initializeAtmosphere(self,telescope,compute_covariance =True, randomState=None):
         self.logger.debug('Atmosphere::initializeAtmosphere')
         self.compute_covariance = compute_covariance
@@ -311,6 +310,7 @@ class Atmosphere:
         self.logger.info('Atmosphere::buildLayer - Layer '+str(i_layer+1)+' created.')      
     
         return layer
+    
     # Saves the atmosphere phase screens.
     # If returns False, there was an error.
     # Filename shall contain the name of the folder + filename without extension '.fits'
@@ -450,27 +450,26 @@ class Atmosphere:
         
         return True
 
-    def update(self,OPD=None):
-        if OPD is None:
-            self.user_defined_opd = False
-            # Update each layer at a different process to speed up the computation
-            results = Parallel(n_jobs=self.nLayer, prefer="threads")(
-                delayed(self.updateLayer)(getattr(self,'layer_'+str(i_layer+1))) for i_layer in range(self.nLayer))
-            for i_layer in range(self.nLayer):
-                setattr(self,'layer_'+str(i_layer+1),results[i_layer])
-        else:
-            self.user_defined_opd = True
-            # case where the OPD is input
-            self.OPD_no_pupil   = OPD
-            self.OPD            = OPD*self.telescope.pupil   
-        if self.telescope.isPaired:
-            self*self.telescope
-    
+    # Updates the atmosphere given the wind speed, direction and sampling time. 
+    # Each layer is updated in parallel
+    # If returns True, the Update was successful
+    def update(self):
+        self.logger.debug('Atmosphere::update')
+        # Update each layer at a different process to speed up the computation.
+        # Threads are faster than multiprocessing due to the overheads of making the copies. 
+        results = Parallel(n_jobs=self.nLayer, prefer="threads")(
+            delayed(self.updateLayer)(getattr(self,'layer_'+str(i_layer+1))) for i_layer in range(self.nLayer))
+        for i_layer in range(self.nLayer):
+            setattr(self,'layer_'+str(i_layer+1),results[i_layer])
+        
+        self.logger.info('Atmosphere::update - Updated.')
+        return True
+        
+    # Updates each layer
+    # Returns the layer updated
     def updateLayer(self,updatedLayer,shift = None):
 
-        if self.compute_covariance is False:
-            raise AttributeError('The computation of the covariance matrices was set to False in the atmosphere initialisation. Set it to True to provide moving layers.')
-        self.ps_loop    = updatedLayer.D / (updatedLayer.resolution)
+        ps_loop    = updatedLayer.D / (updatedLayer.resolution)
         ps_turb_x       = updatedLayer.vX*self.telescope.samplingTime 
         ps_turb_y       = updatedLayer.vY*self.telescope.samplingTime 
         
@@ -481,8 +480,8 @@ class Atmosphere:
             if updatedLayer.notDoneOnce:
                 updatedLayer.notDoneOnce = False
                 updatedLayer.ratio = np.zeros(2)
-                updatedLayer.ratio[0] = ps_turb_x/self.ps_loop  
-                updatedLayer.ratio[1] = ps_turb_y/self.ps_loop
+                updatedLayer.ratio[0] = ps_turb_x/ps_loop  
+                updatedLayer.ratio[1] = ps_turb_y/ps_loop
                 updatedLayer.buff = np.zeros(2)
             
             if shift is None:
@@ -528,6 +527,7 @@ class Atmosphere:
             shiftMatrix     = translationImageMatrix(updatedLayer.mapShift,[updatedLayer.buff[0],updatedLayer.buff[1]]) #units are in pixel of the M1            
             updatedLayer.phase     = globalTransformation(updatedLayer.mapShift,shiftMatrix)[1:-1,1:-1]
         return updatedLayer
+
 
     def set_pupil_footprint(self):
         self.logger.debug('Atmosphere::set_pupil_footprint')
@@ -591,6 +591,7 @@ class Atmosphere:
             for i in range(self.asterism.n_source):
                 phase_support.append(np.zeros([self.telescope.resolution,self.telescope.resolution]))
         return phase_support
+    
     def fill_phase_support(self,tmpLayer, i_layer, phase_support_shape):
         self.logger.debug('Atmosphere::fill_phase_support')
         if self.asterism is None:
@@ -648,6 +649,7 @@ class Atmosphere:
                 self.OPD_no_pupil.append(phase_support[i]*self.wavelength/2/np.pi)
                 self.OPD.append(self.OPD_no_pupil[i]*self.telescope.pupil)
         return
+    
     def get_covariance_matrices(self, layer):
         # Compute the covariance matrices - Implements the paper from Assemat et al. (2006)
         self.logger.debug('Atmosphere::get_covariance_matrices')
@@ -1003,5 +1005,6 @@ class Atmosphere:
         queue_listener.start()
 
         return queue_listener
+    
     def __del__(self):
         self.queue_listerner.stop()
