@@ -468,15 +468,12 @@ class Atmosphere:
     # Updates each layer
     # Returns the layer updated
     def updateLayer(self,updatedLayer,shift = None):
-
+        self.logger.debug('Atmosphere::updateLayer')
         ps_loop    = updatedLayer.D / (updatedLayer.resolution)
-        ps_turb_x       = updatedLayer.vX*self.telescope.samplingTime 
-        ps_turb_y       = updatedLayer.vY*self.telescope.samplingTime 
+        ps_turb_x       = updatedLayer.vX*self.samplingTime 
+        ps_turb_y       = updatedLayer.vY*self.samplingTime 
         
-        if updatedLayer.vX==0 and updatedLayer.vY==0 and shift is None:
-            updatedLayer.phase = updatedLayer.phase
-            
-        else:
+        if not((updatedLayer.vX==0) and (updatedLayer.vY==0) and (shift is None)):
             if updatedLayer.notDoneOnce:
                 updatedLayer.notDoneOnce = False
                 updatedLayer.ratio = np.zeros(2)
@@ -488,6 +485,7 @@ class Atmosphere:
                 ratio = updatedLayer.ratio
             else:
                  ratio = shift    # shift in pixels
+            
             tmpRatio = np.abs(ratio)
             tmpRatio[np.isinf(tmpRatio)]=0
             nScreens = (tmpRatio)
@@ -524,8 +522,9 @@ class Atmosphere:
             updatedLayer.buff[0]   =  (np.abs(updatedLayer.buff[0])%1)*np.sign(updatedLayer.buff[0])
             updatedLayer.buff[1]   =  (np.abs(updatedLayer.buff[1])%1)*np.sign(updatedLayer.buff[1])
                 
-            shiftMatrix     = translationImageMatrix(updatedLayer.mapShift,[updatedLayer.buff[0],updatedLayer.buff[1]]) #units are in pixel of the M1            
+            shiftMatrix            = translationImageMatrix(updatedLayer.mapShift,[updatedLayer.buff[0],updatedLayer.buff[1]]) # units are in pixel of the M1            
             updatedLayer.phase     = globalTransformation(updatedLayer.mapShift,shiftMatrix)[1:-1,1:-1]
+
         return updatedLayer
 
 
