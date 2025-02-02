@@ -51,6 +51,7 @@ class LayerClass:
         self.vX = 0
         self.vY = 0
         self.windSpeed = 0
+        self.fractionalR0 = 0
         # Arrays 
         self.A = np.array([])
         self.B = np.array([])
@@ -186,6 +187,9 @@ class Atmosphere:
         self.seeingArcsec           = 206265*(self.wavelength/self.r0)
         self.mode = mode
         
+    # Gets the telescope information (or checks if it is defined, in case it was loaded from file) and runs in parallel the creation of each atmospheric layer
+    # When the atmosphere is initialized, prints the properties of the atmosphere.
+    # Returns True if succesful. 
     def initializeAtmosphere(self,telescope,compute_covariance =True, randomState=None):
         self.logger.debug('Atmosphere::initializeAtmosphere')
         self.compute_covariance = compute_covariance
@@ -223,6 +227,8 @@ class Atmosphere:
         self.print_properties()
         return True
             
+    # Creates each layer of the atmosphere. This functions is run in parallel
+    # Returns the layer initialized
     def buildLayer(self, i_layer, randomState = None, from_file=False):
         """
             Generation of phase screens using the method introduced in Assemat et al (2006)
@@ -250,6 +256,7 @@ class Atmosphere:
         layer.windSpeed     = self.windSpeed[i_layer]
         layer.direction     = self.windDirection[i_layer]
         layer.fov_rad       = self.fov_rad
+        layer.fractionalR0  = self.fractionalR0[i_layer]
         
         # compute the X and Y wind speed
         layer.vY            = layer.windSpeed*np.cos(np.deg2rad(layer.direction))
@@ -261,8 +268,8 @@ class Atmosphere:
         
         layer.D_fov             = self.D+2*np.tan(layer.fov_rad/2)*layer.altitude
         layer.resolution_fov    = int(np.ceil((self.resolution/self.D)*layer.D_fov))
-        layer.resolution        = layer.resolution_fov + 4 #4 pixels are added as a margin for the edges
-        layer.D                 = layer.resolution * self.D/ self.resolution
+        layer.resolution        = layer.resolution_fov + 4 # 4 pixels are added as a margin for the edges
+        layer.D                 = layer.resolution * self.D/ self.resolution # in px
         # layer pixel size
         layer.d0 = layer.D/layer.resolution        
         # number of pixel for the phase screens computation
@@ -310,6 +317,31 @@ class Atmosphere:
         self.logger.info('Atmosphere::buildLayer - Layer '+str(i_layer+1)+' created.')      
     
         return layer
+    
+    # Computes the covariance matrices required for the implementation of Assemat et al. (2006)
+    # Returns True
+    def get_covariance_matrices(self, layer):
+        self.logger.debug('Atmosphere::get_covariance_matrices')
+        # Compute the covariance matrices - Implements the paper from Assemat et al. (2006)
+        self.logger.debug('Atmosphere::get_covariance_matrices')
+        c=time.time()        
+        layer.ZZt = makeCovarianceMatrix(layer.innerZ,layer.innerZ,self)
+        layer.ZZt_inv = np.linalg.pinv(layer.ZZt)
+
+        d=time.time()
+        self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' ZZt.. : ' +str(d-c) +' s')
+        layer.ZXt = makeCovarianceMatrix(layer.innerZ,layer.outerZ,self)
+        e=time.time()
+        self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' ZXt.. : ' +str(e-d) +' s')
+        layer.XXt = makeCovarianceMatrix(layer.outerZ,layer.outerZ,self)
+        f=time.time()
+        self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' XXt.. : ' +str(f-e) +' s')
+        
+        layer.ZZt_r0     = layer.ZZt*(self.r0_def/self.r0)**(5/3)
+        layer.ZXt_r0     = layer.ZXt*(self.r0_def/self.r0)**(5/3)
+        layer.XXt_r0     = layer.XXt*(self.r0_def/self.r0)**(5/3)
+        layer.ZZt_inv_r0 = layer.ZZt_inv/((self.r0_def/self.r0)**(5/3))
+        return True
     
     # Saves the atmosphere phase screens.
     # If returns False, there was an error.
@@ -469,7 +501,7 @@ class Atmosphere:
     # Returns the layer updated
     def updateLayer(self,updatedLayer,shift = None):
         self.logger.debug('Atmosphere::updateLayer')
-        ps_loop    = updatedLayer.D / (updatedLayer.resolution)
+        ps_loop         = updatedLayer.D / (updatedLayer.resolution)
         ps_turb_x       = updatedLayer.vX*self.samplingTime 
         ps_turb_y       = updatedLayer.vY*self.samplingTime 
         
@@ -527,47 +559,8 @@ class Atmosphere:
 
         return updatedLayer
 
-
-    def set_pupil_footprint(self):
-        self.logger.debug('Atmosphere::set_pupil_footprint')
-        for i_layer in range(self.nLayer):
-            layer = getattr(self,'layer_'+str(i_layer+1))
-            
-            if self.asterism is None:
-                if self.telescope.src.tag == "sun":
-                    chromatic_shift = 0
-                else:
-                    if self.telescope.src.chromatic_shift is not None:                    
-                        if len(self.telescope.src.chromatic_shift) == self.nLayer:
-                            chromatic_shift = self.telescope.src.chromatic_shift[i_layer]
-                        else:
-                            raise ValueError('The chromatic_shift property is expected to be the same length as the number of atmospheric layer. ')    
-                    else:
-                        chromatic_shift = 0
-                [x_z,y_z] = pol2cart(layer.altitude*np.tan((self.telescope.src.coordinates[0]+chromatic_shift)/206265) * layer.resolution / layer.D,np.deg2rad(self.telescope.src.coordinates[1]))
-                layer.extra_sx = int(x_z)-x_z
-                layer.extra_sy = int(y_z)-y_z
-                
-                center_x = int(y_z)+layer.resolution//2
-                center_y = int(x_z)+layer.resolution//2
-        
-                layer.pupil_footprint = np.zeros([layer.resolution,layer.resolution])
-                layer.pupil_footprint[center_x-self.telescope.resolution//2:center_x+self.telescope.resolution//2,center_y-self.telescope.resolution//2:center_y+self.telescope.resolution//2 ] = 1
-            else:
-                layer.pupil_footprint= []
-                layer.extra_sx = []
-                layer.extra_sy = []
-                for i in range(self.asterism.n_source):
-                    [x_z,y_z] = pol2cart(layer.altitude*np.tan((self.asterism.coordinates[i][0])/206265) * layer.resolution / layer.D,np.deg2rad(self.asterism.coordinates[i][1]))
-                    layer.extra_sx.append(int(x_z)-x_z)
-                    layer.extra_sy.append( int(y_z)-y_z)
-                    center_x = int(y_z)+layer.resolution//2
-                    center_y = int(x_z)+layer.resolution//2
-                    
-                    pupil_footprint = np.zeros([layer.resolution,layer.resolution])
-                    pupil_footprint[center_x-self.telescope.resolution//2:center_x+self.telescope.resolution//2,center_y-self.telescope.resolution//2:center_y+self.telescope.resolution//2 ] = 1
-                    layer.pupil_footprint.append(pupil_footprint)
-        
+    # Shifts one row the atmosphere layer
+    # Returns the layer shifted one pixel
     def add_row(self,layer,stepInPixel,map_full = None):
         self.logger.debug('Atmosphere::add_row')
         if map_full is None:
@@ -579,97 +572,133 @@ class Atmosphere:
         X                                   = layer.A@Z + layer.B@layer.randomState.normal(size=layer.B.shape[1])
         map_full[layer.outerMask!=0]  = X
         map_full[layer.outerMask==0]  = np.reshape(onePixelShiftedPhaseScreen,layer.resolution*layer.resolution)
-        return onePixelShiftedPhaseScreen     
-            
-    def initialize_phase_support(self):
-        self.logger.debug('Atmosphere::initialize_phase_support')
-        if self.asterism is None:
-            phase_support = np.zeros([self.telescope.resolution,self.telescope.resolution])
-        else:
-            phase_support = []
-            for i in range(self.asterism.n_source):
-                phase_support.append(np.zeros([self.telescope.resolution,self.telescope.resolution]))
-        return phase_support
-    
-    def fill_phase_support(self,tmpLayer, i_layer, phase_support_shape):
-        self.logger.debug('Atmosphere::fill_phase_support')
-        if self.asterism is None:
-            _im = tmpLayer.phase.copy()
+        return onePixelShiftedPhaseScreen 
 
-            if tmpLayer.extra_sx !=0 or tmpLayer.extra_sy != 0:
-                                
+    # Given a source NGS or Sun
+    # Returns the OPD for each line of sight
+    # IMPORTANT: the content of the atmosphere class does not depend on the sources, so this methods just projects the sources 
+    # into the atmosphere to find the new OPD. Hence, each projection can run in parallel.
+    def getOPD(self, src):
+        self.logger.info('Atmosphere::getOPD - Getting the OPD for each source.')
+
+        # First, we need to check the source tbecause the sun is made of an asterism, 
+        # it will be more efficient to run in parallel the process for each individual star and then combine it.
+        list_src = []
+
+        if src.tag == 'sun':
+            for src in src.sun_subDir_ast.src:
+                list_src.append(src)
+        else:
+            list_src.append(src)
+
+        # Then, we get the footprint for each element of the list -> we do this in parallel.
+        # result_footprint contains a list of nSources, each element containing a tuple of two list of size nLayers. The first list contains the footprint per layer, 
+        # and the second list the offset of the centroid due to discretization
+        result_footprint = Parallel(n_jobs=len(list_src), prefer="threads")(delayed(self.get_pupil_footprint)(list_src[i]) for i in range(len(list_src)))
+
+        # Once the pupil is defined, we should use it to get the phase
+        # result_phase contains a list of nSources, each element containing a list of size nLayers, whose elements contain the phase per layer [in rad]
+        result_phase = Parallel(n_jobs=len(list_src), prefer="threads")(delayed(self.project_phase)(
+                                list_src[i], result_footprint[i][0], result_footprint[i][1]) for i in range(len(list_src)))
+
+        # Finally, the phases are merged to get the resulting OPD per line of sight
+        # result_opd_no_pupil contains one list of size nSources containing the OPD without pupil per source. 
+        # The OPD is in [meters]
+        result_opd_no_pupil = Parallel(n_jobs=len(list_src), prefer="threads")(delayed(self.get_opd_per_src)(list_src[i], result_phase[i]) for i in range(len(list_src)))
+
+        return result_opd_no_pupil
+        
+    # Use the src position on sky to get the region of interest for the line of sight, selecting it through a binary mask (footprint)
+    # Returns a list with the footprint per layer and a list with the center offset per axis [x, y] due to discretization
+    def get_pupil_footprint(self, src):
+        self.logger.debug('Atmosphere::set_pupil_footprint')
+        footprint_per_layer = []
+        extra_s = []
+
+        for i_layer in range(self.nLayer):
+            layer = getattr(self,'layer_'+str(i_layer+1))
+
+            # If defined, chromatic shift shall be define per layer. We need to check its format
+            if src.chromatic_shift is None:
+                chromatic_shift = 0
+            else:
+                if len(src.chromatic_shift) != self.nLayer:
+                    raise ValueError('Atmosphere::get_pupil_footprint - If defined, the chromatic shift shall be defined per layer.')
+                chromatic_shift = src.chromatic_shift[i_layer]  
+
+            # The source coordinates are defined as: [elevation, azimuth] taking as reference the Zenith, i.e. [0,x] has the telescope pointing to the sky vertically.
+            # Elevation is measured in arcsec, azimuth in degrees.
+            # We need to compute the location of the source w.r.t zenith to define the pupil centered at the source
+            # The polar coordinates, at an altiudue z_i are: r = z_i*tan(elevation), theta = azimuth. Then, we convert to cartesian coordinates.
+            # Note that before changing coordinates, the radius in meters is converted to px using the layer diameter (layer.D) and phase screen size (layer.resolution)
+            [x_z,y_z] = pol2cart(layer.altitude*np.tan((src.coordinates[0]+chromatic_shift)/206265) * layer.resolution / layer.D, np.deg2rad(src.coordinates[1]))
+            # [x_z, y_z] are the cartesian coordinates in px w.r.t zenith. 
+            center_x = int(y_z)+layer.resolution//2
+            center_y = int(x_z)+layer.resolution//2
+
+            # As the coordinates are discretized in pixels, there may be an offset. We need to pass this offset when the phase is projected,
+            # so we store it and return it to the main function
+            extra_s.append([int(x_z)-x_z, int(y_z)-y_z])
+    
+            # Finally, create the pupil and set the points inside the pupil to 1
+            pupil_footprint = np.zeros([layer.resolution,layer.resolution])
+            pupil_footprint[center_x-self.resolution//2:center_x+self.resolution//2,
+                            center_y-self.resolution//2:center_y+self.resolution//2 ] = 1
+            
+            footprint_per_layer.append(pupil_footprint)
+        return footprint_per_layer, extra_s
+            
+    # This function receives the src and footprints to compute the phase per layer and line of sight. The computation is parallelized per layer.
+    # Returns a list containing the phase per layer for the input object
+    def project_phase(self, src, pupil_footprint, extra_s):
+        self.logger.debug('Atmosphere::fill_phase_support')
+
+        # Each layer shall run in parallel to reduce time consumption. Returns a list containing the phase per layer for the source line of sight
+        result_phase = Parallel(n_jobs=self.nLayer, prefer="threads")(
+            delayed(self.get_phase_layered)(src, getattr(self,'layer_'+str(i_layer+1)), pupil_footprint[i_layer], extra_s[i_layer]) for i_layer in range(self.nLayer))
+        
+        return result_phase
+
+    # Given an object, a layer, and the footprint, this function gets the corresponding phase with the adequate dimensions
+    # Returns the phase for the set of inputs
+    def get_phase_layered(self, src, layer, pupil_footprint, extra_s):
+
+        if src.tag == 'LGS':
+            sub_im = np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])
+
+            alpha_cone = np.arctan(self.D/2/src.altitude)
+            h = src.altitude-layer.altitude
+
+            if np.isinf(h):
+                r =self.D/2
+            else:
+                r = h*np.tan(alpha_cone)
+
+            ratio = self.D/r/2
+
+            cube_in = np.atleast_3d(sub_im).T
+            
+            pixel_size_in   = layer.D/layer.resolution
+            pixel_size_out  = pixel_size_in/ratio
+            resolution_out  = self.resolution
+            return np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out)).T* np.sqrt(layer.fractionalR0)
+        else:
+            if extra_s[0] !=0 or extra_s[1] != 0:        
                 pixel_size_in   = 1
                 pixel_size_out  = 1
-                resolution_out  = _im.shape[0]
-                _im = np.squeeze(interpolate_image(_im, pixel_size_in, pixel_size_out, resolution_out,shift_x =tmpLayer.extra_sx, shift_y= tmpLayer.extra_sy  ))
-            phase_support = np.reshape(_im[np.where(tmpLayer.pupil_footprint==1)],[self.telescope.resolution,self.telescope.resolution])* np.sqrt(self.fractionalR0[i_layer])
-        else:
-            for i in range(self.asterism.n_source):
-                _im = tmpLayer.phase.copy()
-
-                if tmpLayer.extra_sx[i] !=0 or tmpLayer.extra_sy[i] != 0:
-                                    
-                    pixel_size_in   = 1
-                    pixel_size_out  = 1
-                    resolution_out  = _im.shape[0]
-                    _im = np.squeeze(interpolate_image(_im, pixel_size_in, pixel_size_out, resolution_out,shift_x =tmpLayer.extra_sx[i], shift_y= tmpLayer.extra_sy[i]  ))
-
-                phase_support = np.zeros(phase_support_shape)
-
-                if self.asterism.src[i].type == 'LGS':
-                    sub_im = np.reshape(_im[np.where(tmpLayer.pupil_footprint[i]==1)],[self.telescope.resolution,self.telescope.resolution])
-                    alpha_cone = np.arctan(self.telescope.D/2/self.asterism.altitude[i])
-                    h = self.asterism.altitude[i]-tmpLayer.altitude
-                    if np.isinf(h):
-                        r =self.telescope.D/2
-                    else:
-                        r = h*np.tan(alpha_cone)
-                    ratio = self.telescope.D/r/2
-                    cube_in = np.atleast_3d(sub_im).T
-                    
-                    pixel_size_in   = tmpLayer.D/tmpLayer.resolution
-                    pixel_size_out  = pixel_size_in/ratio
-                    resolution_out  = self.telescope.resolution
-
-                    phase_support[i]+= np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out)).T* np.sqrt(self.fractionalR0[i_layer])
-
-                else:
-                    phase_support[i]+= np.reshape(_im[np.where(tmpLayer.pupil_footprint[i]==1)],[self.telescope.resolution,self.telescope.resolution])* np.sqrt(self.fractionalR0[i_layer])
-        return phase_support
+                resolution_out  = layer.phase.shape[0]
+                return np.squeeze(interpolate_image(layer.phase, pixel_size_in, pixel_size_out, resolution_out, shift_x =layer.extra_sx, shift_y= layer.extra_sy))
+            else:
+                return np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])* np.sqrt(layer.fractionalR0)
     
-    def set_OPD(self,phase_support):
-        if self.asterism is None:
-            self.OPD_no_pupil   = phase_support*self.wavelength/2/np.pi
-            self.OPD            = self.OPD_no_pupil*self.telescope.pupil
-        else:
-            self.OPD =[]
-            self.OPD_no_pupil = []
-            for i in range(self.asterism.n_source):
-                self.OPD_no_pupil.append(phase_support[i]*self.wavelength/2/np.pi)
-                self.OPD.append(self.OPD_no_pupil[i]*self.telescope.pupil)
-        return
-    
-    def get_covariance_matrices(self, layer):
-        # Compute the covariance matrices - Implements the paper from Assemat et al. (2006)
-        self.logger.debug('Atmosphere::get_covariance_matrices')
-        c=time.time()        
-        layer.ZZt = makeCovarianceMatrix(layer.innerZ,layer.innerZ,self)
-        layer.ZZt_inv = np.linalg.pinv(layer.ZZt)
+    # Adds the phase contribution of each layer to the pupil, computing the OPD for a given source. The function can be executed in parallel.
+    # Returns the OPD without pupil in [meters]
+    def get_opd_per_src(self, src, phase):
+        self.logger.debug('Atmosphere::get_opd_per_src')
 
-        d=time.time()
-        self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' ZZt.. : ' +str(d-c) +' s')
-        layer.ZXt = makeCovarianceMatrix(layer.innerZ,layer.outerZ,self)
-        e=time.time()
-        self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' ZXt.. : ' +str(e-d) +' s')
-        layer.XXt = makeCovarianceMatrix(layer.outerZ,layer.outerZ,self)
-        f=time.time()
-        self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' XXt.. : ' +str(f-e) +' s')
-        
-        layer.ZZt_r0     = layer.ZZt*(self.r0_def/self.r0)**(5/3)
-        layer.ZXt_r0     = layer.ZXt*(self.r0_def/self.r0)**(5/3)
-        layer.XXt_r0     = layer.XXt*(self.r0_def/self.r0)**(5/3)
-        layer.ZZt_inv_r0 = layer.ZZt_inv/((self.r0_def/self.r0)**(5/3))
-        return True    
+        opd_no_pupil = np.sum(phase,axis=0) * src.wavelength/2/np.pi # the phase is defined in rad, and the OPD in m
+        return opd_no_pupil
+    
 
     def print_atm_at_wavelength(self,wavelength):
 
@@ -702,61 +731,6 @@ class Atmosphere:
         self.logger.info('{: ^18s}'.format('Frequency') + '{: ^18s}'.format(str(np.round(1/self.samplingTime,2))+' [Hz]' ))
         self.logger.info('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
         return True
-
-    def __mul__(self,obj):
-        if obj.tag == 'telescope' or obj.tag == 'source' or obj.tag == 'asterism' or obj.tag == 'sun':
-            if obj.tag == 'telescope':
-                if obj.src.tag == 'sun':
-                    c_ = np.asarray(obj.src.sun_subDir_ast.coordinates)
-                    if np.max(c_[:,0]) <= self.fov/2:
-                        self.asterism       = obj.src.sun_subDir_ast
-                    else:
-                        raise ValueError('One of the sources is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
-                elif obj.src.tag == 'asterism':
-                    c_ = np.asarray(obj.src.coordinates)
-                    if np.max(c_[:,0]) <= self.fov/2:
-                        self.asterism       = obj.src
-                    else:
-                        raise ValueError('One of the sources is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
-                if self.fov == obj.fov:   
-                    self.telescope = obj
-                else:          
-                    print('Re-initializing the atmosphere to match the new telescope fov')
-                    self.hasNotBeenInitialized = True
-                    self.initializeAtmosphere(obj)
-            elif obj.tag == 'source':                
-                if obj.coordinates[0] <= self.fov/2:
-                    self.telescope.src  = obj
-                    obj                 = self.telescope
-                    self.asterism       = None
-                else:
-                    raise ValueError('The source object zenith ('+str(obj.coordinates[0])+'") is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
-            elif obj.tag =='asterism':
-                c_ = np.asarray(obj.coordinates)
-                if np.max(c_[:,0]) <= self.fov/2:
-                    self.telescope.src  = obj
-                    self.asterism       = obj
-                    obj                 = self.telescope
-                else:
-                    raise ValueError('One of the sources is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
-            elif obj.tag =='sun':
-                c_ = np.asarray(obj.sun_subDir_ast.coordinates)
-                if np.max(c_[:,0]) <= self.fov/2:
-                    self.telescope.src  = obj
-                    self.asterism       = obj.sun_subDir_ast
-                    obj                 = self.telescope
-                else:
-                    raise ValueError('One of the sources is outside of the telescope fov ('+str(self.fov//2)+'")! You can:\n - Reduce the zenith of the source \n - Re-initialize the atmosphere object using a telescope with a larger fov')
-            if self.user_defined_opd is False:
-                self.set_pupil_footprint()
-                phase_support = self.initialize_phase_support()
-                results_phase_support = Parallel(n_jobs=self.nLayer, prefer="threads")(
-                    delayed(self.fill_phase_support)(getattr(self,'layer_'+str(i_layer+1)), i_layer, phase_support.shape) for i_layer in range(self.nLayer))
-                phase_support = np.sum(results_phase_support,axis=0)
-                self.set_OPD(phase_support)
-            return obj
-        else:
-            raise AttributeError('The atmosphere can be multiplied only with a Telescope or a Source object!')
     
     def display_atm_layers(self,layer_index= None,fig_index = None,list_src = None):
         display_cn2 = False
