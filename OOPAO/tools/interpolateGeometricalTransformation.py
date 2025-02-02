@@ -234,7 +234,7 @@ def interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out, sha
     cube_out =  np.asarray(joblib_reconstruction())
     # print('...Done!')    
     return cube_out
-import time
+
 def interpolate_image(image_in, pixel_size_in, pixel_size_out,resolution_out, rotation_angle = 0, shift_x = 0,shift_y = 0,anamorphosisAngle=0,tangentialScaling=0,radialScaling=0, shape_out = None, order = 1):
         nx, ny = image_in.shape  
                  
