@@ -583,6 +583,7 @@ class Atmosphere:
 
         # First, we need to check the source tbecause the sun is made of an asterism, 
         # it will be more efficient to run in parallel the process for each individual star and then combine it.
+        t0 = time.time()
         list_src = []
 
         if src.tag == 'sun':
@@ -590,22 +591,26 @@ class Atmosphere:
                 list_src.append(src)
         else:
             list_src.append(src)
-
+        t1 = time.time()
         # Then, we get the footprint for each element of the list -> we do this in parallel.
         # result_footprint contains a list of nSources, each element containing a tuple of two list of size nLayers. The first list contains the footprint per layer, 
         # and the second list the offset of the centroid due to discretization
         result_footprint = Parallel(n_jobs=len(list_src), prefer="threads")(delayed(self.get_pupil_footprint)(list_src[i]) for i in range(len(list_src)))
-
+        t2 = time.time()
         # Once the pupil is defined, we should use it to get the phase
         # result_phase contains a list of nSources, each element containing a list of size nLayers, whose elements contain the phase per layer [in rad]
         result_phase = Parallel(n_jobs=len(list_src), prefer="threads")(delayed(self.project_phase)(
                                 list_src[i], result_footprint[i][0], result_footprint[i][1]) for i in range(len(list_src)))
-
+        t3 = time.time()
         # Finally, the phases are merged to get the resulting OPD per line of sight
         # result_opd_no_pupil contains one list of size nSources containing the OPD without pupil per source. 
         # The OPD is in [meters]
         result_opd_no_pupil = Parallel(n_jobs=len(list_src), prefer="threads")(delayed(self.get_opd_per_src)(list_src[i], result_phase[i]) for i in range(len(list_src)))
-
+        t4 = time.time()
+        self.logger.info(f'List creation {t1-t0}')
+        self.logger.info(f'Footprint {t2-t1}')
+        self.logger.info(f'Phase {t3-t2}')
+        self.logger.info(f'OPD {t4-t3}')
         return result_opd_no_pupil
         
     # Use the src position on sky to get the region of interest for the line of sight, selecting it through a binary mask (footprint)
@@ -648,13 +653,14 @@ class Atmosphere:
             footprint_per_layer.append(pupil_footprint)
         return footprint_per_layer, extra_s
             
-    # This function receives the src and footprints to compute the phase per layer and line of sight. The computation is parallelized per layer.
+    # This function receives the src and footprints to compute the phase per layer and line of sight. The computation is parallelized per layer, 
+    # although it turned out to be slower so n_jobs is set to 1
     # Returns a list containing the phase per layer for the input object
     def project_phase(self, src, pupil_footprint, extra_s):
         self.logger.debug('Atmosphere::fill_phase_support')
 
         # Each layer shall run in parallel to reduce time consumption. Returns a list containing the phase per layer for the source line of sight
-        result_phase = Parallel(n_jobs=self.nLayer, prefer="threads")(
+        result_phase = Parallel(n_jobs=1, prefer="threads")(
             delayed(self.get_phase_layered)(src, getattr(self,'layer_'+str(i_layer+1)), pupil_footprint[i_layer], extra_s[i_layer]) for i_layer in range(self.nLayer))
         
         return result_phase
@@ -686,7 +692,7 @@ class Atmosphere:
             if extra_s[0] !=0 or extra_s[1] != 0:        
                 pixel_size_in   = 1
                 pixel_size_out  = 1
-                resolution_out  = layer.phase.shape[0]
+                resolution_out  = self.resolution
                 return np.squeeze(interpolate_image(layer.phase, pixel_size_in, pixel_size_out, resolution_out, shift_x =layer.extra_sx, shift_y= layer.extra_sy))
             else:
                 return np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])* np.sqrt(layer.fractionalR0)
