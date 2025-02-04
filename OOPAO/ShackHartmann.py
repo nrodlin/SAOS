@@ -20,20 +20,6 @@ except:
     print('WARNING: The joblib module is not installed. This would speed up considerably the operations.')
     print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
 
-# import ctypes
-# try : 
-#     mkl_rt = ctypes.CDLL('libmkl_rt.so')
-#     mkl_set_num_threads = mkl_rt.MKL_Set_Num_Threads
-#     mkl_set_num_threads(6)
-# except:
-#     try:
-#         mkl_rt = ctypes.CDLL('./mkl_rt.dll')
-#         mkl_set_num_threads = mkl_rt.MKL_Set_Num_Threads
-#         mkl_set_num_threads(6)
-#     except:
-#         print('Could not optimize the parallelisation of the code ')
-
-
 class ShackHartmann:
     def __init__(self,nSubap:float,
                  telescope,
@@ -150,12 +136,12 @@ class ShackHartmann:
             self.binning_factor         = padding_extension_factor
             self.zero_padding           = 1 
         else:
-            self.n_pix_subap            = self.telescope.resolution// self.nSubap 
+            self.n_pix_subap            = self.telescope.resolution // self.nSubap 
             self.is_extended            = False
         
 
         # different resolutions needed
-        self.n_pix_subap_init           = self.telescope.resolution// self.nSubap    
+        self.n_pix_subap_init           = self.telescope.resolution // self.nSubap    
         self.extra_pixel                = (self.n_pix_subap-self.n_pix_subap_init)//2         
         self.n_pix_lenslet_init         = self.n_pix_subap_init*self.zero_padding 
         self.n_pix_lenslet              = self.n_pix_subap*self.zero_padding 
