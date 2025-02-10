@@ -14,7 +14,9 @@ from queue import Queue
 from astropy.io import fits
 import datetime
 
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, Memory
+from joblib import parallel_backend
+
 import numpy as np
 from numpy.random import RandomState
 import math
@@ -494,6 +496,8 @@ class Atmosphere:
         for i_layer in range(self.nLayer):
             setattr(self,'layer_'+str(i_layer+1),results[i_layer])
         
+        # Serialize layers into shared memory before the getOPD method call
+
         self.logger.info('Atmosphere::update - Updated.')
         return True
         
@@ -595,6 +599,7 @@ class Atmosphere:
         # Then, we get the footprint for each element of the list -> we do this in parallel.
         # result_footprint contains a list of nSources, each element containing a tuple of two list of size nLayers. The first list contains the footprint per layer, 
         # and the second list the offset of the centroid due to discretization
+
         result_footprint = Parallel(n_jobs=len(list_src), prefer="threads")(delayed(self.get_pupil_footprint)(list_src[i]) for i in range(len(list_src)))
 
         # Once the pupil is defined, we should use it to get the phase
@@ -611,6 +616,7 @@ class Atmosphere:
         
     # Use the src position on sky to get the region of interest for the line of sight, selecting it through a binary mask (footprint)
     # Returns a list with the footprint per layer and a list with the center offset per axis [x, y] due to discretization
+    
     def get_pupil_footprint(self, src):
         self.logger.debug('Atmosphere::set_pupil_footprint')
         footprint_per_layer = []
