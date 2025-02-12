@@ -8,6 +8,10 @@ Created on Thu May 20 17:52:09 2021
 import inspect
 import time
 
+import logging
+import logging.handlers
+from queue import Queue
+
 import numpy as np
 
 from .Detector import Detector
@@ -114,7 +118,10 @@ class ShackHartmann:
             _ wfs.cam.readoutNoise      : Readout noise can be set to True or False
             _ wfs.lightRatio            : reset the valid subaperture selection considering the new value
         
-        """ 
+        """
+        self.queue_listerner = self.setup_logging()
+        self.logger = logging.getLogger()
+
         self.tag                            = 'shackHartmann'
         self.telescope                      = telescope
         if self.telescope.src is None:
@@ -225,10 +232,7 @@ class ShackHartmann:
             self.get_convolution_spot() 
 
         # WFS initialization
-        self.initialize_wfs()
-        
-
-
+        self.initialize_wfs()       
         
     def initialize_wfs(self):
         self.isInitialized = False
@@ -516,166 +520,97 @@ class ShackHartmann:
         
         return signal_2D,signal
     
-    
-    def wfs_measure(self,phase_in = None,integrate = True):
-        if phase_in is not None:
-            self.telescope.src.phase = phase_in
+    # Receives the phase to be measure as an OPD [m] and return the slopes measured by the SH in [px]
+
+    def wfs_measure(self,phase_in, src, integrate = True):
+        self.logger.debug("ShackHartmann::wfs_measure")
+        # Check input parameters
+        if (phase_in is None) or (src is None):
+            self.logger.error("ShackHartmann::wfs_measure - Phase or Source are none.")
+            raise ValueError('ShackHartmann::wfs_measure - Phase or Source are none.')
+        # Check if it is necessary to recompute the flux per subaperture, this is important as it will take longer
+        # time during the execution and the number of subaps may vary!! --> Be careful, the IM shall vary accondingly
+        if self.current_nPhoton != src.nPhoton:
+            self.logger.info('ShackHartmann::wfs_measure - Number of photons changed, updating flux on subaps')
+            self.initialize_flux()   
         
-        if self.current_nPhoton != self.telescope.src.nPhoton:
-            print('updating the flux of the SHWFS object')
-            self.initialize_flux()
-   
-            
+        # There are two possible WFS strategies: diffractive or geometric. 
+        # Diffractive applies the phase and compute the Fourier transformed object, later applying a centroid algorithm.
+        # Geometric computes the slope directly from the phase points, which reduces the execution time, though it is less realistic
+
         if self.is_geometric is False:
             ##%%%%%%%%%%%%  DIFFRACTIVE SH WFS %%%%%%%%%%%%
-            if np.ndim(self.telescope.src.phase)==2:
-                #-- case with a single wave-front to sense--
-                # reset camera frame to be filled up
-                self.raw_data   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+            # reset camera frame to be filled up
+            self.raw_data   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
 
-                # normalization for FFT
-                norma = self.cube.shape[1]
+            # normalization for FFT
+            norma = self.cube.shape[1]
 
-                # compute spot intensity
-                if self.telescope.spatialFilter is None:  
-                    phase = self.telescope.src.phase   
-                    self.initialize_flux()
+            # compute spot intensity
+            t0 = time.time()
+            I = (np.abs(np.fft.fft2(np.asarray(self.get_lenslet_em_field(phase_in)),axes=[1,2])/norma)**2)
+            self.logger.info(f'ShackHartmann::wfs_measure - em field: {time.time()-t0}')
 
-                else:
-                    phase = self.telescope.phase_filtered   
-                    self.initialize_flux(((self.telescope.amplitude_filtered)**2).T*self.telescope.src.fluxMap.T)              
-                I = (np.abs(np.fft.fft2(np.asarray(self.get_lenslet_em_field(phase)),axes=[1,2])/norma)**2)
-                # reduce to valid subaperture
-                I = I[self.valid_subapertures_1D,:,:]
-                
+            # reduce to valid subaperture
+            I = I[self.valid_subapertures_1D,:,:]
+            t0 = time.time()
+            # Check if there are wrapping effects at the edges of the pupil
+            if self.flux_flag == False:
                 self.sum_I   = np.sum(I,axis=0)
                 self.edge_subaperture_criterion = np.sum(I*self.outerMask)/np.sum(I)
-                if (self.edge_subaperture_criterion>0.05) and (self.flux_flag == False):
-                    self.flux_flag = True
-                    print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-                    print('WARNING !!!! THE LIGHT IN THE SUBAPERTURE IS MAYBE WRAPPING !!!'+str(np.round(100*self.edge_subaperture_criterion,1))+' % of the total flux detected on the edges of the subapertures. You may want to lower the seeing value or increase the resolution')
-                    print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
 
-                # if FoV is extended, zero pad the spot intensity
-                if self.is_extended:
-                    I = np.pad(I,[[0,0],[self.extra_pixel,self.extra_pixel],[self.extra_pixel,self.extra_pixel]]) 
-                
-                # in case of LGS sensor, convolve with LGS spots to create spot elungation
-                if self.is_LGS:
-                    I = np.fft.fftshift(np.abs((np.fft.ifft2(np.fft.fft2(I)*self.C))),axes = [1,2])
+            if (self.edge_subaperture_criterion>0.05) and (self.flux_flag == False):
+                self.flux_flag = True
+                self.logger.warning('ShackHartmann::wfs_measure%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+                self.logger.warning('ShackHartmann::wfs_measure - THE LIGHT IN THE SUBAPERTURE MAY BE WRAPPING !!!'\
+                                   + str(np.round(100*self.edge_subaperture_criterion,1))+'% of the total flux detected on the edges of the subapertures.'\
+                                   'You may want to lower the seeing value or increase the resolution')
+                self.logger.warning('ShackHartmann::wfs_measure%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+            
+            self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
+            
+            # if FoV is extended, zero pad the spot intensity
+            if self.is_extended:
+                I = np.pad(I,[[0,0],[self.extra_pixel,self.extra_pixel],[self.extra_pixel,self.extra_pixel]]) 
+            
+            # in case of LGS sensor, convolve with LGS spots to create spot elungation
+            if self.is_LGS:
+                I = np.fft.fftshift(np.abs((np.fft.ifft2(np.fft.fft2(I)*self.C))),axes = [1,2])
 
-                # Crop to get the spot at shannon sampling
-                if self.shannon_sampling:
-                    self.maps_intensity =  I[:,self.n_pix_subap//2:-self.n_pix_subap//2,self.n_pix_subap//2:-self.n_pix_subap//2]
-               
-                if self.binning_factor>1:
-                    self.maps_intensity =  bin_ndarray(self.maps_intensity,[self.maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,self.n_pix_subap//self.binning_factor], operation='sum')
-                else:
-                    self.maps_intensity =  bin_ndarray(I,[I.shape[0], self.n_pix_subap//self.binning_factor,self.n_pix_subap//self.binning_factor], operation='sum')
-                # bin the 2D spots intensity to get the desired number of pixel per subaperture
-                if self.binning_factor>1:
-                    self.maps_intensity =  bin_ndarray(self.maps_intensity,[self.maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,self.n_pix_subap//self.binning_factor], operation='sum')
-               
-                # fill camera frame with computed intensity (only valid subapertures)
-                def joblib_fill_raw_data():
-                    Q=Parallel(n_jobs=1,prefer='processes')(delayed(self.fill_raw_data)(i,j,k) for i,j,k in zip(self.index_x[self.valid_subapertures_1D],self.index_y[self.valid_subapertures_1D],self.maps_intensity))
-                    return Q
-                joblib_fill_raw_data()
-
-                if integrate:
-                    self.signal_2D,self.signal = self.wfs_integrate()                
-
-
+            # Crop to get the spot at shannon sampling
+            if self.shannon_sampling:
+                self.maps_intensity =  I[:,self.n_pix_subap//2:-self.n_pix_subap//2,self.n_pix_subap//2:-self.n_pix_subap//2]
+            t0 = time.time()
+            if self.binning_factor>1:
+                self.maps_intensity =  bin_ndarray(self.maps_intensity,[self.maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,self.n_pix_subap//self.binning_factor], operation='sum')
             else:
-                #-- case with multiple wave-fronts to sense--
-                
-                # set phase buffer
-                self.phase_buffer = np.moveaxis(self.telescope.src.phase_no_pupil,-1,0)
-
-                # tile the valid subaperture vector to match the number of input phase
-                valid_subap_1D_tiled = np.tile(self.valid_subapertures_1D,self.phase_buffer.shape[0])
-
-                # tile the valid LGS convolution spot to match the number of input phase
-                if self.is_LGS:
-                    self.lgs_exp =  np.tile(self.C,[self.phase_buffer.shape[0],1,1])
-                    
-                # reset camera frame
-                self.raw_data   = np.zeros([self.phase_buffer.shape[0],self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
-                
-                # compute 2D intensity for multiple input wavefronts
-                def compute_diffractive_signals_multi():
-                    Q=Parallel(n_jobs=1,prefer='processes')(delayed(self.get_lenslet_em_field)(i) for i in self.phase_buffer)
-                    return Q                 
-                emf_buffer = np.reshape(np.asarray(compute_diffractive_signals_multi()),[self.phase_buffer.shape[0]*self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init])
-                
-                # reduce to valid subaperture
-                emf_buffer = emf_buffer[valid_subap_1D_tiled,:,:]
-                
-                # normalization for FFT
-                norma = emf_buffer.shape[1]
-                # get the spots intensity
-                I = np.abs(np.fft.fft2(emf_buffer)/norma)**2
-                
-                # if FoV is extended, zero pad the spot intensity
-                if self.is_extended:
-                    I = np.pad(I,[[0,0],[self.extra_pixel,self.extra_pixel],[self.extra_pixel,self.extra_pixel]]) 
-                    
-                # if lgs convolve with gaussian
-                if self.is_LGS:
-                    I = np.real(np.fft.ifft2(np.fft.fft2(I)*self.lgs_exp))
-                # bin the 2D spots arrays
-                self.maps_intensity = (bin_ndarray(I, [I.shape[0],self.n_pix_subap,self.n_pix_subap], operation='sum'))
-                # add photon/readout noise to 2D spots
-                if self.cam.photonNoise!=0:
-                    self.maps_intensity  = self.random_state_photon_noise.poisson(self.maps_intensity)
-                        
-                if self.cam.readoutNoise!=0:
-                    self.maps_intensity += np.int64(np.round(self.random_state_readout_noise.randn(self.maps_intensity.shape[0],self.maps_intensity.shape[1],self.maps_intensity.shape[2])*self.cam.readoutNoise))
-                
-                # fill up camera frame if requested (default is False)
-                if self.get_raw_data_multi is True:
-                    self.compute_raw_data_multi(self.maps_intensity)
-                                    
-                # normalization for centroid computation
-                norma = np.sum(np.sum(self.maps_intensity,axis=1),axis=1)
-
-                # centroid computation
-                self.centroid_lenslets = self.centroid(self.maps_intensity,self.threshold_cog)
-
-                # re-organization of signals according to number of wavefronts considered
-                self.signal_2D = np.zeros([self.phase_buffer.shape[0],self.nSubap*2,self.nSubap])
-                
-                for i in range(self.phase_buffer.shape[0]):
-                    self.SX[self.validLenslets_x,self.validLenslets_y] = self.centroid_lenslets[i*self.nValidSubaperture:(i+1)*self.nValidSubaperture,0]
-                    self.SY[self.validLenslets_x,self.validLenslets_y] = self.centroid_lenslets[i*self.nValidSubaperture:(i+1)*self.nValidSubaperture,1]
-                    signal_2D = np.concatenate((self.SX,self.SY)) - self.reference_slopes_maps
-                    signal_2D[~self.valid_slopes_maps] = 0
-                    self.signal_2D[i,:,:] = signal_2D/self.slopes_units
-
-                self.signal = self.signal_2D[:,self.valid_slopes_maps].T
-                # assign camera_fram to sh.cam.frame
-                self*self.cam
+                self.maps_intensity =  bin_ndarray(I,[I.shape[0], self.n_pix_subap//self.binning_factor,self.n_pix_subap//self.binning_factor], operation='sum')
+            
+            # bin the 2D spots intensity to get the desired number of pixel per subaperture
+            if self.binning_factor>1:
+                self.maps_intensity =  bin_ndarray(self.maps_intensity,[self.maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,self.n_pix_subap//self.binning_factor], operation='sum')
+            self.logger.info(f'ShackHartmann::wfs_measure - Binning: {time.time()-t0}')
+            t0 = time.time()
+            # fill camera frame with computed intensity (only valid subapertures)
+            def joblib_fill_raw_data():
+                Q=Parallel(n_jobs=1,prefer=self.joblib_prefer)(delayed(self.fill_raw_data)(i,j,k) for i,j,k in zip(self.index_x[self.valid_subapertures_1D],self.index_y[self.valid_subapertures_1D],self.maps_intensity))
+                return Q
+            joblib_fill_raw_data()
+            self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
+            t0 = time.time()
+            if integrate:
+                self.signal_2D,self.signal = self.wfs_integrate()                
+            self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
 
         else:
             ##%%%%%%%%%%%%  GEOMETRIC SH WFS %%%%%%%%%%%%
-            if np.ndim(self.telescope.src.phase)==2:
-                self.raw_data   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+            self.raw_data   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
 
-                self.signal_2D = self.lenslet_propagation_geometric(self.telescope.src.phase_no_pupil)*self.valid_slopes_maps/self.slopes_units
-                    
-                self.signal = self.signal_2D[self.valid_slopes_maps]
+            self.signal_2D = self.lenslet_propagation_geometric(self.telescope.src.phase_no_pupil)*self.valid_slopes_maps/self.slopes_units
                 
-                self*self.cam
-
-            else:
-                self.phase_buffer = np.moveaxis(self.telescope.src.phase_no_pupil,-1,0)
-
-                def compute_geometric_signals():
-                    Q=Parallel(n_jobs=1,prefer='processes')(delayed(self.lenslet_propagation_geometric)(i) for i in self.phase_buffer)
-                    return Q
-                maps = compute_geometric_signals()
-                self.signal_2D = np.asarray(maps)/self.slopes_units
-                self.signal = self.signal_2D[:,self.valid_slopes_maps].T
+            self.signal = self.signal_2D[self.valid_slopes_maps]
+            
+            self*self.cam
 
     def print_properties(self):
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SHACK HARTMANN WFS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
@@ -780,3 +715,30 @@ class ShackHartmann:
     def __repr__(self):
         self.print_properties()
         return ' '
+    
+    def setup_logging(self, logging_level=logging.WARNING):
+        #
+        #  Setup of logging at the main process using QueueHandler
+        log_queue = Queue()
+        queue_handler = logging.handlers.QueueHandler(log_queue)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging_level)  # Minimum log level
+
+        # Setup of the formatting
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
+        )
+
+        # Output to terminal
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+
+        # Qeue handler captures the messages from the different logs and serialize them
+        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
+        root_logger.addHandler(queue_handler)
+        queue_listener.start()
+
+        return queue_listener
+    
+    def __del__(self):
+        self.queue_listerner.stop()
