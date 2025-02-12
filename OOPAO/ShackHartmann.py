@@ -128,6 +128,12 @@ class ShackHartmann:
 
         self.tag                            = 'shackHartmann'
 
+        # Check the source type, just in case:
+
+        if src.tag != 'source':
+            self.logger.error(f'ShackHartmann::init - Source type is {src.tag}, which is not supported. This module expects the type to be SOURCE')
+            raise AttributeError(f'Expected SOURCE type, but {src.tag} was provided instead.')
+
         self.is_geometric                   = is_geometric
         self.nSubap                         = nSubap
         self.lightRatio                     = lightRatio
@@ -207,7 +213,11 @@ class ShackHartmann:
         self.phasor_expanded       = np.exp(-(1j*np.pi*(self.n_pix_lenslet+1)/self.n_pix_lenslet)*(xx+yy))
         self.phasor_expanded_tiled          = np.moveaxis(np.tile(self.phasor_expanded[:,:,None],self.nSubap**2),2,0)
 
-        self.initialize_flux(telescope)
+        # The normalized flux maps considers the efficiency in the reflectance of the light in the pupil, integration time and area and light ratio derived to the WFS
+        # The flux is computed as norm_flux * nPhoton
+        self.norm_flux_map = self.lightRatio*telescope.pupilReflectivity*telescope.samplingTime*(telescope.D/telescope.resolution)**2
+
+        self.initialize_flux(src, self.norm_flux_map)
         for i in range(self.nSubap):
             for j in range(self.nSubap):
                 self.index_x.append(i)
@@ -258,7 +268,7 @@ class ShackHartmann:
         self.reference_slopes_maps  = np.zeros([self.nSubap*2,self.nSubap])
         self.slopes_units           = 1
         print('Acquiring reference slopes..')        
-        self.wfs_measure(src.phase)        
+        self.wfs_measure(src.phase, src)        
         self.reference_slopes_maps = np.copy(self.signal_2D) 
         self.isInitialized = True
         print('Done!')
@@ -303,9 +313,9 @@ class ShackHartmann:
         return centroid_out
 #%% DIFFRACTIVE
 
-    def initialize_flux(self,src):
-        if input_flux_map is None:
-            input_flux_map = src.fluxMap.T
+    def initialize_flux(self,src, norm_flux_map):
+
+        input_flux_map = src.nPhoton * norm_flux_map.T
         
         tmp_flux_h_split = np.hsplit(input_flux_map,self.nSubap)
         self.cube_flux = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init],dtype=float)
@@ -533,7 +543,7 @@ class ShackHartmann:
         # time during the execution and the number of subaps may vary!! --> Be careful, the IM shall vary accondingly
         if self.current_nPhoton != src.nPhoton:
             self.logger.info('ShackHartmann::wfs_measure - Number of photons changed, updating flux on subaps')
-            self.initialize_flux(src)   
+            self.initialize_flux(src, self.norm_flux)   
         
         # There are two possible WFS strategies: diffractive or geometric. 
         # Diffractive applies the phase and compute the Fourier transformed object, later applying a centroid algorithm.
