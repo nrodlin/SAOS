@@ -12,10 +12,8 @@ import logging.handlers
 from queue import Queue
 
 from astropy.io import fits
-import datetime
 
-from joblib import Parallel, delayed, Memory
-from joblib import parallel_backend
+from joblib import Parallel, delayed
 
 import numpy as np
 from numpy.random import RandomState
@@ -28,7 +26,7 @@ import matplotlib.gridspec as gridspec
 from .phaseStats import ft_phase_screen, ft_sh_phase_screen, makeCovarianceMatrix
 from .tools.displayTools import makeSquareAxes
 from .tools.interpolateGeometricalTransformation import interpolate_cube, interpolate_image
-from .tools.tools import createFolder, globalTransformation, pol2cart, translationImageMatrix
+from .tools.tools import globalTransformation, pol2cart, translationImageMatrix
 
 class LayerClass:
     def __init__(self):
@@ -963,7 +961,7 @@ class Atmosphere:
         self.print_properties()
         return ' '
                             
-    def setup_logging(self, logging_level=logging.INFO):
+    def setup_logging(self, logging_level=logging.WARNING):
         #
         #  Setup of logging at the main process using QueueHandler
         log_queue = Queue()
