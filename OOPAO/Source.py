@@ -131,6 +131,7 @@ class Source:
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SOURCE INTERACTION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
         
     def __mul__(self,obj):
+        # TODO: removed all
         if obj.tag =='telescope':
             obj.src   = self
             if type(obj.OPD) is list:
