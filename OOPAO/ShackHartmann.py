@@ -195,8 +195,6 @@ class ShackHartmann:
         self.nJobs                  = 1
         self.joblib_prefer          = 'threads'
         
-        # camera frame 
-        self.raw_data           = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
         # cube of lenslet zero padded
         self.cube                   = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init])
         self.cube_flux              = np.zeros([self.nSubap**2,self.n_pix_subap_init,self.n_pix_subap_init],dtype=(complex))
@@ -267,13 +265,14 @@ class ShackHartmann:
         # flux per subaperture
         self.reference_slopes_maps  = np.zeros([self.nSubap*2,self.nSubap])
         self.slopes_units           = 1
-        print('Acquiring reference slopes..')        
-        self.wfs_measure(src.phase, src)        
+
+        self.logger.info('ShackHartmann::initialize_wfs - Acquiring reference slopes..')
+        null_phase = np.zeros((telescope.resolution, telescope.resolution))        
+        self.wfs_measure(null_phase, src)        
         self.reference_slopes_maps = np.copy(self.signal_2D) 
         self.isInitialized = True
-        print('Done!')
         
-        print('Setting slopes units..')  
+        self.logger.info('ShackHartmann::initialize_wfs - Setting slopes units..')  
         # normalize to 2 pi p2v
 
         [Tip, Tilt] = np.meshgrid(np.linspace(0,np.pi,telescope.resolution,endpoint=False),np.linspace(0,np.pi,telescope.resolution,endpoint=False))
@@ -288,7 +287,7 @@ class ShackHartmann:
         for i in range(5):
             calibration_phase = telescope.pupil*Tip*(i-2)*amp*((2*np.pi)/src.wavelength)
 
-            self.wfs_measure(calibration_phase)        
+            self.wfs_measure(calibration_phase, src)        
             mean_slope[i] = np.mean(self.signal[:self.nValidSubaperture])
             input_std[i] = np.std(calibration_phase[telescope.pupil])
             
@@ -338,11 +337,11 @@ class ShackHartmann:
         self.cube_em*=np.sqrt(self.cube_flux)*self.phasor_tiled
         return self.cube_em 
   
-    def fill_raw_data(self,ind_x,ind_y,I,index_frame=None):
+    def fill_raw_data(self,ind_x,ind_y,I,ideal_frame, index_frame=None):
         if index_frame is None:
-            self.raw_data[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
+            ideal_frame[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
         else:
-            self.raw_data[index_frame,ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I
+            ideal_frame[index_frame,ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I
 
     def split_raw_data(self):
         raw_data_h_split = np.vsplit((self.cam.frame),self.nSubap)
@@ -499,10 +498,10 @@ class ShackHartmann:
         # backward compatibility with previous version
         self.wfs_measure(phase_in=phase_in)
         return
-    def wfs_integrate(self):
+    def wfs_integrate(self, ideal_frame):
         # propagate to detector to add noise and detector effects
-        self*self.cam
-        self.split_raw_data()
+        noisy_frame = self.cam.integrate(ideal_frame)
+        self.split_raw_data(noisy_frame)
 
         # compute the centroid on valid subaperture
         self.centroid_lenslets = self.centroid(self.maps_intensity,self.threshold_cog)
@@ -552,7 +551,8 @@ class ShackHartmann:
         if self.is_geometric is False:
             ##%%%%%%%%%%%%  DIFFRACTIVE SH WFS %%%%%%%%%%%%
             # reset camera frame to be filled up
-            self.raw_data   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+            ideal_frame   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,
+                                      self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
 
             # normalization for FFT
             norma = self.cube.shape[1]
@@ -582,7 +582,8 @@ class ShackHartmann:
             
             # if FoV is extended, zero pad the spot intensity
             if self.is_extended:
-                I = np.pad(I,[[0,0],[self.extra_pixel,self.extra_pixel],[self.extra_pixel,self.extra_pixel]]) 
+                I = np.pad(I,[[0,0],[self.extra_pixel,self.extra_pixel],
+                              [self.extra_pixel,self.extra_pixel]]) 
             
             # in case of LGS sensor, convolve with LGS spots to create spot elungation
             if self.is_LGS:
@@ -590,39 +591,46 @@ class ShackHartmann:
 
             # Crop to get the spot at shannon sampling
             if self.shannon_sampling:
-                self.maps_intensity =  I[:,self.n_pix_subap//2:-self.n_pix_subap//2,self.n_pix_subap//2:-self.n_pix_subap//2]
+                maps_intensity =  I[:,self.n_pix_subap//2:-self.n_pix_subap//2,self.n_pix_subap//2:-self.n_pix_subap//2]
             t0 = time.time()
             if self.binning_factor>1:
-                self.maps_intensity =  bin_ndarray(self.maps_intensity,[self.maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,self.n_pix_subap//self.binning_factor], operation='sum')
+                maps_intensity =  bin_ndarray(self.maps_intensity,[self.maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,
+                                                                        self.n_pix_subap//self.binning_factor], operation='sum')
             else:
-                self.maps_intensity =  bin_ndarray(I,[I.shape[0], self.n_pix_subap//self.binning_factor,self.n_pix_subap//self.binning_factor], operation='sum')
+                maps_intensity =  bin_ndarray(I,[I.shape[0], self.n_pix_subap//self.binning_factor,
+                                                      self.n_pix_subap//self.binning_factor], operation='sum')
             
             # bin the 2D spots intensity to get the desired number of pixel per subaperture
             if self.binning_factor>1:
-                self.maps_intensity =  bin_ndarray(self.maps_intensity,[self.maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,self.n_pix_subap//self.binning_factor], operation='sum')
+                maps_intensity =  bin_ndarray(self.maps_intensity,[self.maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,
+                                                                        self.n_pix_subap//self.binning_factor], operation='sum')
             self.logger.info(f'ShackHartmann::wfs_measure - Binning: {time.time()-t0}')
             t0 = time.time()
             # fill camera frame with computed intensity (only valid subapertures)
             def joblib_fill_raw_data():
-                Q=Parallel(n_jobs=1,prefer=self.joblib_prefer)(delayed(self.fill_raw_data)(i,j,k) for i,j,k in zip(self.index_x[self.valid_subapertures_1D],self.index_y[self.valid_subapertures_1D],self.maps_intensity))
+                Q=Parallel(n_jobs=1,prefer=self.joblib_prefer)(delayed(self.fill_raw_data)(i,j,k) for i,j,k in zip(self.index_x[self.valid_subapertures_1D],
+                                                                                                                   self.index_y[self.valid_subapertures_1D],
+                                                                                                                   maps_intensity, ideal_frame))
                 return Q
             joblib_fill_raw_data()
             self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
             t0 = time.time()
             if integrate:
-                self.signal_2D,self.signal = self.wfs_integrate()                
+                signal, signal_2D, noisy_frame = self.wfs_integrate(ideal_frame)                
             self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
 
         else:
             ##%%%%%%%%%%%%  GEOMETRIC SH WFS %%%%%%%%%%%%
-            self.raw_data   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
+            ideal_frame   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
 
             # TODO: Requires phase WITHOUT PUPIL, why?
-            self.signal_2D = self.lenslet_propagation_geometric(phase_in)*self.valid_slopes_maps/self.slopes_units
+            signal_2D = self.lenslet_propagation_geometric(phase_in)*self.valid_slopes_maps/self.slopes_units
                 
-            self.signal = self.signal_2D[self.valid_slopes_maps]
+            signal = signal_2D[self.valid_slopes_maps]
             
-            self*self.cam
+            noisy_frame = self.cam.integrate(ideal_frame)
+        
+        return signal, signal_2D, noisy_frame
 
     def print_properties(self):
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SHACK HARTMANN WFS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
@@ -694,17 +702,7 @@ class ShackHartmann:
                 print('Re-initializing WFS...')
                 self.initialize_wfs()
                 print('Done!')
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% WFS INTERACTIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    def __mul__(self,obj): 
-        if obj.tag=='detector':
-            obj._integrated_time+=self.telescope.samplingTime
-            obj.integrate(self.raw_data)
-            # self.raw_data = obj.frame
-        else:
-            print('Error light propagated to the wrong type of object')
-        return -1
-    
+   
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
  
     def show(self):
