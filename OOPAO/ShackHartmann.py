@@ -253,15 +253,6 @@ class ShackHartmann:
         self.cam.photonNoise        = 0
         self.cam.readoutNoise       = 0       
         
-        # reference signal
-        self.sx0                    = np.zeros([self.nSubap,self.nSubap])
-        self.sy0                    = np.zeros([self.nSubap,self.nSubap])
-        # signal vector
-        self.sx                     = np.zeros([self.nSubap,self.nSubap])
-        self.sy                     = np.zeros([self.nSubap,self.nSubap])
-        # signal map
-        self.SX                     = np.zeros([self.nSubap,self.nSubap])
-        self.SY                     = np.zeros([self.nSubap,self.nSubap])
         # flux per subaperture
         self.reference_slopes_maps  = np.zeros([self.nSubap*2,self.nSubap])
         self.slopes_units           = 1
@@ -291,9 +282,11 @@ class ShackHartmann:
             mean_slope[i] = np.mean(self.signal[:self.nValidSubaperture])
             input_std[i] = np.std(calibration_phase[telescope.pupil])
             
-        self.p = np.polyfit(np.linspace(-2,2,5)*amp,mean_slope,deg = 1)
-        self.slopes_units = np.abs(self.p[0])*(src.wavelength/2/np.pi)
-        print('Done!')
+        p = np.polyfit(np.linspace(-2,2,5)*amp,mean_slope,deg = 1)
+        self.slopes_units = np.abs(p[0])*(src.wavelength/2/np.pi)
+        
+        self.logger.info('ShackHartmann::initialize_wfs - Done!') 
+
         self.cam.photonNoise        = readoutNoise
         self.cam.readoutNoise       = photonNoise
         
@@ -488,41 +481,34 @@ class ShackHartmann:
         return
     
 #%% SH Measurement 
-    def sh_measure(self,phase_in):
-        # backward compatibility with previous version
-        self.wfs_measure(phase_in=phase_in)
-        return
-    def wfs_integrate(self, ideal_frame):
+    def wfs_integrate(self, ideal_frame, maps_intensity):
         # propagate to detector to add noise and detector effects
         noisy_frame = self.cam.integrate(ideal_frame)
-        self.split_raw_data(noisy_frame)
+        maps_intensity = self.split_raw_data(noisy_frame)
 
         # compute the centroid on valid subaperture
-        self.centroid_lenslets = self.centroid(self.maps_intensity,self.threshold_cog)
+        centroid_lenslets = self.centroid(maps_intensity, self.threshold_cog)
         
         # discard nan and inf values
-        val_inf = np.where(np.isinf(self.centroid_lenslets))
-        val_nan = np.where(np.isnan(self.centroid_lenslets)) 
+        val_inf = np.where(np.isinf(centroid_lenslets))
+        val_nan = np.where(np.isnan(centroid_lenslets)) 
         
         if np.shape(val_inf)[1] !=0:
-            print('Warning! some subapertures are giving inf values!')
-            self.centroid_lenslets[np.where(np.isinf(self.centroid_lenslets))] = 0
+            self.logger.warning('ShackHartmann::wfs_integrate - Some subapertures are giving inf values!')
+            centroid_lenslets[np.where(np.isinf(centroid_lenslets))] = 0
         
         if np.shape(val_nan)[1] !=0:
-            print('Warning! some subapertures are giving nan values!')
-            self.centroid_lenslets[np.where(np.isnan(self.centroid_lenslets))] = 0
+            self.logger.warning('ShackHartmann::wfs_integrate - Some subapertures are giving NaN values!')
+            centroid_lenslets[np.where(np.isnan(centroid_lenslets))] = 0
             
-        # compute slopes-maps
-        self.SX[self.validLenslets_x,self.validLenslets_y] = self.centroid_lenslets[:,0]
-        self.SY[self.validLenslets_x,self.validLenslets_y] = self.centroid_lenslets[:,1]
-        
-        signal_2D                           = np.concatenate((self.SX,self.SY)) - self.reference_slopes_maps
+        # compute slopes-maps       
+        signal_2D                           = np.concatenate((centroid_lenslets[:,0], centroid_lenslets[:,1])) - self.reference_slopes_maps
         signal_2D[~self.valid_slopes_maps]  = 0
         
         signal_2D                      = signal_2D/self.slopes_units
         signal                         = signal_2D[self.valid_slopes_maps]
         
-        return signal_2D,signal
+        return signal, signal_2D, noisy_frame
     
     # Receives the phase to be measure as an OPD [m] and return the slopes measured by the SH in [px]
 
@@ -588,7 +574,7 @@ class ShackHartmann:
                 maps_intensity =  I[:,self.n_pix_subap//2:-self.n_pix_subap//2,self.n_pix_subap//2:-self.n_pix_subap//2]
             t0 = time.time()
             if self.binning_factor>1:
-                maps_intensity =  bin_ndarray(self.maps_intensity,[self.maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,
+                maps_intensity =  bin_ndarray(maps_intensity,[maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,
                                                                         self.n_pix_subap//self.binning_factor], operation='sum')
             else:
                 maps_intensity =  bin_ndarray(I,[I.shape[0], self.n_pix_subap//self.binning_factor,
@@ -596,7 +582,7 @@ class ShackHartmann:
             
             # bin the 2D spots intensity to get the desired number of pixel per subaperture
             if self.binning_factor>1:
-                maps_intensity =  bin_ndarray(self.maps_intensity,[self.maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,
+                maps_intensity =  bin_ndarray(maps_intensity,[maps_intensity.shape[0], self.n_pix_subap//self.binning_factor,
                                                                         self.n_pix_subap//self.binning_factor], operation='sum')
             self.logger.info(f'ShackHartmann::wfs_measure - Binning: {time.time()-t0}')
             t0 = time.time()
@@ -607,7 +593,7 @@ class ShackHartmann:
             self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
             t0 = time.time()
             if integrate:
-                signal, signal_2D, noisy_frame = self.wfs_integrate(ideal_frame)                
+                signal, signal_2D, noisy_frame = self.wfs_integrate(ideal_frame, maps_intensity)                
             self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
 
         else:
