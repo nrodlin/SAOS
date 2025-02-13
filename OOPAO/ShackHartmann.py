@@ -337,36 +337,30 @@ class ShackHartmann:
         self.cube_em*=np.sqrt(self.cube_flux)*self.phasor_tiled
         return self.cube_em 
   
-    def fill_raw_data(self,ind_x,ind_y,I,ideal_frame, index_frame=None):
-        if index_frame is None:
-            ideal_frame[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
-        else:
-            ideal_frame[index_frame,ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I
+    def fill_raw_data(self,ind_x,ind_y,I,ideal_frame):
+        self.logger.debug('shackHartmann::fill_raw_data')
 
-    def split_raw_data(self):
-        raw_data_h_split = np.vsplit((self.cam.frame),self.nSubap)
-        self.maps_intensity = np.zeros([self.nSubap**2,self.n_pix_subap,self.n_pix_subap],dtype=float)
+        ideal_frame[ind_x*self.n_pix_subap//self.binning_factor:(ind_x+1)*self.n_pix_subap//self.binning_factor,
+                    ind_y*self.n_pix_subap//self.binning_factor:(ind_y+1)*self.n_pix_subap//self.binning_factor] = I        
+        
+        return ideal_frame
+
+    def split_raw_data(self, noisy_frame):
+        self.logger.debug('shackHartmann::split_raw_data')
+
+        raw_data_h_split = np.vsplit((noisy_frame),self.nSubap)
+        
+        maps_intensity = np.zeros([self.nSubap**2,self.n_pix_subap, self.n_pix_subap], dtype=float)
         center = self.n_pix_subap//2
+
         for i in range(self.nSubap):
             raw_data_v_split = np.hsplit(raw_data_h_split[i],self.nSubap)
-            self.maps_intensity[i*self.nSubap:(i+1)*self.nSubap,center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2,center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2] = np.asarray(raw_data_v_split)
-        self.maps_intensity = self.maps_intensity[self.valid_subapertures_1D,:,:]
- 
-    def compute_raw_data_multi(self,maps_intensity):   
-        self.ind_frame =np.zeros(maps_intensity.shape[0],dtype=(int))
-        self.maps_intensity = maps_intensity
-        index_x = np.tile(self.index_x[self.valid_subapertures_1D],self.phase_buffer.shape[0])
-        index_y = np.tile(self.index_y[self.valid_subapertures_1D],self.phase_buffer.shape[0])
+            maps_intensity[i*self.nSubap:(i+1)*self.nSubap,center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2,
+                           center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2] = np.asarray(raw_data_v_split)
         
-        for i in range(self.phase_buffer.shape[0]):
-            self.ind_frame[i*self.nValidSubaperture:(i+1)*self.nValidSubaperture]=i
-        
-        def joblib_fill_raw_data():
-            Q=Parallel(n_jobs=1,prefer='processes')(delayed(self.fill_raw_data)(i,j,k,l) for i,j,k,l in zip(index_x,index_y,self.maps_intensity,self.ind_frame))
-            return Q
-        
-        joblib_fill_raw_data()
-        return
+        maps_intensity = maps_intensity[self.valid_subapertures_1D,:,:]
+
+        return maps_intensity
         
     #%% GEOMETRIC    
          
@@ -607,12 +601,9 @@ class ShackHartmann:
             self.logger.info(f'ShackHartmann::wfs_measure - Binning: {time.time()-t0}')
             t0 = time.time()
             # fill camera frame with computed intensity (only valid subapertures)
-            def joblib_fill_raw_data():
-                Q=Parallel(n_jobs=1,prefer=self.joblib_prefer)(delayed(self.fill_raw_data)(i,j,k) for i,j,k in zip(self.index_x[self.valid_subapertures_1D],
-                                                                                                                   self.index_y[self.valid_subapertures_1D],
-                                                                                                                   maps_intensity, ideal_frame))
-                return Q
-            joblib_fill_raw_data()
+
+            self.fill_raw_data(self.index_x[self.valid_subapertures_1D], self.index_y[self.valid_subapertures_1D], maps_intensity, ideal_frame)
+
             self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
             t0 = time.time()
             if integrate:
