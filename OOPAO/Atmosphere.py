@@ -610,7 +610,7 @@ class Atmosphere:
         # The OPD is in [meters]
         result_opd_no_pupil = Parallel(n_jobs=len(list_src), prefer="threads")(delayed(self.get_opd_per_src)(list_src[i], result_phase[i]) for i in range(len(list_src)))
 
-        return result_opd_no_pupil
+        return result_opd_no_pupil[0]
         
     # Use the src position on sky to get the region of interest for the line of sight, selecting it through a binary mask (footprint)
     # Returns a list with the footprint per layer and a list with the center offset per axis [x, y] due to discretization
