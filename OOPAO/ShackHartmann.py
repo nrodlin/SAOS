@@ -190,11 +190,7 @@ class ShackHartmann:
             self.is_LGS                 = True
         else:
             self.is_LGS                 = False
-        
-        # joblib parameter
-        self.nJobs                  = 1
-        self.joblib_prefer          = 'threads'
-        
+                
         # cube of lenslet zero padded
         self.cube                   = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init])
         self.cube_flux              = np.zeros([self.nSubap**2,self.n_pix_subap_init,self.n_pix_subap_init],dtype=(complex))
@@ -223,8 +219,11 @@ class ShackHartmann:
         self.current_nPhoton = src.nPhoton
         self.index_x = np.asarray(self.index_x)
         self.index_y = np.asarray(self.index_y)
-        self.flux_flag = False        
-        print('Selecting valid subapertures based on flux considerations..')
+
+        self.flux_flag = False     
+
+
+        self.logger.info('ShackHartmann::__init__ - Selecting valid subapertures based on flux considerations..')
         self.photon_per_subaperture_2D = np.reshape(self.photon_per_subaperture,[self.nSubap,self.nSubap])
         self.valid_subapertures = np.reshape(self.photon_per_subaperture >= self.lightRatio*np.max(self.photon_per_subaperture), [self.nSubap,self.nSubap])
         self.valid_subapertures_1D = np.reshape(self.valid_subapertures,[self.nSubap**2])
