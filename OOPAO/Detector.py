@@ -286,6 +286,8 @@ class Detector:
             # reset the buffer and _integrated_time property
             self.buffer_frame     = []
             self._integrated_time = 0
+
+            return self.frame
              
     
     def integrate(self,frame):
@@ -306,10 +308,12 @@ class Detector:
         self.buffer_frame.append(frame)
         
         if self.integrationTime is None:
-            self.readout()
+            noisy_frame = self.readout()
         else:                
             if self._integrated_time>=self.integrationTime: 
-                self.readout()
+                noisy_frame = self.readout()
+        
+        return noisy_frame
 
 
     def computeSNR(self):
