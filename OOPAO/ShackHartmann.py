@@ -567,8 +567,9 @@ class ShackHartmann:
             norma = self.cube.shape[1]
 
             # compute spot intensity
-            sp.fft.set_workers(self.nSubap)  # Use 1 thread per subaperture row
+            sp.fft.set_workers(self.nSubap)  # Use 1 thread per row of subapertures
             I = (np.abs(sp.fft.fft2(np.asarray(self.get_lenslet_em_field(phase_in)), axes=[1,2]) / norma) ** 2)
+            # I = (np.abs(np.fft.fft2(np.asarray(self.get_lenslet_em_field(phase_in)),axes=[1,2])/norma)**2)
 
             # reduce to valid subaperture
             I = I[self.valid_subapertures_1D,:,:]
