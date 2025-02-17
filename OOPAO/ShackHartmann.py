@@ -13,6 +13,7 @@ import logging.handlers
 from queue import Queue
 
 import numpy as np
+import scipy as sp
 
 from .Detector import Detector
 from .tools.tools import bin_ndarray
@@ -306,17 +307,20 @@ class ShackHartmann:
 
     def initialize_flux(self, src, norm_flux_map):
 
+        # Create the flux cube storing the flux at each subaperture
+        self.cube_flux = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init],dtype=float)
+
+        # Build the flux map
         input_flux_map = src.nPhoton * norm_flux_map
 
         input_flux_map = input_flux_map.reshape(self.nSubap, self.n_pix_subap_init, 
                          self.nSubap, self.n_pix_subap_init).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
                                                                                             self.n_pix_subap_init, self.n_pix_subap_init) 
-        
-        self.cube_flux = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init],dtype=float)
-        
+        # Assign the illumination to the region, considering zeropadding
         self.cube_flux[:,self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2,
                         self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2] = input_flux_map
       
+        # Get general properties of the illumination
         self.photon_per_subaperture = np.apply_over_axes(np.sum, self.cube_flux, [1,2])
         self.current_nPhoton = src.nPhoton
         return
@@ -325,13 +329,16 @@ class ShackHartmann:
     # The subapertures are sorted from left to right, top to bottom.
 
     def get_lenslet_em_field(self, phase):
-        self.logger('ShackHartmann::get_lenslet_em_field')
-        # Reshape the subapertures to a grid of subapertures
-        phase_reshaped = phase.reshape(self.nSubap, self.n_pix_lenslet_init, 
-                                       self.nSubap, self.n_pix_lenslet_init).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
-                                                                                                           self.n_pix_lenslet_init, self.n_pix_lenslet_init)
+        self.logger.debug('ShackHartmann::get_lenslet_em_field')
+        # Create the output with the dimensions
+        cube_em = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init],dtype=complex)
+        # Reshape the subapertures to a grid of subapertures. The sensor can be zeropadded, so the phase is filling the central part of the subaperture
+        phase_reshaped = phase.reshape(self.nSubap, self.n_pix_subap_init, 
+                                       self.nSubap, self.n_pix_subap_init).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
+                                                                                                           self.n_pix_subap_init, self.n_pix_subap_init)
         # Apply the exponential to full matrix
-        cube_em = np.exp(1j * phase_reshaped)
+        cube_em[:,self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2,
+                  self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2] = np.exp(1j * phase_reshaped)
 
         # Apply light scaling
         cube_em *= np.sqrt(self.cube_flux) * self.phasor_tiled
@@ -560,13 +567,11 @@ class ShackHartmann:
             norma = self.cube.shape[1]
 
             # compute spot intensity
-            t0 = time.time()
-            I = (np.abs(np.fft.fft2(np.asarray(self.get_lenslet_em_field(phase_in)),axes=[1,2])/norma)**2)
-            self.logger.info(f'ShackHartmann::wfs_measure - em field: {time.time()-t0}')
+            sp.fft.set_workers(self.nSubap)  # Use 1 thread per subaperture row
+            I = (np.abs(sp.fft.fft2(np.asarray(self.get_lenslet_em_field(phase_in)), axes=[1,2]) / norma) ** 2)
 
             # reduce to valid subaperture
             I = I[self.valid_subapertures_1D,:,:]
-            t0 = time.time()
             # Check if there are wrapping effects at the edges of the pupil
             if self.flux_flag == False:
                 self.sum_I   = np.sum(I,axis=0)
@@ -577,7 +582,6 @@ class ShackHartmann:
                 self.logger.warning('ShackHartmann::wfs_measure - THE LIGHT IN THE SUBAPERTURE MAY BE WRAPPING !!!'\
                                    + str(np.round(100*self.edge_subaperture_criterion,1))+'% of the total flux detected on the edges of the subapertures.'\
                                    'You may want to lower the seeing value or increase the resolution')            
-            self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
             
             # if FoV is extended, zero pad the spot intensity
             if self.is_extended:
@@ -591,7 +595,7 @@ class ShackHartmann:
             # Crop to get the spot at shannon sampling
             if self.shannon_sampling:
                 subaps =  I[:,self.n_pix_subap//2:-self.n_pix_subap//2,self.n_pix_subap//2:-self.n_pix_subap//2]
-            t0 = time.time()
+
             if self.binning_factor>1:
                 subaps =  bin_ndarray(subaps,[subaps.shape[0], self.n_pix_subap//self.binning_factor,
                                                                         self.n_pix_subap//self.binning_factor], operation='sum')
@@ -603,18 +607,12 @@ class ShackHartmann:
             if self.binning_factor>1:
                 subaps =  bin_ndarray(subaps,[subaps.shape[0], self.n_pix_subap//self.binning_factor,
                                                                         self.n_pix_subap//self.binning_factor], operation='sum')
-            self.logger.info(f'ShackHartmann::wfs_measure - Binning: {time.time()-t0}')
-            t0 = time.time()
             # fill camera frame with computed intensity (only valid subapertures)
 
             ideal_frame = self.create_full_frame(subaps)
 
-            self.logger.info(f'ShackHartmann::wfs_measure - Create full frame: {time.time()-t0}')
-            t0 = time.time()
             if integrate:
                 signal, signal_2D, noisy_frame = self.wfs_integrate(ideal_frame, subaps)                
-            self.logger.info(f'ShackHartmann::wfs_measure - Integrate: {time.time()-t0}')
-
         else:
             ##%%%%%%%%%%%%  GEOMETRIC SH WFS %%%%%%%%%%%%
             ideal_frame   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
