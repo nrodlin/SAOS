@@ -304,30 +304,33 @@ class ShackHartmann:
         return centroid_out
 #%% DIFFRACTIVE
 
-    def initialize_flux(self,src, norm_flux_map):
+    def initialize_flux(self, src, norm_flux_map):
 
-        input_flux_map = src.nPhoton * norm_flux_map.T
-        
-        tmp_flux_h_split = np.hsplit(input_flux_map,self.nSubap)
-        self.cube_flux = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init],dtype=float)
-        
-        for i in range(self.nSubap):
-            tmp_flux_v_split = np.vsplit(tmp_flux_h_split[i],self.nSubap)
-            self.cube_flux[i*self.nSubap:(i+1)*self.nSubap,self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2,
-                           self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2] = np.asarray(tmp_flux_v_split)
-        
+        input_flux_map = src.nPhoton * norm_flux_map
+
+        self.cube_flux = input_flux_map.reshape(self.nSubap, self.n_pix_lenslet_init, 
+                                self.nSubap, self.n_pix_lenslet_init).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
+                                                                                                    self.n_pix_lenslet_init, self.n_pix_lenslet_init)       
         self.photon_per_subaperture = np.apply_over_axes(np.sum, self.cube_flux, [1,2])
         self.current_nPhoton = src.nPhoton
         return
-    
-    def get_lenslet_em_field(self,phase):
-        tmp_phase_h_split = np.hsplit(phase.T,self.nSubap)
-        self.cube_em = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init],dtype=complex)
-        for i in range(self.nSubap):
-            tmp_phase_v_split = np.vsplit(tmp_phase_h_split[i],self.nSubap)
-            self.cube_em[i*self.nSubap:(i+1)*self.nSubap,self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2,self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2] = np.exp(1j*np.asarray(tmp_phase_v_split))
-        self.cube_em*=np.sqrt(self.cube_flux)*self.phasor_tiled
-        return self.cube_em 
+    # This function takes the phase at the pupil as input. Then, the flux at each subaperture (pupil function) is multiplied 
+    # by the complex phase to obtain the PSF per subaperture, as an array of dimensions (nSubap**2, n_pix_lenslet_init, n_pix_lenslet_init)
+    # The subapertures are sorted from left to right, top to bottom.
+
+    def get_lenslet_em_field(self, phase):
+        self.logger('ShackHartmann::get_lenslet_em_field')
+        # Reshape the subapertures to a grid of subapertures
+        phase_reshaped = phase.reshape(self.nSubap, self.n_pix_lenslet_init, 
+                                       self.nSubap, self.n_pix_lenslet_init).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
+                                                                                                           self.n_pix_lenslet_init, self.n_pix_lenslet_init)
+        # Apply the exponential to full matrix
+        cube_em = np.exp(1j * phase_reshaped)
+
+        # Apply light scaling
+        cube_em *= np.sqrt(self.cube_flux) * self.phasor_tiled
+
+        return cube_em
   
     def create_full_frame(self, subaps):
         self.logger.debug('shackHartmann::create_full_frame')
@@ -348,16 +351,15 @@ class ShackHartmann:
 
     def get_subaps(self, noisy_frame):
         self.logger.debug('shackHartmann::get_subaps')
-
-        raw_data_h_split = np.vsplit((noisy_frame),self.nSubap)
         
-        subaps = np.zeros([self.nSubap**2,self.n_pix_subap, self.n_pix_subap], dtype=float)
+        subaps = noisy_frame.reshape(self.nSubap, self.n_pix_subap, 
+                                            self.nSubap, self.n_pix_subap).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
+                                                                                                         self.n_pix_subap, self.n_pix_subap)
         center = self.n_pix_subap//2
 
-        for i in range(self.nSubap):
-            raw_data_v_split = np.hsplit(raw_data_h_split[i],self.nSubap)
+        for i in range(self.nSubap*self.nSubap):
             subaps[i*self.nSubap:(i+1)*self.nSubap,center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2,
-                           center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2] = np.asarray(raw_data_v_split)
+                   center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2] = subaps[i]
         
         subaps = subaps[self.valid_subapertures_1D,:,:]
 
@@ -461,8 +463,8 @@ class ShackHartmann:
                     shift_x_buffer.append(shift_X)
                     shift_y_buffer.append(shift_Y)
 
-                    C_elung.append((np.fft.fft2(I.T)))
-                    C_gauss.append((np.fft.fft2(I_gauss.T)))
+                    C_elung.append((np.fft.fft2(I)))
+                    C_gauss.append((np.fft.fft2(I_gauss)))
                     
         self.shift_x_buffer = np.asarray(shift_x_buffer)
         self.shift_y_buffer = np.asarray(shift_y_buffer)
@@ -488,7 +490,7 @@ class ShackHartmann:
         
         return
     
-#%% SH Measurement 
+#%% SH Measurement
     def wfs_integrate(self, ideal_frame, subaps):
         # propagate to detector to add noise and detector effects
         noisy_frame = self.cam.integrate(ideal_frame)
@@ -529,8 +531,8 @@ class ShackHartmann:
         
         return signal, signal_2D, noisy_frame
     
-    # Receives the phase to be measure as an OPD [m] and return the slopes measured by the SH in [px]
-
+    # Receives the phase [rad]] and return the slopes measured by the SH in [px]
+    # Expects the ideal frame WITHOUT pupil applied.
     def wfs_measure(self,phase_in, src, integrate = True):
         self.logger.debug("ShackHartmann::wfs_measure")
         # Check input parameters
@@ -602,17 +604,16 @@ class ShackHartmann:
 
             ideal_frame = self.create_full_frame(subaps)
 
-            self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
+            self.logger.info(f'ShackHartmann::wfs_measure - Create full frame: {time.time()-t0}')
             t0 = time.time()
             if integrate:
                 signal, signal_2D, noisy_frame = self.wfs_integrate(ideal_frame, subaps)                
-            self.logger.info(f'ShackHartmann::wfs_measure - Time checking wrapping effects: {time.time()-t0}')
+            self.logger.info(f'ShackHartmann::wfs_measure - Integrate: {time.time()-t0}')
 
         else:
             ##%%%%%%%%%%%%  GEOMETRIC SH WFS %%%%%%%%%%%%
             ideal_frame   = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,self.n_pix_subap*(self.nSubap)//self.binning_factor], dtype =float)
 
-            # TODO: Requires phase WITHOUT PUPIL, why?
             signal_2D = self.lenslet_propagation_geometric(phase_in)*self.valid_slopes_maps/self.slopes_units
                 
             signal = signal_2D[self.valid_slopes_maps]
@@ -715,7 +716,7 @@ class ShackHartmann:
         self.print_properties()
         return ' '
     
-    def setup_logging(self, logging_level=logging.WARNING):
+    def setup_logging(self, logging_level=logging.INFO):
         #
         #  Setup of logging at the main process using QueueHandler
         log_queue = Queue()
