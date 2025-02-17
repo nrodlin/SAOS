@@ -117,7 +117,6 @@ class Detector:
                 
         self.saturation         = 0
         self.tag                = 'detector'   
-        self.buffer_frame       = []
         self._integrated_time   = 0
         self.fov_arcsec         = None
         self.pixel_size_rad     = None
@@ -235,11 +234,10 @@ class Detector:
             frame -= self.backgroundMap        
             return frame
         except:
-            raise AttributeError('The shape of the backgroun map does not match the ')
+            raise AttributeError('The shape of the background map does not match the ')
     
     
-    def readout(self):
-            frame = np.sum(self.buffer_frame,axis=0)   
+    def readout(self, frame):
                         
             if self.darkCurrent!=0:
                 frame = self.set_dark_shot_noise(frame)
@@ -276,7 +274,6 @@ class Detector:
                 frame = self.remove_bakground(frame)
             # Save the integrated frame and buffer
             self.frame  = frame.copy()
-            self.buffer = self.buffer_frame.copy()
             if self.resolution is None:
                 self.resolution       = self.frame.shape[0]
             if self.fov_arcsec is not None:
@@ -284,7 +281,6 @@ class Detector:
                 self.pixel_size_arcsec  = self.fov_arcsec/self.resolution
             
             # reset the buffer and _integrated_time property
-            self.buffer_frame     = []
             self._integrated_time = 0
 
             return self.frame
@@ -304,11 +300,9 @@ class Detector:
             
         # Simulate the quantum efficiency of the detector (photons to electrons)
         frame = self.conv_photon_electron(frame)
-
-        self.buffer_frame.append(frame)
         
         if self.integrationTime is None:
-            noisy_frame = self.readout()
+            noisy_frame = self.readout(frame)
         else:                
             if self._integrated_time>=self.integrationTime: 
                 noisy_frame = self.readout()
@@ -366,8 +360,6 @@ class Detector:
     def integrationTime(self,val):          
         self._integrationTime = val
         self._integrated_time = 0
-        self.buffer_frame = []
-
         
              
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
