@@ -308,9 +308,15 @@ class ShackHartmann:
 
         input_flux_map = src.nPhoton * norm_flux_map
 
-        self.cube_flux = input_flux_map.reshape(self.nSubap, self.n_pix_lenslet_init, 
-                                self.nSubap, self.n_pix_lenslet_init).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
-                                                                                                    self.n_pix_lenslet_init, self.n_pix_lenslet_init)       
+        input_flux_map = input_flux_map.reshape(self.nSubap, self.n_pix_subap_init, 
+                         self.nSubap, self.n_pix_subap_init).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
+                                                                                            self.n_pix_subap_init, self.n_pix_subap_init) 
+        
+        self.cube_flux = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init],dtype=float)
+        
+        self.cube_flux[:,self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2,
+                        self.center_init - self.n_pix_subap_init//2:self.center_init+self.n_pix_subap_init//2] = input_flux_map
+      
         self.photon_per_subaperture = np.apply_over_axes(np.sum, self.cube_flux, [1,2])
         self.current_nPhoton = src.nPhoton
         return
@@ -357,9 +363,8 @@ class ShackHartmann:
                                                                                                          self.n_pix_subap, self.n_pix_subap)
         center = self.n_pix_subap//2
 
-        for i in range(self.nSubap*self.nSubap):
-            subaps[i*self.nSubap:(i+1)*self.nSubap,center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2,
-                   center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2] = subaps[i]
+        subaps[:,center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2,
+                center - self.n_pix_subap//self.binning_factor//2:center+self.n_pix_subap//self.binning_factor//2] = subaps
         
         subaps = subaps[self.valid_subapertures_1D,:,:]
 
