@@ -36,7 +36,7 @@ class ShackHartmann:
                  padding_extension_factor:int = 1,
                  threshold_convolution:float = 0.05,
                  shannon_sampling:bool = False,
-                 unit_P2V = False):
+                 unit_in_rad = False):
         
         """SHACK-HARTMANN
         A Shack Hartmann object consists in defining a 2D grd of lenslet arrays located in the pupil plane of the telescope to estimate the local tip/tilt seen by each lenslet. 
@@ -79,9 +79,9 @@ class ShackHartmann:
             If True, the lenslet array spots are sampled at the same sampling as the FFT (2 pix per FWHM).
             If False, the sampling is 1 pix per FWHM (default).
             The default is False.
-        unit_P2V : bool, optional
-                If True, the slopes units are calibrated using a Tip/Tilt normalized to 2 Pi peak-to-valley.
-                If False, the slopes units are calibrated using a Tip/Tilt normalized to 1 in the pupil (Default). In that case the slopes are expressed in [rad].
+        unit_in_rad : bool, optional
+                If True, the slopes units are in radians.
+                If False, the slopes units are in px.
                 The default is False.
 
         Raises
@@ -144,7 +144,7 @@ class ShackHartmann:
         self.threshold_convolution          = threshold_convolution
         self.threshold_cog                  = threshold_cog
         self.shannon_sampling               = shannon_sampling
-        self.unit_P2V                       = unit_P2V
+        self.unit_in_rad                    = unit_in_rad
         # case where the spots are zeropadded to provide larger fOV
         if padding_extension_factor>=2:
             self.n_pix_subap            = int(padding_extension_factor*telescope.resolution// self.nSubap)            
@@ -262,28 +262,30 @@ class ShackHartmann:
         self.isInitialized = True
         
         self.logger.info('ShackHartmann::initialize_wfs - Setting slopes units..')  
-        # normalize to 2 pi p2v
+        # Compute conversion from px to rad
 
-        [Tip, Tilt] = np.meshgrid(np.linspace(0,np.pi,telescope.resolution,endpoint=False),np.linspace(0,np.pi,telescope.resolution,endpoint=False))
+        # First, we generate a phase
+        if self.unit_in_rad:
+            [Tip, Tilt] = np.meshgrid(np.linspace(-np.pi,np.pi,telescope.resolution,endpoint=False),np.linspace(-np.pi,np.pi,telescope.resolution,endpoint=False))
 
-        if self.unit_P2V is False:            
-            # normalize to 1 m RMS in the pupil
-            Tip *= 1/np.std(Tip[telescope.pupil])
+            mode_amp = np.std(Tip)
+            amp_list = [i for i in range(-2,3)]
 
-        mean_slope = np.zeros(5)
-        amp = 10e-9
+            mean_slope = np.zeros(5)
+            input_std = np.zeros(5)
 
-        input_std = np.zeros(5)
-        
-        for i in range(5):
-            calibration_phase = telescope.pupil*Tip*(i-2)*amp*((2*np.pi)/src.wavelength)
+            for i in range(len(amp_list)):
+                calibration_phase_tip = amp_list[i]*Tip*telescope.pupil
+                signalTip,_,_ = self.wfs_measure(calibration_phase_tip, src)
 
-            signal,_,_ = self.wfs_measure(calibration_phase, src)        
-            mean_slope[i] = np.mean(signal[:self.nValidSubaperture])
-            input_std[i] = np.std(calibration_phase[telescope.pupil])
-            
-        p = np.polyfit(np.linspace(-2,2,5)*amp,mean_slope,deg = 1)
-        self.slopes_units = np.abs(p[0])*(src.wavelength/2/np.pi)
+                calibration_phase_tilt = amp_list[i]*Tilt*telescope.pupil
+                signalTilt,_,_ = self.wfs_measure(calibration_phase_tilt, src)
+
+                mean_slope[i] = np.mean(signalTip[:self.nValidSubaperture] + signalTilt[:self.nValidSubaperture])
+                input_std[i] = np.std(calibration_phase_tip[telescope.pupil])
+                
+            p = np.polyfit(amp_list*np.asarray(mode_amp), mean_slope, deg = 1)
+            self.slopes_units = np.abs(p[0]) # [px/rad]
         
         self.logger.info('ShackHartmann::initialize_wfs - Done!') 
 
