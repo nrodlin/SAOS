@@ -36,7 +36,8 @@ class ShackHartmann:
                  padding_extension_factor:int = 1,
                  threshold_convolution:float = 0.05,
                  shannon_sampling:bool = False,
-                 unit_in_rad = False):
+                 unit_in_rad = False,
+                 logger=None):
         
         """SHACK-HARTMANN
         A Shack Hartmann object consists in defining a 2D grd of lenslet arrays located in the pupil plane of the telescope to estimate the local tip/tilt seen by each lenslet. 
@@ -124,8 +125,11 @@ class ShackHartmann:
             _ wfs.lightRatio            : reset the valid subaperture selection considering the new value
         
         """
-        self.queue_listerner = self.setup_logging()
-        self.logger = logging.getLogger()
+        if logger is None:
+            self.queue_listerner = self.setup_logging()
+            self.logger = logging.getLogger()
+        else:
+            self.logger = logger
 
         self.tag                            = 'shackHartmann'
 
@@ -723,7 +727,6 @@ class ShackHartmann:
         return ' '
     
     def setup_logging(self, logging_level=logging.WARNING):
-        #
         #  Setup of logging at the main process using QueueHandler
         log_queue = Queue()
         queue_handler = logging.handlers.QueueHandler(log_queue)

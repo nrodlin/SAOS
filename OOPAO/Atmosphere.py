@@ -82,7 +82,8 @@ class Atmosphere:
                  fractionalR0:list,
                  windDirection:list,
                  altitude:list,
-                 mode:float=1):
+                 mode:float=1,
+                 logger=None):
         """ ATMOSPHERE.
         An Atmosphere is made of one or several layer of turbulence that follow the Van Karmann statistics. 
         Each layer is considered to be independant to the other ones and has its own properties (direction, speed, etc.)
@@ -168,8 +169,11 @@ class Atmosphere:
         _ display_atm_layers(layer_index)           : imshow the OPD of each layer with the intersection beam for each source
         
         """
-        self.queue_listerner = self.setup_logging()
-        self.logger = logging.getLogger()
+        if logger is None:
+            self.queue_listerner = self.setup_logging()
+            self.logger = logging.getLogger()
+        else:
+            self.logger = logger
 
         self.hasNotBeenInitialized  = True
         self.r0_def                 = 0.15              # Fried Parameter in m 
