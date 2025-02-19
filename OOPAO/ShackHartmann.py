@@ -722,7 +722,7 @@ class ShackHartmann:
         self.print_properties()
         return ' '
     
-    def setup_logging(self, logging_level=logging.INFO):
+    def setup_logging(self, logging_level=logging.WARNING):
         #
         #  Setup of logging at the main process using QueueHandler
         log_queue = Queue()
