@@ -12,28 +12,28 @@ import time
 import numpy as np
 from joblib import Parallel, delayed
 
+import logging
+import logging.handlers
+from queue import Queue
+
 from .MisRegistration import MisRegistration
-from .tools.interpolateGeometricalTransformation import interpolate_cube
+from .tools.interpolateGeometricalTransformation import interpolate_cube, interpolate_image
 from .tools.tools import emptyClass, pol2cart, print_
 
 
-# try :
-#     mkl_rt = ctypes.CDLL('libmkl_rt.so')
-#     mkl_set_num_threads = mkl_rt.MKL_Set_Num_Threads
-#     mkl_set_num_threads(8)
-# except:
-#     try:
-#         mkl_rt = ctypes.CDLL('./mkl_rt.dll')
-#         mkl_set_num_threads = mkl_rt.MKL_Set_Num_Threads
-#         mkl_set_num_threads(8)
-#     except:
-#         try:
-#             import mkl
-#             mkl_set_num_threads = mkl.set_num_threads
-#         except:
-#             mkl_set_num_threads = None
-
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CLASS INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+
+class dmLayerClass():
+    def __init__(self):
+        self.altitude = None
+        self.D_fov = None # diameter of the DM projected into the altitude layer [meters]
+        self.D_px = None # size of the DM in [pixels]
+        self.telescope_D = None # Telescope diamter in [meters]
+        self.telescope_D_px = None # Telescope diameter in [px] using the DM resolution
+        self.telescope_resolution = None # Telescope diameter in [px] using the original telescope resolution
+        self.center = None # center coordinates of the DM [pixels]
+        self.pupil_footprint = None # 2D telescope pupil projected to the altitude layer
+        
 
 class DeformableMirror:
     def __init__(self,
@@ -44,7 +44,7 @@ class DeformableMirror:
                  pitch:float = None,
                  modes:np.ndarray = None,
                  misReg = None,
-                 M4_param = None,
+                 customDM = None,
                  nJobs:int = 30,
                  nThreads:int = 20,
                  print_dm_properties:bool = True,
@@ -54,7 +54,8 @@ class DeformableMirror:
                  flip_lr = False,
                  sign = 1,
                  valid_act_thresh_outer = None, 
-                 valid_act_thresh_inner = None):
+                 valid_act_thresh_inner = None,
+                 logger = None):
         """DEFORMABLE MIRROR
         A Deformable Mirror object consists in defining the 2D maps of influence functions of the actuators. 
         By default, the actuator grid is cartesian in a Fried Geometry with respect to the nSubap parameter. 
@@ -105,7 +106,7 @@ class DeformableMirror:
             to the Deformable Mirror. When using user-defined influence functions, this parameter is ignored.
             Consider to use the function applyMisRegistration in OOPAO/mis_registration_identification_algorithm/ to perform interpolations.
             The default is None.
-        M4_param : Parameter File, optional
+        customDM : Parameter File, optional
             Parameter File for M4 computation. The default is None.
         nJobs : int, optional
             Number of jobs for the joblib multi-threading. The default is 30.
@@ -153,7 +154,7 @@ class DeformableMirror:
                 In that case tel.OPD is summed with dm.OPD: tel.OPD = tel.OPD + dm.OPD
 
         ************************** CHANGING THE OPD OF THE MIRROR **************************
-        
+        np.squeeze(interpolate_image(layer.phase, pixel_size_in, pixel_size_out, resolution_out, shift_x =layer.extra_sx, shift_y= layer.extra_sy))
         * The dm.OPD can be reseted to 0 by setting the dm.coefs property to 0:
             dm.coefs = 0
 
@@ -198,89 +199,82 @@ class DeformableMirror:
         tel.OPD contains a cube of 2D maps for each actuator
 
         """
+        # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
+        if logger is None:
+            self.queue_listerner = self.setup_logging()
+            self.logger = logging.getLogger()
+        else:
+            self.logger = logger
+
+        # Define class attributes
         self.print_dm_properties = print_dm_properties
         self.floating_precision = floating_precision
         self.flip_= flip
         self.flip_lr = flip_lr 
         self.sign = sign
-        self.M4_param = M4_param
-        if M4_param is not None:
-            if M4_param['isM4']:
-                from .M4_model.make_M4_influenceFunctions import makeM4influenceFunctions
+        if customDM is not None:
+            print_('Building the set of influence functions for the custom DM...', print_dm_properties)
+            # generate the M4 influence functions            
 
-                print_('Building the set of influence functions of M4...',print_dm_properties)
-                # generate the M4 influence functions            
+            pup = telescope.pupil
+            filename = customDM['m4_filename']
+            nAct = customDM['nActuator']
+            
+            a = time.time()
+            # compute M4 influence functions
+            # TODO: implement makeInfluenceFunctions for custom DMs
+            try:
+                coordinates_M4 = makeM4influenceFunctions(pup                   = pup,\
+                                                            filename              = filename,\
+                                                            misReg                = misReg,\
+                                                            dm                    = self,\
+                                                            nAct                  = nAct,\
+                                                            nJobs                 = nJobs,\
+                                                            nThreads              = nThreads,\
+                                                            order                 = customDM['order_m4_interpolation'],\
+                                                            floating_precision    = floating_precision)
+            except:
+                coordinates_M4 = makeM4influenceFunctions(pup                   = pup,\
+                                                            filename              = filename,\
+                                                            misReg                = misReg,\
+                                                            dm                    = self,\
+                                                            nAct                  = nAct,\
+                                                            nJobs                 = nJobs,\
+                                                            nThreads              = nThreads,\
+                                                            floating_precision    = floating_precision)
 
-                pup = telescope.pupil
-                filename = M4_param['m4_filename']
-                nAct = M4_param['nActuator']
-                
-                a = time.time()
-                # compute M4 influence functions
-                try:
-                    coordinates_M4 = makeM4influenceFunctions(pup                   = pup,\
-                                                              filename              = filename,\
-                                                              misReg                = misReg,\
-                                                              dm                    = self,\
-                                                              nAct                  = nAct,\
-                                                              nJobs                 = nJobs,\
-                                                              nThreads              = nThreads,\
-                                                              order                 = M4_param['order_m4_interpolation'],\
-                                                              floating_precision    = floating_precision)
-                except:
-                    coordinates_M4 = makeM4influenceFunctions(pup                   = pup,\
-                                                              filename              = filename,\
-                                                              misReg                = misReg,\
-                                                              dm                    = self,\
-                                                              nAct                  = nAct,\
-                                                              nJobs                 = nJobs,\
-                                                              nThreads              = nThreads,\
-                                                              floating_precision    = floating_precision)
-
-    #            selection of the valid M4 actuators
-                if M4_param['validActCriteria']!=0:
-                    IF_STD = np.std(np.squeeze(self.modes[telescope.pupilLogical,:]), axis=0)
-                    ACTXPC=np.where(IF_STD >= np.mean(IF_STD)*M4_param['validActCriteria'])
-                    self.modes         = self.modes[:,ACTXPC[0]]
-                
-                    coordinates = coordinates_M4[ACTXPC[0],:]
-                else:
-                    coordinates = coordinates_M4
-                # normalize coordinates 
-                coordinates   = (coordinates/telescope.resolution - 0.5)*40
-                self.M4_param = M4_param
-                self.isM4 = True
-                print_ ('Done!',print_dm_properties)
-                b = time.time()
-
-                print_('Done! M4 influence functions computed in ' + str(b-a) + ' s!',print_dm_properties)
+#            selection of the valid M4 actuators
+            if customDM['validActCriteria']!=0:
+                IF_STD = np.std(np.squeeze(self.modes[telescope.pupilLogical,:]), axis=0)
+                ACTXPC=np.where(IF_STD >= np.mean(IF_STD) * customDM['validActCriteria'])
+                self.modes         = self.modes[:,ACTXPC[0]]
+            
+                coordinates = coordinates_M4[ACTXPC[0],:]
             else:
-                self.isM4 = False
+                coordinates = coordinates_M4
+            # normalize coordinates 
+            coordinates   = (coordinates/telescope.resolution - 0.5)*40
+            self.M4_param = M4_param
+            self.isM4 = True
+            print_ ('Done!',print_dm_properties)
+            b = time.time()
+
+            print_('Done! M4 influence functions computed in ' + str(b-a) + ' s!',print_dm_properties)
+            self.isCustom = True
         else:
-            self.isM4 = False
-        self.telescope             = telescope
+            self.isCustom = False
+        self.telescope             = telescope # Remove?
         self.altitude = altitude
         if mechCoupling <=0:
             raise ValueError('The value of mechanical coupling should be positive.')
-        if altitude is None:
-            self.resolution            = telescope.resolution      # Resolution of the DM influence Functions 
-            self.mechCoupling          = mechCoupling
-            self.tag                   = 'deformableMirror'
-            self.D                     = telescope.D
-        else:
-            if telescope.src.tag == 'asterism':
-                self.oversampling_factor    = np.max((np.asarray(self.telescope.src.coordinates)[:,0]/(self.telescope.resolution/2)))
-            else:
-                self.oversampling_factor = self.telescope.src.coordinates[0]/(self.telescope.resolution/2)
-            self.altitude_layer        = self.buildLayer(self.telescope,altitude)
-            self.resolution            = self.altitude_layer.resolution      # Resolution of the DM influence Functions 
-            self.mechCoupling          = mechCoupling
-            self.tag                   = 'deformableMirror'
-            self.D                     = self.altitude_layer.D
+        
+        self.dm_layer = self.buildLayer(self.telescope, altitude)
+        self.mechCoupling          = mechCoupling
+        self.tag                   = 'deformableMirror'
         
         # case with no pitch specified (Cartesian geometry)
         if pitch is None:
-            self.pitch             = self.D/(nSubap)                 # size of a subaperture
+            self.pitch             = self.dm_layer.D_fov/(nSubap)  # size of a subaperture
         else:
             self.pitch = pitch
         
@@ -301,7 +295,7 @@ class DeformableMirror:
             self.nActAlongDiameter                  = self.nAct-1
             
             # set the coordinates of the DM object to produce a cartesian geometry
-            x = np.linspace(-(self.D)/2,(self.D)/2,self.nAct)
+            x = np.linspace(-(self.dm_layer.D_fov)/2,(self.dm_layer.D_fov)/2,self.nAct)
             X,Y=np.meshgrid(x,x)            
             
             # compute the initial set of coordinates
@@ -311,9 +305,9 @@ class DeformableMirror:
             # select valid actuators (central and outer obstruction)
             r = np.sqrt(self.xIF0**2 + self.yIF0**2)
             if valid_act_thresh_outer is None: 
-                valid_act_thresh_outer = self.D/2+0.7533*self.pitch
+                valid_act_thresh_outer = self.dm_layer.D_fov/2+0.7533*self.pitch
             if valid_act_thresh_inner is None:
-                valid_act_thresh_inner = telescope.centralObstruction*self.D/2-0.5*self.pitch
+                valid_act_thresh_inner = telescope.centralObstruction*self.dm_layer.D_fov/2-0.5*self.pitch
             
             validActInner = r > valid_act_thresh_inner
             validActOuter = r <= valid_act_thresh_outer
@@ -332,7 +326,7 @@ class DeformableMirror:
             self.xIF0 = coordinates[:,0]
             self.yIF0 = coordinates[:,1]
             self.nAct = len(self.xIF0)                            # In that case corresponds to the total number of actuators
-            self.nActAlongDiameter = (self.D)/self.pitch
+            self.nActAlongDiameter = (self.dm_layer.D_fov)/self.pitch
             
             validAct=(np.arange(0,self.nAct))                     # In that case assumed that all the Influence Functions provided are controlled actuators
             
@@ -345,10 +339,10 @@ class DeformableMirror:
         yIF0 = self.yIF0[self.validAct]
 
         # anamorphosis
-        xIF3,yIF3 = self.anamorphosis(xIF0,yIF0,self.misReg.anamorphosisAngle*np.pi/180,self.misReg.tangentialScaling,self.misReg.radialScaling)
+        xIF3, yIF3 = self.anamorphosis(xIF0,yIF0,self.misReg.anamorphosisAngle*np.pi/180,self.misReg.tangentialScaling,self.misReg.radialScaling)
         
         # rotation
-        xIF4,yIF4 = self.rotateDM(xIF3,yIF3,self.misReg.rotationAngle*np.pi/180)
+        xIF4, yIF4 = self.rotateDM(xIF3,yIF3,self.misReg.rotationAngle*np.pi/180)
         
         # shifts
         xIF = xIF4-self.misReg.shiftX
@@ -359,15 +353,15 @@ class DeformableMirror:
 
         
         # corresponding coordinates on the pixel grid
-        u0x      = self.resolution/2+xIF*self.resolution/self.D
-        u0y      = self.resolution/2+yIF*self.resolution/self.D      
+        u0x      = self.dm_layer.resolution/2+xIF*self.dm_layer.resolution/self.dm_layer.D_fov
+        u0y      = self.dm_layer.resolution/2+yIF*self.dm_layer.resolution/self.dm_layer.D_fov      
         self.nIF = len(xIF)
         # store the coordinates
         self.coordinates        = np.zeros([self.nIF,2])
         self.coordinates[:,0]   = xIF
         self.coordinates[:,1]   = yIF
  
-        if self.isM4==False:
+        if self.isCustom==False:
             print_('Generating a Deformable Mirror: ',print_dm_properties)
             if np.ndim(modes)==0:
                 print_('Computing the 2D zonal modes...',print_dm_properties)
@@ -394,108 +388,136 @@ class DeformableMirror:
             self.print_properties()
     
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% GEOMETRICAL FUNCTIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-    def buildLayer(self,telescope,altitude):
+    # The DM can be considered as an atmospheric layers with discrete points actuated, which are then connected with their influence functions, 
+    # shaping a continuous 2D surface. 
+    def buildLayer(self, telescope, altitude):
+        self.logger.debug('DeformableMirror::buildLayer')
         # initialize layer object
-        layer               = emptyClass()
+        layer                   = dmLayerClass()
        
         # gather properties of the atmosphere
-        layer.altitude      = altitude       
+        layer.altitude          = altitude       
                 
         # Diameter and resolution of the layer including the Field Of View and the number of extra pixels
-        layer.D             = telescope.D+2*np.tan(telescope.fov/2)*layer.altitude*self.oversampling_factor
-        layer.resolution    = int(np.ceil((telescope.resolution/telescope.D)*layer.D))
-        layer.D_fov             = telescope.D+2*np.tan(telescope.fov/2)*layer.altitude
-        layer.resolution_fov    = int(np.ceil((telescope.resolution/telescope.D)*layer.D))
-        layer.center = layer.resolution//2
-        
-        if telescope.src.tag =='source':
-            [x_z,y_z] = pol2cart(telescope.src.coordinates[0]*(layer.D_fov-telescope.D)/telescope.D,np.deg2rad(telescope.src.coordinates[1]))
-     
-            center_x = int(y_z)+layer.resolution//2
-            center_y = int(x_z)+layer.resolution//2
-        
-            layer.pupil_footprint = np.zeros([layer.resolution,layer.resolution])
-            layer.pupil_footprint[center_x-telescope.resolution//2:center_x+telescope.resolution//2,center_y-telescope.resolution//2:center_y+telescope.resolution//2 ] = 1
-        else:
-            layer.pupil_footprint= []
-            layer.center_x= []
-            layer.center_y= []
+        layer.D_fov             = telescope.D + 2*np.tan(telescope.fov/2)*layer.altitude # in [m]
+        layer.D_px              = int(np.ceil((telescope.resolution/telescope.D)*layer.D_fov)) # Diameter in [px]
+        layer.center            = layer.D_px//2
 
-            for i in range(telescope.src.n_source):
-                 [x_z,y_z] = pol2cart(telescope.src.coordinates[i][0]*(layer.D_fov-telescope.D)/telescope.D,np.deg2rad(telescope.src.coordinates[i][1]))
-     
-                 center_x = int(y_z)+layer.resolution//2
-                 center_y = int(x_z)+layer.resolution//2
-            
-                 pupil_footprint = np.zeros([layer.resolution,layer.resolution])
-                 pupil_footprint[center_x-telescope.resolution//2:center_x+telescope.resolution//2,center_y-telescope.resolution//2:center_y+telescope.resolution//2 ] = 1
-                 layer.pupil_footprint.append(pupil_footprint)   
-                 layer.center_x.append(center_x)   
-                 layer.center_y.append(center_y)   
-
+        layer.phase = np.zeros([layer.D_px,layer.D_px])
+        layer.telescope_D          = telescope.D # Telescope diameter in [m]
+        layer.telescope_D_px       = telescope.D * (layer.D_px / layer.D_fov) # Telescope diameter in [px] using the DM resolution
+        layer.telescope_resolution = telescope.resolution # Telescope diameter in [px] using the original telescope resolution
+        
         return layer
-    def get_OPD_altitude(self,i_source):
+    # When the DM is located at an altitude layer, the phase of the DMs affect differently the sources dpending on their coordinates in sky. 
+    # Before return the phase of the DM, we need to select the correct region of the DM affecting the source, which is done by masking the pupil
+    def get_dm_pupil(self, src):
+        self.logger.debug('DeformableMirror::get_dm_pupil')
         
-        if np.ndim(self.OPD)==2:                    
-            OPD = np.reshape(self.OPD[np.where(self.altitude_layer.pupil_footprint[i_source]==1)],[self.telescope.resolution,self.telescope.resolution])
-        else:
-            OPD = np.reshape(self.OPD[self.altitude_layer.center_x[i_source]-self.telescope.resolution//2:self.altitude_layer.center_x[i_source]+self.telescope.resolution//2,self.altitude_layer.center_y[i_source]-self.telescope.resolution//2:self.altitude_layer.center_y[i_source]+self.telescope.resolution//2,:],[self.telescope.resolution,self.telescope.resolution,self.OPD.shape[2]])
+        # Source coordinates are [angle_fov["], zenith_angle[rad]]. Hence, to obtain the location of the object at the DM altitude plane:
+        # 1) Compute the projection: altitude * tan(angle_fov[rad]) -> location in meters
+        # 2) From meters to pixels: result_1 * (D_px/metapupil_D)
+        # 3) From polar to cartesian: (result_2[px], zenith_angle[rad]) -> (x_z, y_z) [px]
+        [x_z, y_z] = pol2cart((self.dm_layer.altitude * np.tan(src.coordinates[0])/206265)*(self.dm_layer.D_px/self.dm_layer.D_fov), 
+                             np.deg2rad(src.coordinates[1]))
+
+        # Matriz origin is placed at the left-top corner, whereas the telescope origin is at the optical axis.
+        # We add an offset to translate the origins.
+        center_x = int(y_z) + self.dm_layer.D_px//2
+        center_y = int(x_z) + self.dm_layer.D_px//2
     
-        if self.telescope.src.src[i_source].type == 'LGS':
-                    if np.ndim(self.OPD)==2:  
-                        sub_im = np.atleast_3d(OPD)
-                    else:
-                        sub_im = np.moveaxis(OPD,2,0)
-                        
-                    alpha_cone = np.arctan(self.telescope.D/2/self.telescope.src.altitude[i_source])
-                    h = self.telescope.src.altitude[i_source]-self.altitude_layer.altitude
-                    if np.isinf(h):
-                        r =self.telescope.D/2
-                    else:
-                        r = h*np.tan(alpha_cone)
-                    ratio = self.telescope.D/r/2
-                    cube_in = sub_im.T
-                    pixel_size_in   = self.altitude_layer.D/self.altitude_layer.resolution
-                    pixel_size_out  = pixel_size_in/ratio
-                    resolution_out  = self.telescope.resolution
-
-                    OPD = np.asarray(np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out)).T)
+        # Finally, we mask the region that sees the source. This region is centered at the location computed in 3) 
+        # and its shape equals the telescope pupil with the DM layer diameter in [px]
+        pupil_footprint = np.zeros([self.dm_layer.D_px, self.dm_layer.D_px])
+        pupil_footprint[center_x-self.dm_layer.telescope_D_px//2:center_x+self.dm_layer.telescope_D_px//2,
+                        center_y-self.dm_layer.telescope_D_px//2:center_y+self.dm_layer.telescope_D_px//2] = 1 
         
-        return OPD
+        return pupil_footprint
 
+    # The OPD is computed for a given source - for altitude layers, it depends on its location in sky
+    # Returns the OPD [m] and the phase [rad], for which the wavelength of the input source is used. 
+    # The shape of the output is [telescope.resolution, telescope.resolution] [px]
+    def get_dm_opd(self, source):
+        self.logger.debug('DeformableMirror::get_dm_opd')
+        # Set the OPD dimensions
+        result_OPD = np.zeros((self.dm_layer.telescope_resolution, self.dm_layer.telescope_resolution))
+        # Get the pupil for the object. For the case of the sun, only the central subdir is considered.
+        pupil = self.get_dm_pupil(source)
+        # Select only the region of the DM that is affecting to the source.
+        OPD = np.reshape(self.OPD[np.where(pupil==1)],[self.dm_layer.telescope_D_px,self.dm_layer.telescope_D_px]) # reshape is necessary because indexing ravels the original 2D matrix
 
+        # Depending on the source type, certain action may differ
+        if source.tag == 'LGS':
+            # This code considers the impact of having an object at a finite altitude (typ. LGS). 
+            sub_im = np.atleast_3d(OPD)
+                
+            alpha_cone = np.arctan(self.dm_layer.telescope_D/2/source.altitude)
+            h = source.altitude-self.dm_layer.altitude
 
-    import time
-    def dm_propagation(self,telescope,OPD_in = None, i_source = None):
-        if OPD_in is None:
-            OPD_in = telescope.OPD_no_pupil
-        if i_source is not None:
-            dm_OPD = self.get_OPD_altitude(i_source)
-        else:
-            dm_OPD = self.OPD
-        # case where the telescope is paired to an atmosphere
-        if telescope.isPaired:
-            if telescope.isPetalFree:
-                telescope.removePetalling()       
-            # case with single OPD
-            if np.ndim(self.OPD)==2:                    
-                OPD_out_no_pupil    = OPD_in + dm_OPD
-            # case with multiple OPD
+            if np.isinf(h):
+                r = self.dm_layer.telescope_D/2
             else:
-                OPD_out_no_pupil    = np.tile(OPD_in[...,None],(1,1,self.OPD.shape[2]))+dm_OPD     
-        # case where the telescope is separated from a telescope object
-        else:
-                OPD_out_no_pupil    = dm_OPD
+                r = h*np.tan(alpha_cone)
 
-        return OPD_out_no_pupil
+            ratio = self.dm_layer.telescope_D/r/2
+            
+            cube_in = sub_im.T
+            pixel_size_in   = self.dm_layer.D_fov/self.dm_layer.D_px
+            pixel_size_out  = pixel_size_in/ratio
+            
+            output_OPD = np.asarray(np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, self.dm_layer.telescope_resolution)))
         
+        else: # NGS and Sun types can be handled equally. The sun is simplified, only considering the projection of the centrar subdir
+            output_OPD = np.squeeze(interpolate_image(OPD, 1, 1, self.dm_layer.telescope_resolution))
+
+        output_phase = output_OPD * (2*np.pi / source.wavelength)       
+
+        return output_OPD, output_phase                     
+        
+    # The shape of the mirror is controlled through a set of modes that by default are zonal --> defining a typical DM. 
+    # If a modal DM is defined, then the coefficients correspond to those of the modal basis.
+    # Please notice that in this context, the modes do not refer to the AO control modal base but the intrinsic mechanical behaviour of the DM.
+    # The shape of the mirror is computed as the matricial product of modes x coeffs -> modes [dm_layer.D_px, nValidActs], coefs [nValidActs, 1]    
+    def updateDMShape(self, val):
+        self.logger.debug('DeformableMirror::updateDMShape')  
+        if self.floating_precision==32:            
+            self._coefs = np.float32(val)
+        else:
+            self._coefs = val
+
+        if np.isscalar(val):
+            if val==0:
+                self.logger.info('DeformableMirror::updateDMShape - Setting the DM to zero.')  
+                self._coefs = np.zeros(self.nValidAct,dtype=np.float64)
+                try:
+                    self.OPD = np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.dm_layer.resolution,self.dm_layer.resolution]))
+                except:
+                    self.OPD = np.float64(np.reshape(self.modes@self._coefs,[self.dm_layer.resolution,self.dm_layer.resolution]))
+
+            else:
+                self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, cannot be scale unless it is zero.')
+                return False    
+        else:                
+            if len(val)==self.nValidAct:
+                # One array of coefficients is given
+                if np.ndim(val)==1:
+                    try:
+                        self.OPD = np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.dm_layer.resolution,self.dm_layer.resolution]))
+                    except:
+                        self.OPD = np.float64(np.reshape(self.modes@self._coefs,[self.dm_layer.resolution,self.dm_layer.resolution]))
+            else:
+                self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, only a 1D vector is expected.')    
+                raise ValueError('DeformableMirror::updateDMShape - Dimensions do not match to the number of valid actuators.')
+        return True
+    
     def rotateDM(self,x,y,angle):
+        self.logger.debug('DeformableMirror::rotateDM')
         xOut =   x*np.cos(angle)-y*np.sin(angle)
         yOut =   y*np.cos(angle)+x*np.sin(angle)
         return xOut,yOut
 
     def anamorphosis(self,x,y,angle,mRad,mNorm):
-    
+        self.logger.debug('DeformableMirror::anamorphosis')
         mRad  += 1
         mNorm += 1
         xOut   = x * (mRad*np.cos(angle)**2  + mNorm* np.sin(angle)**2)  +  y * (mNorm*np.sin(2*angle)/2  - mRad*np.sin(2*angle)/2)
@@ -504,14 +526,15 @@ class DeformableMirror:
         return xOut,yOut
         
     def modesComputation(self,i,j):
+        self.logger.debug('DeformableMirror::modesComputation')
         x0 = i
         y0 = j
-        cx = (1+self.misReg.radialScaling)*(self.resolution/self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
-        cy = (1+self.misReg.tangentialScaling)*(self.resolution/self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
+        cx = (1+self.misReg.radialScaling)*(self.dm_layer.resolution/self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
+        cy = (1+self.misReg.tangentialScaling)*(self.dm_layer.resolution/self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
 
 #                    Radial direction of the anamorphosis
         theta  = self.misReg.anamorphosisAngle*np.pi/180
-        x      = np.linspace(0,1,self.resolution)*self.resolution
+        x      = np.linspace(0,1,self.dm_layer.resolution)*self.dm_layer.resolution
         X,Y    = np.meshgrid(x,x)
     
 #                Compute the 2D Gaussian coefficients
@@ -527,7 +550,7 @@ class DeformableMirror:
         if self.flip_:
             G = np.flip(G)
             
-        output = np.reshape(G,[1,self.resolution**2])
+        output = np.reshape(G,[1,self.dm_layer.resolution**2])
         if self.floating_precision == 32:
             output = np.float32(output)
             
@@ -544,50 +567,43 @@ class DeformableMirror:
         self.misReg.print_()
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
 
+    def setup_logging(self, logging_level=logging.WARNING):
+        #
+        #  Setup of logging at the main process using QueueHandler
+        log_queue = Queue()
+        queue_handler = logging.handlers.QueueHandler(log_queue)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging_level)  # Minimum log level
+
+        # Setup of the formatting
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
+        )
+
+        # Output to terminal
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+
+        # Qeue handler captures the messages from the different logs and serialize them
+        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
+        root_logger.addHandler(queue_handler)
+        queue_listener.start()
+
+        return queue_listener
+    
+    def __del__(self):
+        self.queue_listerner.stop()
 #        
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DM PROPERTIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-
+    # Returns the coefficients for the modes of the DM.
     @property
     def coefs(self):
         return self._coefs
-    
+    # A setter is defined to avoid unprocessed variation of the coefficient vector!
     @coefs.setter
     def coefs(self,val):
-        if self.floating_precision==32:            
-            self._coefs=np.float32(val)
-        else:
-            self._coefs=val
-
-        if np.isscalar(val):
-            if val==0:
-                self._coefs = np.zeros(self.nValidAct,dtype=np.float64)
-                try:
-                    self.OPD = np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.resolution,self.resolution]))
-                except:
-                    self.OPD = np.float64(np.reshape(self.modes@self._coefs,[self.resolution,self.resolution]))
-
-            else:
-                print('Error: wrong value for the coefficients')    
-        else:                
-            if len(val)==self.nValidAct:
-#                case of a single mode at a time
-                if np.ndim(val)==1:
-                    try:
-                        self.OPD = np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.resolution,self.resolution]))
-                    except:
-                        self.OPD = np.float64(np.reshape(self.modes@self._coefs,[self.resolution,self.resolution]))
-                        
-#                case of multiple modes at a time
-                else:
-                    try:
-                        self.OPD =  np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.resolution,self.resolution,val.shape[1]]))                            
-                    except:
-                        self.OPD =  np.float64(np.reshape(self.modes@self._coefs,[self.resolution,self.resolution,val.shape[1]]))
-
-            else:
-                print('Error: wrong value for the coefficients')    
-                sys.exit(0)
-            self.current_coefs = self.coefs.copy()
+        self.logger.debug('DeformableMirror::coefs')
+        self.updateDMShape(val)
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
  
