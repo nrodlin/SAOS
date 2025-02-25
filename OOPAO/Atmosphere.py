@@ -172,6 +172,7 @@ class Atmosphere:
         if logger is None:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
+            self.external_logger_flag = False
         else:
             self.external_logger_flag = True
             self.logger = logger
@@ -943,28 +944,6 @@ class Atmosphere:
                     tmpLayer.ratio[0] = ps_turb_x/self.ps_loop
                     tmpLayer.ratio[1] = ps_turb_y/self.ps_loop
                     setattr(self,'layer_'+str(i_layer+1),tmpLayer )                
-             
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
- 
-    def show(self):
-        attributes = inspect.getmembers(self, lambda a:not(inspect.isroutine(a)))
-        print(self.tag+':')
-        for a in attributes:
-            if not(a[0].startswith('__') and a[0].endswith('__')):
-                if not(a[0].startswith('_')):
-                    if not np.shape(a[1]):
-                        tmp=a[1]
-                        try:
-                            print('          '+str(a[0])+': '+str(tmp.tag)+' object') 
-                        except:
-                            print('          '+str(a[0])+': '+str(a[1])) 
-                    else:
-                        if np.ndim(a[1])>1:
-                            print('          '+str(a[0])+': '+str(np.shape(a[1])))  
-                            
-    def __repr__(self):
-        self.print_properties()
-        return ' '
                             
     def setup_logging(self, logging_level=logging.WARNING):
         #

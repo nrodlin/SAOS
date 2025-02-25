@@ -1,20 +1,25 @@
 from OOPAO.Source import Source
 from OOPAO.Asterism import Asterism
+
 import numpy as np
 from astropy.io import fits
 import matplotlib.pyplot as plt
+
+import logging
+import logging.handlers
+from queue import Queue
 
 class ExtendedSource(Source):
     def __init__(self, optBand:str,
                  coordinates:list = [0,0],
                  fov=10,
-                 altitude:float = np.inf, 
-                 display_properties:bool=True,
+                 altitude:float = np.inf,
                  img_path="OOPAO/OOPAO/images/imsol.fits",
                  img_PS=1/60,
                  nSubDirs=1,
                  patch_padding=5,
-                 subDir_margin=1.0):
+                 subDir_margin=1.0,
+                 logger=None):
         """SOURCE
         A extended source object shares the implementation of the Source class, but the photometry varies for the Sun. 
         The LGS and Magnitude parameters are omitted in this definition
@@ -30,8 +35,6 @@ class ExtendedSource(Source):
             DESCRIPTION. Field of View in arcsec of the patch selected
         altitude : float, optional
             DESCRIPTION. The default is np.inf.
-        display_properties : bool, optional
-            DESCRIPTION. The default is True.
         img_path: str, optional
             DESCRIPTION. Sun pattern that shall be uploaded, expected FITS file.
         img_PS: str, optional
@@ -66,7 +69,6 @@ class ExtendedSource(Source):
 
         _ src.nPhoton   : number of photons per m2 per s, can be updated online. 
         _ src.fluxMap   : 2D map of the number of photons per pixel per frame (depends on the loop frequency defined by tel.samplingTime)  
-        _ src.display_properties : display the properties of the src object
         
         The main properties of the object can be displayed using :
             src.print_properties()
@@ -80,10 +82,18 @@ class ExtendedSource(Source):
         src*tel
        
         """
+        # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
+        if logger is None:
+            self.queue_listerner = self.setup_logging()
+            self.logger = logging.getLogger()
+            self.external_logger_flag = False
+        else:
+            self.external_logger_flag = True
+            self.logger = logger
+        
         self.is_initialized = False
         tmp = self.photometry(optBand)
         
-        self.display_properties = display_properties
         tmp             = self.photometry(optBand)              # get the photometry properties
         self.optBand    = optBand                               # optical band
         self.wavelength = tmp[0]                                # wavelength in m
@@ -101,14 +111,11 @@ class ExtendedSource(Source):
         self.subDir_margin = subDir_margin                                # Extra margin to the subDirs size to avoid border effects [arcsec]
 
         self.type     = 'SUN'
-
-        if self.display_properties:
-            self.print_properties()
-            
+           
         self.sun_nopad, self.sun_padded = self.load_sun_img()   # Take sun patch, pad + no pad
 
         if self.nSubDirs > 7:
-            raise BaseException("Too many directions, processing will not be feasible")
+            raise BaseException("ExtendedSource::__init__ - Too many subdirections, processing will not be feasible")
         
         self.subDirs_coordinates, self.subDirs_sun = self.get_subDirs() # Coordinates are in polar [r, theta(radians)] + FoV [arcsec]
                                                                         # The origin is the telescope axis.
@@ -121,8 +128,8 @@ class ExtendedSource(Source):
             for dirY in range(self.nSubDirs):
                 subDirs_stars.append(Source(optBand=self.optBand, 
                                             magnitude=1, 
-                                            coordinates=[self.subDirs_coordinates[0,dirX,dirY], self.subDirs_coordinates[1,dirX,dirY]], 
-                                            display_properties=False))
+                                            coordinates=[self.subDirs_coordinates[0,dirX,dirY], self.subDirs_coordinates[1,dirX,dirY]],
+                                            logger=self.logger))
                 subDirs_stars[-1].nPhoton = np.round(self.nPhoton/(self.nSubDirs*self.nSubDirs))
         
         self.sun_subDir_ast = Asterism(subDirs_stars)
@@ -169,6 +176,7 @@ class ExtendedSource(Source):
         self.is_initialized = True
         
     def photometry(self,arg):
+        self.logger.debug('ExtendedSource::photometry')
         # photometry object [wavelength, bandwidth, zeroPoint]
         class phot:
             pass
@@ -184,10 +192,10 @@ class ExtendedSource(Source):
             if hasattr(phot,arg):
                 return getattr(phot,arg)
             else:
-                print('Error: Wrong name for the photometry object')
+                self.logger.error('ExtendedSource::photometry - Wrong name for the photometry object')
                 return -1
         else:
-            print('Error: The photometry object takes a scalar as an input')
+            self.logger.error('ExtendedSource::photometry - The photometry object takes a scalar as an input')
             return -1   
     @property
     def nPhoton(self):
@@ -197,23 +205,21 @@ class ExtendedSource(Source):
         self._nPhoton  = val
         if self.is_initialized:
 
-            print('NGS flux updated!')
-            print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SOURCE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-            print('Wavelength \t'+str(round(self.wavelength*1e6,3)) + ' \t [microns]') 
-            print('Optical Band \t'+self.optBand) 
-            print('Flux \t\t'+ str(np.round(self.nPhoton)) + str('\t [photons/m2/s]'))
-            print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+            self.logger.info('Source::nPhoton - NGS flux updated!')
+            self.logger.info('Wavelength \t'+str(round(self.wavelength*1e6,3)) + ' \t [microns]')
+            self.logger.info('Optical Band \t'+self.optBand)
+            self.logger.info('Flux \t\t'+ str(np.round(self.nPhoton)) + str('\t [photons/m2/s]'))
 
     def print_properties(self):
-        print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SOURCE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-        print('{: ^8s}'.format('Source') +'{: ^10s}'.format('Wavelength')+ '{: ^8s}'.format('Zenith')+ '{: ^10s}'.format('Azimuth')+ '{: ^10s}'.format('Altitude')+ '{: ^10s}'.format('Flux') )
-        print('{: ^8s}'.format('') +'{: ^10s}'.format('[m]')+ '{: ^8s}'.format('[arcsec]')+ '{: ^10s}'.format('[deg]')+ '{: ^10s}'.format('[m]')+ '{: ^10s}'.format('[phot/m2/s]') )
+        self.logger.info('ExtendedSource::print_properties')
+        self.logger.info('{: ^8s}'.format('Source') +'{: ^10s}'.format('Wavelength')+ '{: ^8s}'.format('Zenith')+ '{: ^10s}'.format('Azimuth')+ '{: ^10s}'.format('Altitude')+ '{: ^10s}'.format('Flux') )
+        self.logger.info('{: ^8s}'.format('') +'{: ^10s}'.format('[m]')+ '{: ^8s}'.format('[arcsec]')+ '{: ^10s}'.format('[deg]')+ '{: ^10s}'.format('[m]')+ '{: ^10s}'.format('[phot/m2/s]') )
 
-        print('-------------------------------------------------------------------')        
-        print('{: ^8s}'.format(self.type) +'{: ^10s}'.format(str(self.wavelength))+ '{: ^8s}'.format(str(self.coordinates[0]))+ '{: ^10s}'.format(str(self.coordinates[1]))+'{: ^10s}'.format(str(np.round(self.altitude,2)))+'{: ^10s}'.format(str(np.round(self.nPhoton,1))) )
-        print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+        self.logger.info('-------------------------------------------------------------------')        
+        self.logger.info('{: ^8s}'.format(self.type) +'{: ^10s}'.format(str(self.wavelength))+ '{: ^8s}'.format(str(self.coordinates[0]))+ '{: ^10s}'.format(str(self.coordinates[1]))+'{: ^10s}'.format(str(np.round(self.altitude,2)))+'{: ^10s}'.format(str(np.round(self.nPhoton,1))) )
 
     def load_sun_img(self):
+        self.logger.info('ExtendedSource::load_sun_img')
         tmp_sun = fits.open(self.img_path)[0].data.astype('<f4')
         
         cnt_x = (self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[0]//2
@@ -235,6 +241,7 @@ class ExtendedSource(Source):
         return sun_nopad, sun_pad
     
     def get_subDirs(self):
+        self.logger.info('ExtendedSource::get_subDirs')
         subDir_loc = np.zeros((3,self.nSubDirs, self.nSubDirs))
         if self.nSubDirs > 1:
             subDir_size = (2*(self.fov+self.patch_padding)) / (self.nSubDirs+1) # This guarantees a superposition of the 50% of the subdirs
@@ -266,12 +273,6 @@ class ExtendedSource(Source):
 
                 subDir_imgs[:,:,dirX,dirY] = self.sun_padded[np.round(cx-(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int):np.round(cx+(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int),
                                                              np.round(cy-(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int):np.round(cy+(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int)]       
-        """ fig, axs = plt.subplots(self.nSubDirs, self.nSubDirs, squeeze=False)
-        print(axs.shape)
-        for dirX in range(self.nSubDirs):
-            for dirY in range(self.nSubDirs):
-                axs[dirX, dirY].imshow(subDir_imgs[:,:,dirX,dirY])
-        plt.show() """
         
         return subDir_loc, subDir_imgs
 
@@ -320,3 +321,34 @@ class ExtendedSource(Source):
             return obj
         else:
             raise AttributeError('The Source can only be paired to a Telescope!')
+
+    def setup_logging(self, logging_level=logging.WARNING):
+        #
+        #  Setup of logging at the main process using QueueHandler
+        log_queue = Queue()
+        queue_handler = logging.handlers.QueueHandler(log_queue)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging_level)  # Minimum log level
+
+        # Setup of the formatting
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
+        )
+
+        # Output to terminal
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+
+        # Qeue handler captures the messages from the different logs and serialize them
+        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
+        root_logger.addHandler(queue_handler)
+        queue_listener.start()
+
+        return queue_listener
+    
+    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
+    # If the logger is external, then the queue is stop outside of the class scope and we shall
+    # avoid to attempt its destruction
+    def __del__(self):
+        if not self.external_logger_flag:
+            self.queue_listerner.stop()
