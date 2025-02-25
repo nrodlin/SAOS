@@ -166,12 +166,13 @@ class DeformableMirror:
         if logger is None:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
+            self.external_logger_flag = False
         else:
             self.external_logger_flag = True
             self.logger = logger
 
         # Define class attributes
-        self.tag                   = 'deformableMirror'
+        self.tag = 'deformableMirror'
 
         self.floating_precision = floating_precision
         self.flip_= flip
@@ -365,7 +366,7 @@ class DeformableMirror:
             layer.altitude          = altitude
                 
         # Diameter and resolution of the layer including the Field Of View and the number of extra pixels
-        layer.D_fov             = telescope.D + 2*np.tan(telescope.fov/2)*layer.altitude # in [m]
+        layer.D_fov             = telescope.D + 2*np.tan(telescope.fov/(206624*2))*layer.altitude # in [m]
         layer.D_px              = int(np.ceil((telescope.resolution/telescope.D)*layer.D_fov)) # Diameter in [px]
         layer.center            = layer.D_px//2
 
@@ -575,24 +576,4 @@ class DeformableMirror:
         self.logger.debug('DeformableMirror::coefs')
         self.updateDMShape(val)
 
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
- 
-    def show(self):
-        attributes = inspect.getmembers(self, lambda a:not(inspect.isroutine(a)))
-        print(self.tag+':')
-        for a in attributes:
-            if not(a[0].startswith('__') and a[0].endswith('__')):
-                if not(a[0].startswith('_')):
-                    if not np.shape(a[1]):
-                        tmp=a[1]
-                        try:
-                            print('          '+str(a[0])+': '+str(tmp.tag)+' object') 
-                        except:
-                            print('          '+str(a[0])+': '+str(a[1])) 
-                    else:
-                        if np.ndim(a[1])>1:
-                            print('          '+str(a[0])+': '+str(np.shape(a[1])))  
-    def __repr__(self):
-        self.print_properties()
-        return ' '
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%       
+     
