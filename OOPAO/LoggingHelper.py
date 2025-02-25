@@ -3,8 +3,8 @@ import logging.handlers
 from queue import Queue
 
 class LoggingHelper:
-    def __init__(self):
-        self.queue_listerner = self.setup_logging()
+    def __init__(self, logging_level=logging.WARNING):
+        self.queue_listerner = self.setup_logging(logging_level)
         self.logger = logging.getLogger()
     def setup_logging(self, logging_level=logging.WARNING):
         #

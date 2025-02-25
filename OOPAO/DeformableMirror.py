@@ -167,6 +167,7 @@ class DeformableMirror:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
         else:
+            self.external_logger_flag = True
             self.logger = logger
 
         # Define class attributes
@@ -317,8 +318,8 @@ class DeformableMirror:
         self.yIF = yIF
 
         # corresponding coordinates on the pixel grid
-        u0x      = self.layer.D_px /2 + xIF*self.layer.D_px /self.dm_layer.D_fov
-        u0y      = self.layer.D_px /2 + yIF*self.layer.D_px /self.dm_layer.D_fov      
+        u0x      = self.dm_layer.D_px /2 + xIF*self.dm_layer.D_px /self.dm_layer.D_fov
+        u0y      = self.dm_layer.D_px /2 + yIF*self.dm_layer.D_px /self.dm_layer.D_fov      
         self.nIF = len(xIF)
         # store the coordinates
         self.coordinates        = np.zeros([self.nIF, 2])
@@ -358,7 +359,10 @@ class DeformableMirror:
         layer                   = dmLayerClass()
        
         # gather properties of the atmosphere
-        layer.altitude          = altitude       
+        if altitude is None:
+            layer.altitude          = 0
+        else:
+            layer.altitude          = altitude
                 
         # Diameter and resolution of the layer including the Field Of View and the number of extra pixels
         layer.D_fov             = telescope.D + 2*np.tan(telescope.fov/2)*layer.altitude # in [m]
@@ -453,9 +457,9 @@ class DeformableMirror:
                 self.logger.info('DeformableMirror::updateDMShape - Setting the DM to zero.')  
                 self._coefs = np.zeros(self.nValidAct,dtype=np.float64)
                 try:
-                    self.dm_layer.OPD = np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.layer.D_px ,self.layer.D_px ]))
+                    self.dm_layer.OPD = np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.dm_layer.D_px ,self.dm_layer.D_px ]))
                 except:
-                    self.dm_layer.OPD = np.float64(np.reshape(self.modes@self._coefs,[self.layer.D_px ,self.layer.D_px ]))
+                    self.dm_layer.OPD = np.float64(np.reshape(self.modes@self._coefs,[self.dm_layer.D_px ,self.dm_layer.D_px ]))
 
             else:
                 self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, cannot be scale unless it is zero.')
@@ -465,9 +469,9 @@ class DeformableMirror:
                 # One array of coefficients is given
                 if np.ndim(val)==1:
                     try:
-                        self.dm_layer.OPD = np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.layer.D_px ,self.layer.D_px ]))
+                        self.dm_layer.OPD = np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.dm_layer.D_px ,self.dm_layer.D_px ]))
                     except:
-                        self.dm_layer.OPD = np.float64(np.reshape(self.modes@self._coefs,[self.layer.D_px ,self.layer.D_px ]))
+                        self.dm_layer.OPD = np.float64(np.reshape(self.modes@self._coefs,[self.dm_layer.D_px ,self.dm_layer.D_px ]))
             else:
                 self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, only a 1D vector is expected.')    
                 raise ValueError('DeformableMirror::updateDMShape - Dimensions do not match to the number of valid actuators.')
@@ -492,12 +496,12 @@ class DeformableMirror:
         self.logger.debug('DeformableMirror::modesComputation')
         x0 = i
         y0 = j
-        cx = (1+self.misReg.radialScaling)*(self.layer.D_px /self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
-        cy = (1+self.misReg.tangentialScaling)*(self.layer.D_px /self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
+        cx = (1+self.misReg.radialScaling)*(self.dm_layer.D_px /self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
+        cy = (1+self.misReg.tangentialScaling)*(self.dm_layer.D_px /self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
 
         # Radial direction of the anamorphosis
         theta  = self.misReg.anamorphosisAngle*np.pi/180
-        x      = np.linspace(0,1,self.layer.D_px )*self.layer.D_px 
+        x      = np.linspace(0,1,self.dm_layer.D_px )*self.dm_layer.D_px 
         X,Y    = np.meshgrid(x,x)
     
         # Compute the 2D Gaussian coefficients
@@ -513,7 +517,7 @@ class DeformableMirror:
         if self.flip_:
             G = np.flip(G)
             
-        output = np.reshape(G,[1,self.layer.D_px **2])
+        output = np.reshape(G,[1,self.dm_layer.D_px **2])
         if self.floating_precision == 32:
             output = np.float32(output)
             
@@ -553,8 +557,12 @@ class DeformableMirror:
 
         return queue_listener
     
+    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
+    # If the logger is external, then the queue is stop outside of the class scope and we shall
+    # avoid to attempt its destruction
     def __del__(self):
-        self.queue_listerner.stop()
+        if not self.external_logger_flag:
+            self.queue_listerner.stop()
 #        
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% DM PROPERTIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
     # Returns the coefficients for the modes of the DM.

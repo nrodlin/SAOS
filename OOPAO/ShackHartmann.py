@@ -129,6 +129,7 @@ class ShackHartmann:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
         else:
+            self.external_logger_flag = True
             self.logger = logger
 
         self.tag                            = 'shackHartmann'
@@ -749,5 +750,9 @@ class ShackHartmann:
 
         return queue_listener
     
+    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
+    # If the logger is external, then the queue is stop outside of the class scope and we shall
+    # avoid to attempt its destruction
     def __del__(self):
-        self.queue_listerner.stop()
+        if not self.external_logger_flag:
+            self.queue_listerner.stop()

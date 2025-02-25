@@ -14,6 +14,7 @@ class LightPath:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
         else:
+            self.external_logger_flag = True
             self.logger = logger
         # Process variables: updated per iteration
         # Optical Path Difference: is the difference in optical path length (OPL) between two rays of light [m]
