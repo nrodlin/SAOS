@@ -10,6 +10,7 @@ import sys
 import time
 
 import numpy as np
+import torch
 import cv2
 from joblib import Parallel, delayed
 
@@ -338,6 +339,7 @@ class DeformableMirror:
                     Q=Parallel(n_jobs=8,prefer='threads')(delayed(self.modesComputation)(i,j) for i,j in zip(u0x,u0y))
                     return Q 
                 self.modes=np.squeeze(np.moveaxis(np.asarray(joblib_construction()),0,-1))
+                self.modes_torch = torch.tensor(self.modes).contiguous()
             else:
                 self.logger.info('DeformableMirror::__init__ - Loading the 2D zonal modes..')
                 self.modes = modes
@@ -443,41 +445,25 @@ class DeformableMirror:
         output_phase = output_OPD * (2*np.pi / source.wavelength)       
 
         return output_OPD, output_phase                     
-        
+
     # The shape of the mirror is controlled through a set of modes that by default are zonal --> defining a typical DM. 
     # If a modal DM is defined, then the coefficients correspond to those of the modal basis.
     # Please notice that in this context, the modes do not refer to the AO control modal base but the intrinsic mechanical behaviour of the DM.
     # The shape of the mirror is computed as the matricial product of modes x coeffs -> modes [dm_layer.D_px, nValidActs], coefs [nValidActs, 1]    
     def updateDMShape(self, val):
-        self.logger.debug('DeformableMirror::updateDMShape')  
+        self.logger.debug('DeformableMirror::updateDMShape') 
         if self.floating_precision==32:            
             self._coefs = np.float32(val)
         else:
             self._coefs = val
 
-        if np.isscalar(val):
-            if val==0:
-                self.logger.info('DeformableMirror::updateDMShape - Setting the DM to zero.')  
-                self._coefs = np.zeros(self.nValidAct,dtype=np.float64)
-                try:
-                    self.dm_layer.OPD = np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.dm_layer.D_px ,self.dm_layer.D_px ]))
-                except:
-                    self.dm_layer.OPD = np.float64(np.reshape(self.modes@self._coefs,[self.dm_layer.D_px ,self.dm_layer.D_px ]))
+        if len(val)==self.nValidAct:
+            temp = torch.matmul(self.modes_torch, torch.tensor(self._coefs))
+            self.dm_layer.OPD = np.float64(np.reshape(temp.numpy(),(self.dm_layer.D_px,self.dm_layer.D_px)))
+        else:
+            self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, only a 1D vector is expected.')    
+            raise ValueError('DeformableMirror::updateDMShape - Dimensions do not match to the number of valid actuators.')
 
-            else:
-                self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, cannot be scale unless it is zero.')
-                return False    
-        else:                
-            if len(val)==self.nValidAct:
-                # One array of coefficients is given
-                if np.ndim(val)==1:
-                    try:
-                        self.dm_layer.OPD = np.float64(np.reshape(np.matmul(self.modes,self._coefs),[self.dm_layer.D_px ,self.dm_layer.D_px ]))
-                    except:
-                        self.dm_layer.OPD = np.float64(np.reshape(self.modes@self._coefs,[self.dm_layer.D_px ,self.dm_layer.D_px ]))
-            else:
-                self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, only a 1D vector is expected.')    
-                raise ValueError('DeformableMirror::updateDMShape - Dimensions do not match to the number of valid actuators.')
         return True
     
     def rotateDM(self,x,y,angle):
