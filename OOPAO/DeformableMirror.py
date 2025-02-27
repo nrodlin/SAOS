@@ -373,7 +373,7 @@ class DeformableMirror:
         layer.OPD               = np.zeros([layer.D_px,layer.D_px]) # stores the layer OPD without projection to any source (full pupil/metapupil)
 
         layer.telescope_D          = telescope.D # Telescope diameter in [m]
-        layer.telescope_D_px       = telescope.D * (layer.D_px / layer.D_fov) # Telescope diameter in [px] using the DM resolution
+        layer.telescope_D_px       = int(np.ceil(telescope.D * (layer.D_px / layer.D_fov))) # Telescope diameter in [px] using the DM resolution
         layer.telescope_resolution = telescope.resolution # Telescope diameter in [px] using the original telescope resolution
         
         return layer
@@ -412,8 +412,7 @@ class DeformableMirror:
         # Get the pupil for the object. For the case of the sun, only the central subdir is considered.
         pupil = self.get_dm_pupil(source)
         # Select only the region of the DM that is affecting to the source.
-        OPD = np.reshape(self.dm_layer.OPD[np.where(pupil==1)],[self.dm_layer.telescope_D_px,self.dm_layer.telescope_D_px]) # reshape is necessary because indexing ravels the original 2D matrix
-
+        OPD = self.dm_layer.OPD * pupil
         # Depending on the source type, certain action may differ
         if source.tag == 'LGS':
             # This code considers the impact of having an object at a finite altitude (typ. LGS). 
@@ -519,9 +518,12 @@ class DeformableMirror:
             G = np.flip(G)
             
         output = np.reshape(G,[1,self.dm_layer.D_px **2])
+        
+        output[output < 1e-10] = 0
+
         if self.floating_precision == 32:
             output = np.float32(output)
-            
+           
         return output
     
     def print_properties(self):
