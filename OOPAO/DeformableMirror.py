@@ -10,7 +10,7 @@ import sys
 import time
 
 import numpy as np
-import scipy
+import cv2
 from joblib import Parallel, delayed
 
 import logging
@@ -398,8 +398,12 @@ class DeformableMirror:
         # Finally, we mask the region that sees the source. This region is centered at the location computed in 3) 
         # and its shape equals the telescope pupil with the DM layer diameter in [px]
         pupil_footprint = np.zeros([self.dm_layer.D_px, self.dm_layer.D_px])
-        pupil_footprint[center_x-self.dm_layer.telescope_D_px//2:center_x+self.dm_layer.telescope_D_px//2,
-                        center_y-self.dm_layer.telescope_D_px//2:center_y+self.dm_layer.telescope_D_px//2] = 1 
+        # Define square limits to take the region of the metapupil affecting the source
+        left_corner_x = center_x-self.dm_layer.telescope_D_px//2
+        left_corner_y = center_y-self.dm_layer.telescope_D_px//2
+        # Mask the region
+        pupil_footprint[left_corner_x:left_corner_x + self.dm_layer.telescope_D_px,
+                        left_corner_y:left_corner_y + self.dm_layer.telescope_D_px] = 1 
         
         return pupil_footprint
 
@@ -408,12 +412,10 @@ class DeformableMirror:
     # The shape of the output is [telescope.resolution, telescope.resolution] [px]
     def get_dm_opd(self, source):
         self.logger.debug('DeformableMirror::get_dm_opd')
-        # Set the OPD dimensions
-        result_OPD = np.zeros((self.dm_layer.telescope_resolution, self.dm_layer.telescope_resolution))
         # Get the pupil for the object. For the case of the sun, only the central subdir is considered.
         pupil = self.get_dm_pupil(source)
         # Select only the region of the DM that is affecting to the source.
-        OPD = self.dm_layer.OPD * pupil
+        OPD = self.dm_layer.OPD[pupil==1].reshape((self.dm_layer.telescope_D_px, self.dm_layer.telescope_D_px))
         # Depending on the source type, certain action may differ
         if source.tag == 'LGS':
             # This code considers the impact of having an object at a finite altitude (typ. LGS). 
@@ -436,10 +438,8 @@ class DeformableMirror:
             output_OPD = np.asarray(np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, self.dm_layer.telescope_resolution)))
         
         else: # NGS and Sun types can be handled equally. The sun is simplified, only considering the projection of the centrar subdir
-            output_OPD = scipy.ndimage.zoom(OPD, self.dm_layer.telescope_resolution/OPD.shape[0], order=1)
-            # output_OPD = np.squeeze(interpolate_image(OPD, 1, 1, self.dm_layer.telescope_resolution))
-        import matplotlib.pyplot as plt
-        plt.imshow(output_OPD), plt.show()
+            output_OPD = cv2.resize(OPD, (self.dm_layer.telescope_resolution, self.dm_layer.telescope_resolution), interpolation=cv2.INTER_AREA)
+
         output_phase = output_OPD * (2*np.pi / source.wavelength)       
 
         return output_OPD, output_phase                     
