@@ -10,6 +10,7 @@ import sys
 import time
 
 import numpy as np
+import scipy
 from joblib import Parallel, delayed
 
 import logging
@@ -386,7 +387,7 @@ class DeformableMirror:
         # 1) Compute the projection: altitude * tan(angle_fov[rad]) -> location in meters
         # 2) From meters to pixels: result_1 * (D_px/metapupil_D)
         # 3) From polar to cartesian: (result_2[px], zenith_angle[rad]) -> (x_z, y_z) [px]
-        [x_z, y_z] = pol2cart((self.dm_layer.altitude * np.tan(src.coordinates[0])/206265)*(self.dm_layer.D_px/self.dm_layer.D_fov), 
+        [x_z, y_z] = pol2cart(self.dm_layer.altitude * np.tan(src.coordinates[0]/206265)*(self.dm_layer.D_px/self.dm_layer.D_fov), 
                              np.deg2rad(src.coordinates[1]))
 
         # Matriz origin is placed at the left-top corner, whereas the telescope origin is at the optical axis.
@@ -435,8 +436,10 @@ class DeformableMirror:
             output_OPD = np.asarray(np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, self.dm_layer.telescope_resolution)))
         
         else: # NGS and Sun types can be handled equally. The sun is simplified, only considering the projection of the centrar subdir
-            output_OPD = np.squeeze(interpolate_image(OPD, 1, 1, self.dm_layer.telescope_resolution))
-
+            output_OPD = scipy.ndimage.zoom(OPD, self.dm_layer.telescope_resolution/OPD.shape[0], order=1)
+            # output_OPD = np.squeeze(interpolate_image(OPD, 1, 1, self.dm_layer.telescope_resolution))
+        import matplotlib.pyplot as plt
+        plt.imshow(output_OPD), plt.show()
         output_phase = output_OPD * (2*np.pi / source.wavelength)       
 
         return output_OPD, output_phase                     
