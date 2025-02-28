@@ -338,7 +338,9 @@ class DeformableMirror:
                 def joblib_construction():
                     Q=Parallel(n_jobs=8,prefer='threads')(delayed(self.modesComputation)(i,j) for i,j in zip(u0x,u0y))
                     return Q 
-                self.modes=np.squeeze(np.moveaxis(np.asarray(joblib_construction()),0,-1))
+                self.modes = np.ascontiguousarray(np.squeeze(np.moveaxis(np.asarray(joblib_construction()),0,-1))).reshape(self.dm_layer.D_px,
+                                                                                                                           self.dm_layer.D_px,
+                                                                                                                           self.nValidAct)
                 self.modes_torch = torch.tensor(self.modes).contiguous()
             else:
                 self.logger.info('DeformableMirror::__init__ - Loading the 2D zonal modes..')
@@ -459,7 +461,7 @@ class DeformableMirror:
 
         if len(val)==self.nValidAct:
             temp = torch.matmul(self.modes_torch, torch.tensor(self._coefs))
-            self.dm_layer.OPD = np.float64(np.reshape(temp.numpy(),(self.dm_layer.D_px,self.dm_layer.D_px)))
+            self.dm_layer.OPD = temp.view(self.dm_layer.D_px,self.dm_layer.D_px).double().numpy()
         else:
             self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, only a 1D vector is expected.')    
             raise ValueError('DeformableMirror::updateDMShape - Dimensions do not match to the number of valid actuators.')
