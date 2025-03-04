@@ -282,6 +282,7 @@ class DeformableMirror:
             validActOuter = r <= valid_act_thresh_outer
     
             self.validAct = validActInner*validActOuter
+            self.validAct_2D = self.validAct.reshape(self.nAct,self.nAct)
             self.nValidAct = sum(self.validAct) 
             
         # If the coordinates are specified   
