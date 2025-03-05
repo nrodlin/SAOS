@@ -33,10 +33,9 @@ def generate_hadamard_modes(dm, nModes=None, useTorch=False, include_piston=Fals
             H_modes[indices[0], indices[1], i] = H[i+1, :len(indices[0])]
 
     if useTorch:
-        modes_torch_output = torch.tensor(H_modes, dtype=torch.float32)
-        return modes_torch_output
-    else:
-        return H_modes
+        return torch.tensor(H_modes, dtype=torch.float32)
+   
+    return H_modes
     
 def hadamard(n):
     # Recursive Hadamard matrix generation using Sylvester's Construction.
