@@ -15,14 +15,31 @@ def generate_zernike_modes(dm, nModes=None, useTorch=False, include_piston=False
     if nModes is None:
         nModes = nActs
 
-    zern_modes = np.zeros((pupil_mask.shape[0], pupil_mask.shape[1], nActs))
-
     if include_piston:
         Noffset = 1
     else:
         Noffset = 2
+    
+    # Get the Zernike modes
+    
+    zern_modes = get_zernikes(pupil_mask, nModes, Noffset)
+    
+    # Normalize between -1 and 1
+    max_values = np.max(np.abs(zern_modes), axis=(0,1), keepdims=True)
+    max_values[max_values == 0] = 1
+    zern_modes = zern_modes / max_values
+    
+    # Check torch option
+    if useTorch:
+        return torch.tensor(zern_modes, dtype=torch.float32)
+    return zern_modes
 
-    # Generate zernikes
+# Generate zernikes, this process is split form the main call function to provide a better interface for the KL modal base
+# that requires the generation of the full set of Zernikes, not normalized and without the pupil occlusion and spider.
+
+def get_zernikes(pupil_mask, nModes, Noffset):
+
+    zern_modes = np.zeros((pupil_mask.shape[0], pupil_mask.shape[1], nModes))
 
     Z_machine = ZernikeNaive(mask=[])
     x = np.linspace(-1, 1, pupil_mask.shape[0])
@@ -37,14 +54,6 @@ def generate_zernike_modes(dm, nModes=None, useTorch=False, include_piston=False
         # Apply the pupil mask
         zern_modes[:, :, j] = Z * pupil_mask
     
-    # Normalize between -1 and 1
-    max_values = np.max(np.abs(zern_modes), axis=(0,1), keepdims=True)
-    max_values[max_values == 0] = 1
-    zern_modes = zern_modes / max_values
-    
-    # Check torch option
-    if useTorch:
-        return torch.tensor(zern_modes, dtype=torch.float32)
     return zern_modes
 
 
