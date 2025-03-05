@@ -1,9 +1,7 @@
 import torch
 import numpy as np
-import time
-import cv2
 
-# Returns a 2D matrix of size: (nValidActs x Nmodes) whose range is between -1 and 1.
+# Returns a 3D matrix of size: (nActs x nActs x Nmodes) whose range is between -1 and 1.
 def generate_hadamard_modes(dm, nModes=None, useTorch=False, include_piston=False):
     # Read the main parameters of the DM: nActs and pupil mask
     pupil_mask = dm.validAct_2D
@@ -20,13 +18,13 @@ def generate_hadamard_modes(dm, nModes=None, useTorch=False, include_piston=Fals
     else:
         nHadamard = 2**np.ceil(np.log2(nActs+1)).astype(int)
     # Compute the modes
-    t = time.time()
+
     H = hadamard(nHadamard)
 
     # Generate the 3D matrices, each 2D surface contains one Hadamard mode
     H_modes = np.zeros((pupil_mask.shape[0], pupil_mask.shape[1], nActs))
 
-    indices = np.where(pupil_mask)  # Obtiene los índices donde el pupil_mask es True
+    indices = np.where(pupil_mask)  # Gets the indices where pupil_mask is True
 
     for i in range(nActs):
         if include_piston:
@@ -41,7 +39,7 @@ def generate_hadamard_modes(dm, nModes=None, useTorch=False, include_piston=Fals
         return H_modes
     
 def hadamard(n):
-    """Efficient Hadamard matrix generation using Numba for parallel computation."""
+    # Recursive Hadamard matrix generation using Sylvester's Construction.
     if (n & (n - 1)) != 0:  # Ensure n is a power of 2
         raise ValueError("N must be a power of 2")
     
@@ -57,4 +55,3 @@ def hadamard_recursive(n):
         H = hadamard_recursive(n//2)
         H = np.block([[H, H], [H, -H]])
         return H
-
