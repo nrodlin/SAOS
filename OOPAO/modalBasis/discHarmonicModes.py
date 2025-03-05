@@ -9,33 +9,37 @@ def generate_dh_modes(dm, nModes=None, useTorch=False, include_piston=False):
     # Read the main parameters of the DM: nActs and pupil mask
     pupil_mask = dm.validAct_2D
     nActs = dm.nValidAct
+
     # If the modes are not specified, use the number of actuators --> maximum number of modes
     if nModes is None:
         nModes = nActs
 
     dh_modes = np.zeros((pupil_mask.shape[0], pupil_mask.shape[1], nActs))
 
+    # Get grid coordinates
+    coords = np.arange(pupil_mask.shape[0])
+    x, y = np.meshgrid(coords, coords)
+    
+    # Compute center and radius normalization
+    origin_x, origin_y = pupil_mask.shape[0] / 2, pupil_mask.shape[1] / 2
+    r_max = np.max(np.sqrt((x - origin_x) ** 2 + (y - origin_y) ** 2) * pupil_mask)
+
+    # Compute radius and theta arrays for all points
+    r = np.sqrt((y - origin_y) ** 2 + (x - origin_x) ** 2) / r_max
+    theta = np.arctan2(y - origin_y, x - origin_x)
+
+    # Mask out non-pupil regions
+    r[~pupil_mask] = 0
+    theta[~pupil_mask] = 0
+
+    # Allocate output array
+    dh_modes = np.zeros((pupil_mask.shape[0], pupil_mask.shape[1], nModes))
+
+    # Compute modes in a vectorized way
     for i in range(nModes):
-        print('Mode ', i)
-        # Get the radial and azimuthal order
-        if include_piston:
-            n, m = get_index(i+1)
-        else:
-            n, m = get_index(i+2)
-        # Begin the evaluation of the mode in the pupil --> the coordinates must be polar and defined in the unit circle
-        coords = np.linspace(0, pupil_mask.shape[0]-1, pupil_mask.shape[0])
-        x, y = np.meshgrid(coords, coords)
-        r_max = np.max(np.sqrt((x-pupil_mask.shape[1]/2)**2 + (y-pupil_mask.shape[0]/2)**2)*pupil_mask)
-        for j in range(pupil_mask.shape[0]): # Y-axis
-            for k in range(pupil_mask.shape[1]): # X-axis
-                if pupil_mask[j, k]:
-                    # Move origin from top-left corner to the center of the image
-                    origin_x = pupil_mask.shape[0] / 2
-                    origin_y = pupil_mask.shape[1] / 2
-                    # Compute the radius
-                    r = np.sqrt((j-origin_y)**2+(k-origin_x)**2) / r_max # The radius is normalized to the unit circle
-                    thetha = np.atan2(j-origin_y, k-origin_x)
-                    dh_modes[j, k, i] = disk_harmonic_mode(m, n, r, thetha)
+        n, m = get_index(i+1) if include_piston else get_index(i+2)
+        dh_modes[:, :, i] = disk_harmonic_mode(m, n, r, theta) * pupil_mask  # Apply mask
+
     # Normalize the mode between -1 and 1
 
     max_values = np.max(np.abs(dh_modes), axis=(0,1), keepdims=True)
@@ -96,7 +100,11 @@ def disk_harmonic_mode(m ,n ,r, theta):
     knm = sp.jn_zeros(mu, n)[-1]  # Approximate root using Bessel function zeros
     
     # Compute normalization factor anm
-    anm = 1 / np.sqrt((1 - (m/knm)**2) * (sp.jv(m, knm)**2))
+    anm_den = np.sqrt((1 - (m/knm)**2) * (sp.jv(m, knm)**2))
+    if anm_den == 0:
+        anm = 1
+    else:
+        anm = 1 / anm_den
     
     # Compute radial function Rnm(r)
     Rnm = anm * sp.jv(m, knm * r)
