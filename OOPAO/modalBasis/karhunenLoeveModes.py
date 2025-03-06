@@ -11,7 +11,7 @@ from OOPAO.modalBasis.zernikeModes import ZernikeNaive, get_zernikes
 # imited between -1 and 1 to be used with DMs and in the control loop. Hence, if the range of the modes will be cut afetrwards, there is not need to 
 # correct the original amplitude by the atmosphere conditions.
 
-def generate_kl_modes(dm, nModes=None, useTorch=False, include_piston=False):
+def generate_kl_modes(dm, nModes=None, useTorch=False):
     # Read the main parameters of the DM: nActs and pupil mask
     pupil_mask = dm.validAct_2D
     nActs = dm.nValidAct
@@ -24,16 +24,13 @@ def generate_kl_modes(dm, nModes=None, useTorch=False, include_piston=False):
 
     # Implementation based on Anzuloa and Gladysz (2017), original work from Roddier (1990)
 
-    if include_piston:
-        Noffset = 1
-    else:
-        Noffset = 2
+    Noffset = 2 # +1 due to Noll's index starting at 1, +1 due to the piston mode
 
     Z_covmat = generate_covariance_matrix(nModes, Noffset)
 
     _, _, U = np.linalg.svd(Z_covmat)
 
-    zernikes = get_zernikes(pupil_mask, nModes, nModes)
+    zernikes = get_zernikes(pupil_mask, nModes, Noffset)
 
     kl_modes = np.zeros_like(zernikes)
 
