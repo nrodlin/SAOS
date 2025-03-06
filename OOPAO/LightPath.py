@@ -110,8 +110,9 @@ class LightPath:
                 if i == 0 and parallel_atm:
                     self.atmosphere_opd = opd_results[i]
                     self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
-                self.dm_opd.append(opd_results[i][0])
-                self.dm_phase.append(opd_results[i][1])
+                else:
+                    self.dm_opd.append(opd_results[i][0])
+                    self.dm_phase.append(opd_results[i][1])
         else:
             self.dm_opd = np.zeros_like(self.atmosphere_opd)
             self.dm_phase = np.copy(self.dm_opd)
