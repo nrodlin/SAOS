@@ -26,17 +26,23 @@ class LightPath:
         self.dms_opd = None # in [m]
         self.dms_phase = None # in [rad]
 
+        # The OPD and phase that reaches the WFS: atm + dm
+        self.wfs_opd = None # in [m]
+        self.wfs_phase = None # in [rad]
+
         self.ncpa_opd = None # in [m]
         self.ncpa_phase = None # in [rad]
 
-        self.telescope_opd = None # in [m]
-        self.telescope_phase = None # in [rad]
+        # The OPD and phase that reaches the science camera: atm + dm + ncpa
+        self.sci_opd = None # in [m]
+        self.sci_phase = None # in [rad]
 
         # WFS variables
         self.slopes_1D = None # [px] or [rad] depending on the WFS configuration
         self.slopes_2D = None # [px] or [rad] depending on the WFS configuration
         self.wfs_frame = None
-        # DMs variables
+        
+        # TODO: REMOVE DMs variables
         self.dm_coeffs = None
         # Science variables
         self.sci_frame = None
@@ -52,18 +58,86 @@ class LightPath:
         self.atm = atm
         self.tel = tel
 
-        # Now, handle the optional objects
+        # Now, the optional objects
+        if dm is None:
+            self.dm = None
+        else:
+            if isinstance(dm, list): # There might be several DMs, hence the LightPath expects a list
+                self.dm = dm
+            else:
+                self.dm = [dm]
+        
         self.dm = dm
         self.wfs = wfs
         self.ncpa = ncpa
-        self.sci = ncpa        
+        self.sci = sci
+
         self.logger.info('LightPath::initialize_path - Path initialized')
         return True
     
     # This method propagates the light through the optical path, updating the variables contained within this class
     # The main process will call this method during a simualtion to update the metrics, its execution is thread-safe
-    def propagate(self):
+    # Parameters:
+    # parallel_atm: if True, the atmosphere method getOPD is executed in parallel with the each DMs getOPD
+    # parallel_dms: if True, each DM getOPD is executed in parallel
+    def propagate(self, parallel_atm=False, parallel_dms=False):
         self.logger.debug('LightPath::propagate')
+
+        ## The first two tasks consist of getting the effect of the atmosphere and DMs on the light
+        tasks  = []
+
+        # Prepare the parallel processing
+        if parallel_atm:
+            parallel_dms = True
+            tasks.append(delayed(self.atm.getOPD)(self.src))
+        
+        else:
+            self.atmosphere_opd = self.atm.getOPD(self.src)
+            self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
+        
+        if (parallel_dms == True) and (self.dm is not None):
+            for i in range(len(self.dm)):
+                tasks.append(delayed(self.dm[i].getOPD)(self.src))
+        else:
+            for i in range(self.dm):
+                self.dms_opd
+        
+        # Execute the tasks
+        opd_results = Parallel(n_jobs=len(tasks), prefer="threads")(tasks)
+
+        # Unpack the results
+        self.dm_opd = []
+        self.dm_phase = []
+
+        for i in range(len(opd_results)):
+            if i == 0 and parallel_atm:
+                self.atmosphere_opd = opd_results[i]
+                self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
+            self.dm_opd.append(opd_results[i][0])
+            self.dm_phase.append(opd_results[i][1])
+
+        # Combine the OPD before reaching the WFS
+        self.wfs_opd = self.atmosphere_opd + np.sum(self.dm_opd)
+        self.wfs_opd = self.wfs_opd * (2 * np.pi /self.src.wavelength)
+
+        # Then, measure the slopes at the WFS - if defined
+        if self.wfs is not None:
+            self.slopes_1D, self.slopes_2D, self.wfs_frame = self.wfs.wfs_measure(self.wfs_phase, self.src)
+
+        # If there are NCPA, add them to the OPD
+        # TODO: NCPA class must be upgrade to match the new scheme. It shall return a phase in the pupil plane using the projection of the src as the DMs
+        if self.ncpa is not None:
+            self.sci_opd = self.wfs_opd + self.ncpa_opd
+        else:
+            self.sci_opd = np.copy(self.wfs_opd)
+        
+        self.sci_phase = self.sci_opd * (2 * np.pi /self.src.wavelength)
+
+        # Generate the Science frame, if defined
+        # TODO: Update the detector class to match the new scheme
+        if self.sci is not None:
+            self.sci_frame = self.sci.sci_measure(self.sci_phase, self.src)
+        
         return True
     
     def setup_logging(self, logging_level=logging.WARNING):
