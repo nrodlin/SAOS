@@ -166,6 +166,5 @@ class LightPath:
         return queue_listener
     
     def __del__(self):
-        self.queue_listerner.stop()
-
-       
+        if not self.external_logger_flag:
+            self.queue_listerner.stop()
