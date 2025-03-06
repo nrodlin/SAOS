@@ -42,11 +42,8 @@ class LightPath:
         self.slopes_2D = None # [px] or [rad] depending on the WFS configuration
         self.wfs_frame = None
         
-        # TODO: REMOVE DMs variables
-        self.dm_coeffs = None
         # Science variables
         self.sci_frame = None
-        self.quality_metrics = None
 
     # An optical path is defiend, at least, by the source object emitting the light, the atmosphere and the telescope.
     # Optionally, the telescope can have deformable mirror(s), a wavefront sensor, ncpa and a science camera
@@ -67,7 +64,6 @@ class LightPath:
             else:
                 self.dm = [dm]
         
-        self.dm = dm
         self.wfs = wfs
         self.ncpa = ncpa
         self.sci = sci
@@ -94,31 +90,35 @@ class LightPath:
         else:
             self.atmosphere_opd = self.atm.getOPD(self.src)
             self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
-        
-        if (parallel_dms == True) and (self.dm is not None):
+        if self.dm is not None:
+            nthreads = 1
+
+            if parallel_dms == True:
+                nthreads = len(self.dm)
+            
             for i in range(len(self.dm)):
-                tasks.append(delayed(self.dm[i].getOPD)(self.src))
+                tasks.append(delayed(self.dm[i].get_dm_opd)(self.src))
+
+            # Execute the tasks
+            opd_results = Parallel(n_jobs=nthreads, prefer="threads")(tasks)
+
+            # Unpack the results
+            self.dm_opd = []
+            self.dm_phase = []
+
+            for i in range(len(opd_results)):
+                if i == 0 and parallel_atm:
+                    self.atmosphere_opd = opd_results[i]
+                    self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
+                self.dm_opd.append(opd_results[i][0])
+                self.dm_phase.append(opd_results[i][1])
         else:
-            for i in range(self.dm):
-                self.dms_opd
-        
-        # Execute the tasks
-        opd_results = Parallel(n_jobs=len(tasks), prefer="threads")(tasks)
-
-        # Unpack the results
-        self.dm_opd = []
-        self.dm_phase = []
-
-        for i in range(len(opd_results)):
-            if i == 0 and parallel_atm:
-                self.atmosphere_opd = opd_results[i]
-                self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
-            self.dm_opd.append(opd_results[i][0])
-            self.dm_phase.append(opd_results[i][1])
+            self.dm_opd = np.zeros_like(self.atmosphere_opd)
+            self.dm_phase = np.copy(self.dm_opd)
 
         # Combine the OPD before reaching the WFS
         self.wfs_opd = self.atmosphere_opd + np.sum(self.dm_opd)
-        self.wfs_opd = self.wfs_opd * (2 * np.pi /self.src.wavelength)
+        self.wfs_phase = self.wfs_opd * (2 * np.pi /self.src.wavelength)
 
         # Then, measure the slopes at the WFS - if defined
         if self.wfs is not None:
