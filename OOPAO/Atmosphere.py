@@ -587,7 +587,7 @@ class Atmosphere:
     # IMPORTANT: the content of the atmosphere class does not depend on the sources, so this methods just projects the sources 
     # into the atmosphere to find the new OPD. Hence, each projection can run in parallel.
     def getOPD(self, src):
-        self.logger.info('Atmosphere::getOPD - Getting the OPD for each source.')
+        self.logger.debug('Atmosphere::getOPD - Getting the OPD for each source.')
 
         # First, we need to check the source tbecause the sun is made of an asterism, 
         # it will be more efficient to run in parallel the process for each individual star and then combine it.
