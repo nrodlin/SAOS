@@ -502,7 +502,7 @@ class Atmosphere:
         
         # Serialize layers into shared memory before the getOPD method call
 
-        self.logger.info('Atmosphere::update - Updated.')
+        self.logger.debug('Atmosphere::update - Updated.')
         return True
         
     # Updates each layer
