@@ -68,7 +68,7 @@ class LightPath:
         self.ncpa = ncpa
         self.sci = sci
 
-        self.logger.info('LightPath::initialize_path - Path initialized')
+        self.logger.debug('LightPath::initialize_path - Path initialized')
         return True
     
     # This method propagates the light through the optical path, updating the variables contained within this class
