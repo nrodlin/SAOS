@@ -120,9 +120,9 @@ class LightPath:
 
         # Combine the OPD before reaching the WFS
         if interaction_matrix == False:
-            self.wfs_opd = self.atmosphere_opd + np.sum(self.dm_opd)
+            self.wfs_opd = self.atmosphere_opd + np.sum(self.dm_opd, axis=0)
         else:
-            self.wfs_opd = np.sum(self.dm_opd)
+            self.wfs_opd = np.sum(self.dm_opd, axis=0)
         self.wfs_phase = self.wfs_opd * (2 * np.pi /self.src.wavelength)
 
         # Then, measure the slopes at the WFS - if defined
