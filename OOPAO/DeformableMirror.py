@@ -455,6 +455,12 @@ class DeformableMirror:
     # The shape of the mirror is computed as the matricial product of modes x coeffs -> modes [dm_layer.D_px, nValidActs], coefs [nValidActs, 1]    
     def updateDMShape(self, val):
         self.logger.debug('DeformableMirror::updateDMShape') 
+
+        if isinstance(val, np.ndarray):
+            if (val.shape[0] == self.nAct) and (val.shape[1] == self.nAct):
+                # The command received is a 2D matrix, take only the valid actuators!
+                val = val.flatten()[self.validAct]
+        
         if self.floating_precision==32:            
             self._coefs = np.float32(val)
         else:
@@ -464,7 +470,7 @@ class DeformableMirror:
             temp = torch.matmul(self.modes_torch, torch.tensor(self._coefs))
             self.dm_layer.OPD = temp.view(self.dm_layer.D_px,self.dm_layer.D_px).double().numpy()
         else:
-            self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, only a 1D vector is expected.')    
+            self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, only a 1D vector or a valid 2D matrix is expected.')    
             raise ValueError('DeformableMirror::updateDMShape - Dimensions do not match to the number of valid actuators.')
 
         return True
