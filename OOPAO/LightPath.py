@@ -76,7 +76,8 @@ class LightPath:
     # Parameters:
     # parallel_atm: if True, the atmosphere method getOPD is executed in parallel with the each DMs getOPD
     # parallel_dms: if True, each DM getOPD is executed in parallel
-    def propagate(self, parallel_atm=False, parallel_dms=False):
+    # interaction_matrix: if True, the Atmosphere is not added to the DM OPD during the IM measurement
+    def propagate(self, parallel_atm=False, parallel_dms=False, interaction_matrix=False):
         self.logger.debug('LightPath::propagate')
 
         ## The first two tasks consist of getting the effect of the atmosphere and DMs on the light
@@ -118,7 +119,10 @@ class LightPath:
             self.dm_phase = np.copy(self.dm_opd)
 
         # Combine the OPD before reaching the WFS
-        self.wfs_opd = self.atmosphere_opd + np.sum(self.dm_opd)
+        if interaction_matrix == False:
+            self.wfs_opd = self.atmosphere_opd + np.sum(self.dm_opd)
+        else:
+            self.wfs_opd = np.sum(self.dm_opd)
         self.wfs_phase = self.wfs_opd * (2 * np.pi /self.src.wavelength)
 
         # Then, measure the slopes at the WFS - if defined
