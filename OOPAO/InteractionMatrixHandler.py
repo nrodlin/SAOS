@@ -92,14 +92,47 @@ class InteractionMatrixHandler:
     # nModes is by default None, which will use all the modes of the DMs. If define, it shall be a list specifying the number of modes per DM
     # rcond specifies the percentage over the maximum singular value that are filtered during pseudo-inversion.
     def measure(self, modal_basis, stroke, nModes=None, rcond=0.025):
-        # Validate the parameters format
-        modal_basis_per_DM = self.validate_param(modal_basis, str, 'InteractionMatrixHandler::measure - modal_basis must be a list or a string.')
-        stroke_per_DM = self.validate_param(stroke, float, 'InteractionMatrixHandler::measure - stroke must be a list or a float.')
-    
-        if nModes is None:
-            nModes_per_DM = [dm.nValidAct for dm in self.dm_scanned_list]
+        # Check modal_basis parameter
+        modal_basis_per_DM = []
+        if isinstance(modal_basis, list):
+            if len(modal_basis) == self.im_boolean_matrix.shape[1]:
+                modal_basis_per_DM = modal_basis
+            else:
+                raise ValueError('InteractionMatrixHandler::measure - If the modal basis are specify per DM, the length shall be equal to the number of DMs. \
+                                 Use a string otherwise.')
         else:
-            nModes_per_DM = self.validate_param(nModes, list, None, 'InteractionMatrixHandler::measure - nModes must be a list or None.')
+            if isinstance(modal_basis, str):
+                modal_basis_per_DM = [modal_basis for _ in range(self.im_boolean_matrix.shape[1])]
+            else:
+                raise TypeError('InteractionMatrixHandler::measure - String or list were expected.')
+
+        # Check stroke parameter
+        stroke_per_DM = []
+        if isinstance(stroke, list):
+            if len(stroke) == self.im_boolean_matrix.shape[1]:
+                stroke_per_DM = stroke
+            else:
+                raise ValueError('InteractionMatrixHandler::measure - If the stroke is specify per DM, the length shall be equal to the number of DMs. \
+                                 Use a scalar otherwise.')
+        else:
+            if isinstance(stroke, float):
+                stroke_per_DM = [stroke for _ in range(self.im_boolean_matrix.shape[1])]
+            else:
+                raise TypeError('InteractionMatrixHandler::measure - Float or list were expected.')
+
+        # Check nModes parameter
+        nModes_per_DM = []
+        if isinstance(nModes, list):
+            if len(nModes) == self.im_boolean_matrix.shape[1]:
+                nModes_per_DM = nModes
+            else:
+                raise ValueError('InteractionMatrixHandler::measure - If the number of modes are specify per DM, the length shall be equal to the number of DMs. \
+                                 Use a None otherwise.')
+        else:
+            if nModes is None:
+                nModes_per_DM = [self.dm_scanned_list[i].nValidAct for i in range(self.im_boolean_matrix.shape[1])]
+            else:
+                raise TypeError('InteractionMatrixHandler::measure - None or list were expected.')
         
         # Once the input parameters are defined, we proceed to measure the IM
         # Prepare the variable to store the different IMs
@@ -160,16 +193,6 @@ class InteractionMatrixHandler:
             cmd = 0 * modes[:,:, 0]
             self.dm_scanned_list[i].updateDMShape(cmd)            
         return True
-
-    def validate_param(self, param, param_type, error_msg):
-        if isinstance(param, list):
-            if len(param) != len(self.dm_scanned_list):
-                raise ValueError(error_msg)
-            return param
-        elif isinstance(param, param_type):
-            return [param] * len(self.dm_scanned_list)
-        else:
-            raise TypeError(error_msg)
 
     # Loads from file 
     def load_modal_basis(self, path):
