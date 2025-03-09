@@ -22,11 +22,12 @@ def generate_hadamard_modes(dm, nModes=None, useTorch=False, include_piston=Fals
     H = hadamard(nHadamard)
 
     # Generate the 3D matrices, each 2D surface contains one Hadamard mode
-    H_modes = np.zeros((pupil_mask.shape[0], pupil_mask.shape[1], nActs))
+    H_modes = np.zeros((pupil_mask.shape[0], pupil_mask.shape[1], nModes))
 
     indices = np.where(pupil_mask)  # Gets the indices where pupil_mask is True
 
-    for i in range(nActs):
+    # Hadamard modes must be generated using all the DoF, then, we can crop the number of modes
+    for i in range(nModes):
         if include_piston:
             H_modes[indices[0], indices[1], i] = H[i, :len(indices[0])]
         else:
