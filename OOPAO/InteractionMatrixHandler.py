@@ -1,7 +1,6 @@
 import time
 
 import numpy as np
-import torch
 from joblib import Parallel, delayed
 
 from astropy.io import fits
@@ -128,12 +127,11 @@ class InteractionMatrixHandler:
         return True
 
     # This method measures the interaction matrix according to the im_boolean_matrix generated during initialization.
-    # After measuring the IM, computes the reconstruction matrix as well using psuedo-inversion. 
+    # After measuring the IM, computes the reconstruction matrix as well using pseudo-inversion. 
     # modal_basis_list can be a string or a list of length equal to the number of DMs, enabling the definition of a modal basis for all the DMs or specifying one modal basis for each DM
     # stroke is in [m] and can be a scalar or a list, to let the user set a common stroke for all the DMs or define it per DM.
     # nModes is by default None, which will use all the modes of the DMs. If define, it shall be a list specifying the number of modes per DM
-    # rcond specifies the percentage over the maximum singular value that are filtered during pseudo-inversion.
-    def measure(self, modal_basis, stroke, nModes=None, rcond=0.025):
+    def measure(self, modal_basis, stroke, nModes=None):
         # Check modal_basis parameter
         modal_basis_per_DM = []
         if isinstance(modal_basis, list):
