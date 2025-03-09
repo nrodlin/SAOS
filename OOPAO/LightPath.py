@@ -84,13 +84,16 @@ class LightPath:
         tasks  = []
 
         # Prepare the parallel processing
-        if parallel_atm:
+        if parallel_atm and (not interaction_matrix):
             parallel_dms = True
             tasks.append(delayed(self.atm.getOPD)(self.src))
         
-        else:
+        elif (not parallel_atm) and (not interaction_matrix):
             self.atmosphere_opd = self.atm.getOPD(self.src)
             self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
+        else: # Avoid interacting with the atmosphere while the IM is being measured
+            self.atmosphere_opd = 0
+        
         if self.dm is not None:
             nthreads = 1
 
@@ -108,7 +111,7 @@ class LightPath:
             self.dm_phase = []
 
             for i in range(len(opd_results)):
-                if i == 0 and parallel_atm:
+                if i == 0 and parallel_atm and (not interaction_matrix):
                     self.atmosphere_opd = opd_results[i]
                     self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
                 else:
@@ -119,10 +122,9 @@ class LightPath:
             self.dm_phase = np.copy(self.dm_opd)
 
         # Combine the OPD before reaching the WFS
-        if interaction_matrix == False:
-            self.wfs_opd = self.atmosphere_opd + np.sum(self.dm_opd, axis=0)
-        else:
-            self.wfs_opd = np.sum(self.dm_opd, axis=0)
+
+        self.wfs_opd = self.atmosphere_opd + np.sum(self.dm_opd, axis=0) # Note that for the IM measuring, atmosphere_opd is 0
+
         self.wfs_phase = self.wfs_opd * (2 * np.pi /self.src.wavelength)
 
         # Then, measure the slopes at the WFS - if defined
