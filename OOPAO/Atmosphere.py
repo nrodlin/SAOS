@@ -356,7 +356,7 @@ class Atmosphere:
         self.logger.debug('Atmosphere::save')
 
         if self.hasNotBeenInitialized:
-            logging.error('Atmosphere::save - The atmosphere has not been initialized yet.')
+            self.logger.error('Atmosphere::save - The atmosphere has not been initialized yet.')
             return False
 
         self.logger.info('Atmosphere::save - Creating the HDU')
