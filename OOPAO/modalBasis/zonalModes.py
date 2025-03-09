@@ -19,6 +19,8 @@ def generate_zonal_modes(dm, nModes=None, useTorch=False):
     # Assign each actuator to a layer of the 3D zonal modes matriz
     
     for i, (r, c) in enumerate(zip(rows, cols)):
+        if i == nModes: # Rows and Cols dimension equal the number of actuators, although nModes can be smaller
+            break
         zonal_modes[r, c, i] = 1    
 
     # Check torch option
