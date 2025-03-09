@@ -179,7 +179,7 @@ class InteractionMatrixHandler:
                     tmp_IM_list.append(None)
             # Now, loop over each mode to measure the interaction matrix
             for j in range(modes.shape[2]):
-                if j % 50:
+                if (j % 50) == 0:
                     self.logger.info(f'InteractionMatrixHandler::measure - Mode {j} out of {modes.shape[2]}')
                 # Apply the modal command to the DM
                 cmd = stroke_per_DM[i] * modes[:,:, j]
