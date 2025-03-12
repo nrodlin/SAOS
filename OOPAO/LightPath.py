@@ -9,7 +9,7 @@ import logging.handlers
 from queue import Queue
 
 class LightPath:
-    def __init__(self, logger):
+    def __init__(self, logger=None):
         if logger is None:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
