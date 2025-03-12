@@ -22,9 +22,9 @@ class Sharepoint:
         self.lp_attributes = ['atmosphere_opd', 'atmosphere_phase', 'dms_opd', 'dms_phase',
                               'wfs_opd', 'wfs_phase', 'ncpa_opd', 'ncpa_phase', 'sci_opd', 
                               'sci_phase', 'slopes_1D', 'slopes_2D', 'wfs_frame', 'sci_frame']
-        context = zmq.Context()
-        socket = context.socket(zmq.PUB)
-        socket.bind(protocol + ':' + ip + ':' + str(port))
+        self.context = zmq.Context()
+        self.socket = self.context.socket(zmq.PUB)
+        self.socket.bind(protocol + '://' + ip + ':' + str(port))
     
     def shareData(self, light_path):
         self.logger.debug('Sharepoint::shareData')
@@ -44,8 +44,11 @@ class Sharepoint:
                 
                 if buffer is not None:
                     topics.append(topic_name + self.lp_attributes[j])
-                    self.socker.send_multipart([topics[-1].encode(), buffer.tobytes()])
-        self.logger.info('Sharepoint::shareData - Sending took {time.time()-t0} [s]')                
+                    self.socket.send_multipart([topics[-1].encode(), buffer.tobytes()])
+        
+        self.socket.send_multipart([b"topics", ",".join(topics).encode()])
+        
+        self.logger.info(f'Sharepoint::shareData - Sending took {time.time()-t0} [s]')                
 
         return True
 
@@ -76,3 +79,6 @@ class Sharepoint:
     def __del__(self):
         if not self.external_logger_flag:
             self.queue_listerner.stop()
+        if self.socket is not None and self.context is not None:
+            self.socket.close()
+            self.context.term()
