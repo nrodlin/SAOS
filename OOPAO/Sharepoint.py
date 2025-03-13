@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import zmq
+import pickle
 
 from joblib import Parallel, delayed
 
@@ -19,7 +20,7 @@ class Sharepoint:
             self.external_logger_flag = True
             self.logger = logger
         # List of attributes to be published
-        self.lp_attributes = ['atmosphere_opd', 'atmosphere_phase', 'dms_opd', 'dms_phase',
+        self.lp_attributes = ['atmosphere_opd', 'atmosphere_phase', 'dm_opd', 'dm_phase',
                               'wfs_opd', 'wfs_phase', 'ncpa_opd', 'ncpa_phase', 'sci_opd', 
                               'sci_phase', 'slopes_1D', 'slopes_2D', 'wfs_frame', 'sci_frame']
         self.context = zmq.Context()
@@ -35,6 +36,7 @@ class Sharepoint:
         # Prepare the list of topics 
         topics = []
         t0 = time.time()
+        
         for i in range(nNameSpaces):
             topic_name = 'lightPath' + str(i) + '/'
 
@@ -43,8 +45,13 @@ class Sharepoint:
                 buffer = getattr(light_path[i], self.lp_attributes[j])
                 
                 if buffer is not None:
-                    topics.append(topic_name + self.lp_attributes[j])
-                    self.socket.send_multipart([topics[-1].encode(), buffer.tobytes()])
+                    if isinstance(buffer, list): # Case for the DMs
+                        for k in range(len(buffer)):
+                            topics.append(topic_name + self.lp_attributes[j] + '_' + str(k))
+                            self.socket.send_multipart([topics[-1].encode(), pickle.dumps(buffer[k])])
+                    else:
+                        topics.append(topic_name + self.lp_attributes[j])
+                        self.socket.send_multipart([topics[-1].encode(), pickle.dumps(buffer)])
         
         self.socket.send_multipart([b"topics", ",".join(topics).encode()])
         
