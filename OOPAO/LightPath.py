@@ -23,8 +23,8 @@ class LightPath:
         self.atmosphere_opd = None # in [m]
         self.atmosphere_phase = None # in [rad]
         
-        self.dms_opd = None # in [m]
-        self.dms_phase = None # in [rad]
+        self.dm_opd = None # in [m]
+        self.dm_phase = None # in [rad]
 
         # The OPD and phase that reaches the WFS: atm + dm
         self.wfs_opd = None # in [m]
