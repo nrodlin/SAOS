@@ -11,3 +11,13 @@ nav:
   - Home: index.md
   - Atmosphere: atmosphere.md
   - Source: source.md
+  - Extended Source: extended_source.md
+  - Telescope: telescope.md
+  - Deformable Mirror: deformable_mirror.md
+  - SHWFS: shwfs.md
+  - Correlating SHWFS: correlating_shwfs.md
+  - NCPA: ncpa.md
+  - Detector: detector.md
+  - Interaction Matrix: interaction_matrix.md
+  - Sharepoint: sharepoint.md
+  - Layer: layer.md

@@ -1,13 +1,24 @@
+"""
+Created + major update on March 24 2025
+@author: nrodlin
+"""
+
 from OOPAO.Source import Source
 from OOPAO.Asterism import Asterism
 
 import numpy as np
 from astropy.io import fits
-import matplotlib.pyplot as plt
 
 import logging
 import logging.handlers
 from queue import Queue
+
+"""
+ExtendedSource Module
+=================
+
+This module contains the `ExtendedSource` class, used for modeling an extended source in adaptive optics simulations. Typical case is a sun patch.
+"""
 
 class ExtendedSource(Source):
     def __init__(self, optBand:str,
@@ -20,68 +31,32 @@ class ExtendedSource(Source):
                  patch_padding=5,
                  subDir_margin=1.0,
                  logger=None):
-        """SOURCE
-        A extended source object shares the implementation of the Source class, but the photometry varies for the Sun. 
-        The LGS and Magnitude parameters are omitted in this definition
+        """
+        Initialize an extended source (e.g., the Sun) for use in AO simulations.
 
         Parameters
         ----------
         optBand : str
-            The optical band of the source (see the method photometry)
-            ex, 'V0' corresponds to a wavelength of 500 nm
+            Optical band identifier.
         coordinates : list, optional
-            DESCRIPTION. The default is [0,0], in polar format [r, theta] in which theta is in degrees.
-        fov : float
-            DESCRIPTION. Field of View in arcsec of the patch selected
+            Sky position [zenith, azimuth] in [arcsec, degrees], by default [0, 0].
+        fov : float, optional
+            Field of view in arcseconds, by default 10.
         altitude : float, optional
-            DESCRIPTION. The default is np.inf.
-        img_path: str, optional
-            DESCRIPTION. Sun pattern that shall be uploaded, expected FITS file.
-        img_PS: str, optional
-            DESCRIPTION. Plate Scale in "/px of the input image, default matches the default img_path PS
-        nSubDirs: int, optional
-            DESCRIPTION. Number of sub-directions taken from the sun image to build the inner aberration of the pupil in the image
-        patch_padding: float, optional
-            DESCRIPTION. Padding outside the subaperture FoV in arcsec.
-        Returns
-        -------
-        None.
-
-        """
-        """
-        ************************** REQUIRED PARAMETERS **************************
-        
-        A Source object is characterised by two parameter:
-        _ optBand               : the optical band of the source (see the method photometry)
-                            
-        ************************** COUPLING A SOURCE OBJECT **************************
-        
-        Once generated, a Source object "src" can be coupled to a Telescope "tel" that contains the OPD.
-        _ This is achieved using the * operator     : src*tel
-        _ It can be accessed using                  : tel.src       
-
-    
-        ************************** MAIN PROPERTIES **************************
-        
-        The main properties of a Source object are listed here: 
-        _ src.phase     : 2D map of the phase scaled to the src wavelength corresponding to tel.OPD
-        _ src.type      : SUN  
-
-        _ src.nPhoton   : number of photons per m2 per s, can be updated online. 
-        _ src.fluxMap   : 2D map of the number of photons per pixel per frame (depends on the loop frequency defined by tel.samplingTime)  
-        
-        The main properties of the object can be displayed using :
-            src.print_properties()
-            
-        ************************** OPTIONAL PROPERTIES **************************
-        _ altitude              : altitude of the source. Default is inf (SUN) 
-        ************************** EXEMPLE **************************
-
-        Creates a sun object in V band and combine it to the telescope
-        src = ExtendedSource(opticalBand = 'V0') 
-        src*tel
-       
-        """
+            Altitude of the source in meters. Default is infinity.
+        img_path : str, optional
+            Path to the FITS image of the source (e.g., solar image).
+        img_PS : float, optional
+            Plate scale in arcsec/pixel, by default 1/60.
+        nSubDirs : int, optional
+            Number of sub-directions across the extended source.
+        patch_padding : float, optional
+            Padding beyond FOV for sub-region extraction.
+        subDir_margin : float, optional
+            Margin added to avoid boundary effects.
+        logger : logging.Logger, optional
+            Optional logger instance.
+        """        
         # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
         if logger is None:
             self.queue_listerner = self.setup_logging()
@@ -176,6 +151,19 @@ class ExtendedSource(Source):
         self.is_initialized = True
         
     def photometry(self,arg):
+        """
+        Return photometric properties specific to solar sources.
+
+        Parameters
+        ----------
+        arg : str
+            Photometric band identifier.
+
+        Returns
+        -------
+        list
+            [wavelength, bandwidth, zero point flux] or -1 if not found.
+        """
         self.logger.debug('ExtendedSource::photometry')
         # photometry object [wavelength, bandwidth, zeroPoint]
         class phot:
@@ -211,6 +199,13 @@ class ExtendedSource(Source):
             self.logger.info('Flux \t\t'+ str(np.round(self.nPhoton)) + str('\t [photons/m2/s]'))
 
     def print_properties(self):
+        """
+        Print key attributes of the extended source.
+
+        Returns
+        -------
+        None
+        """
         self.logger.info('ExtendedSource::print_properties')
         self.logger.info('{: ^8s}'.format('Source') +'{: ^10s}'.format('Wavelength')+ '{: ^8s}'.format('Zenith')+ '{: ^10s}'.format('Azimuth')+ '{: ^10s}'.format('Altitude')+ '{: ^10s}'.format('Flux') )
         self.logger.info('{: ^8s}'.format('') +'{: ^10s}'.format('[m]')+ '{: ^8s}'.format('[arcsec]')+ '{: ^10s}'.format('[deg]')+ '{: ^10s}'.format('[m]')+ '{: ^10s}'.format('[phot/m2/s]') )
@@ -219,6 +214,14 @@ class ExtendedSource(Source):
         self.logger.info('{: ^8s}'.format(self.type) +'{: ^10s}'.format(str(self.wavelength))+ '{: ^8s}'.format(str(self.coordinates[0]))+ '{: ^10s}'.format(str(self.coordinates[1]))+'{: ^10s}'.format(str(np.round(self.altitude,2)))+'{: ^10s}'.format(str(np.round(self.nPhoton,1))) )
 
     def load_sun_img(self):
+        """
+        Load the solar image patch and extract both padded and unpadded versions.
+
+        Returns
+        -------
+        tuple of np.ndarray
+            (unpadded image patch, padded image patch)
+        """
         self.logger.info('ExtendedSource::load_sun_img')
         tmp_sun = fits.open(self.img_path)[0].data.astype('<f4')
         
@@ -241,6 +244,14 @@ class ExtendedSource(Source):
         return sun_nopad, sun_pad
     
     def get_subDirs(self):
+        """
+        Compute the sub-direction coordinates and extract subregions from the image.
+
+        Returns
+        -------
+        tuple of (np.ndarray, np.ndarray)
+            Coordinates [r, theta] and subregion image cubes.
+        """
         self.logger.info('ExtendedSource::get_subDirs')
         subDir_loc = np.zeros((3,self.nSubDirs, self.nSubDirs))
         if self.nSubDirs > 1:
@@ -277,6 +288,7 @@ class ExtendedSource(Source):
         return subDir_loc, subDir_imgs
 
     def __mul__(self,obj):
+        # TODO: Remove
         if obj.tag =='telescope':
             if (type(obj.OPD) is not list) and (np.ndim(obj.OPD) <= 2):
                 tmp_OPD = obj.OPD.copy()
