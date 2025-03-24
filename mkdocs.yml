@@ -9,6 +9,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Light Path: light_path.md
   - Atmosphere: atmosphere.md
   - Source: source.md
   - Extended Source: extended_source.md
@@ -21,3 +22,4 @@ nav:
   - Interaction Matrix: interaction_matrix.md
   - Sharepoint: sharepoint.md
   - Layer: layer.md
+  - Misregistration: misregistration.md

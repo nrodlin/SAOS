@@ -3,16 +3,30 @@
 Created on Fri Jun 26 14:01:10 2020
 
 @author: cheritie
+
+Minor update Marh 24 2025
+@author: nrodlin
 """
 
 import inspect
 
-import numpy as np
+"""
+Misregistration Module
+=================
 
+This module contains the `Misresgistration` class, used for modeling the DM misregistration in adaptive optics simulations.
+"""
 
 class MisRegistration:
     def __init__(self,param=None):
-        
+        """
+        Initialize the MisRegistration object, which defines misalignments of an optical element.
+
+        Parameters
+        ----------
+        param : dict or MisRegistration, optional
+            Dictionary or another MisRegistration object defining the initial misregistration values.
+        """        
         self.tag                  = 'misRegistration' 
         self.isInitialized = False  
 
@@ -69,6 +83,19 @@ class MisRegistration:
 
 #        mis-registrations can be added or sub-tracted using + and -       
     def __add__(self,misRegObject):
+        """
+        Combine two MisRegistration objects by summing their parameters.
+
+        Parameters
+        ----------
+        misRegObject : MisRegistration
+            Another misregistration instance.
+
+        Returns
+        -------
+        MisRegistration
+            Resulting combined misregistration.
+        """
         if misRegObject.tag == 'misRegistration':
             tmp = MisRegistration()
             tmp.rotationAngle        = self.rotationAngle       + misRegObject.rotationAngle
@@ -82,6 +109,19 @@ class MisRegistration:
         return tmp
     
     def __sub__(self,misRegObject):
+        """
+        Subtract the misregistration parameters of another object.
+
+        Parameters
+        ----------
+        misRegObject : MisRegistration
+            Another misregistration instance.
+
+        Returns
+        -------
+        MisRegistration
+            Resulting differential misregistration.
+        """
         if misRegObject.tag == 'misRegistration':
             tmp = MisRegistration()
             
@@ -96,12 +136,38 @@ class MisRegistration:
         return tmp
     
     def __eq__(self, other):
+        """
+        Check equality between two MisRegistration objects.
+
+        Parameters
+        ----------
+        other : MisRegistration
+            Another instance.
+
+        Returns
+        -------
+        bool
+            True if all parameters match.
+        """
         if isinstance(other, self.__class__):
             return self.__dict__ == other.__dict__
         else:
             return False
 
     def __ne__(self, other):
+        """
+        Check inequality between two MisRegistration objects.
+
+        Parameters
+        ----------
+        other : MisRegistration
+            Another instance.
+
+        Returns
+        -------
+        bool
+            True if any parameter differs.
+        """
         return not self.__eq__(other)
 # ----------------------------------------- Properties  -----------------------------------------
     @property
@@ -251,24 +317,6 @@ class MisRegistration:
                   
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
     def print_(self):
-            print('{: ^14s}'.format('Rotation [deg]') + '\t' + '{: ^11s}'.format('Shift X [m]')+ '\t' + '{: ^11s}'.format('Shift Y [m]')+ '\t' + '{: ^18s}'.format('Radial Scaling [%]')+ '\t' + '{: ^22s}'.format('Tangential Scaling [%]'))
-            print("{: ^14s}".format(str(self.rotationAngle) )  + '\t' +'{: ^11s}'.format(str(self.shiftX))+'\t' + '{: ^11s}'.format(str(self.shiftY)) +'\t' +'{: ^18s}'.format(str(self.radialScaling))+'\t' + '{: ^22s}'.format(str(self.tangentialScaling)))
+        print('{: ^14s}'.format('Rotation [deg]') + '\t' + '{: ^11s}'.format('Shift X [m]')+ '\t' + '{: ^11s}'.format('Shift Y [m]')+ '\t' + '{: ^18s}'.format('Radial Scaling [%]')+ '\t' + '{: ^22s}'.format('Tangential Scaling [%]'))
+        print("{: ^14s}".format(str(self.rotationAngle) )  + '\t' +'{: ^11s}'.format(str(self.shiftX))+'\t' + '{: ^11s}'.format(str(self.shiftY)) +'\t' +'{: ^18s}'.format(str(self.radialScaling))+'\t' + '{: ^22s}'.format(str(self.tangentialScaling)))
      
-    def show(self):
-        attributes = inspect.getmembers(self, lambda a:not(inspect.isroutine(a)))
-        print(self.tag+':')
-        for a in attributes:
-            if not(a[0].startswith('__') and a[0].endswith('__')):
-                if not(a[0].startswith('_')):
-                    if not np.shape(a[1]):
-                        tmp=a[1]
-                        try:
-                            print('          '+str(a[0])+': '+str(tmp.tag)+' object') 
-                        except:
-                            print('          '+str(a[0])+': '+str(a[1])) 
-                    else:
-                        if np.ndim(a[1])>1:
-                            print('          '+str(a[0])+': '+str(np.shape(a[1])))    
-    def __repr__(self):
-        self.print_()
-        return ' '

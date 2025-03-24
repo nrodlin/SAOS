@@ -1,15 +1,28 @@
-import time
-
 import numpy as np
-import torch
+
 from joblib import Parallel, delayed
 
 import logging
 import logging.handlers
 from queue import Queue
 
+"""
+LightPath Module
+=================
+
+This module contains the `LightPath` class, used for modeling different line of sights in adaptive optics simulations.
+"""
+
 class LightPath:
     def __init__(self, logger=None):
+        """
+        Initialize the LightPath object, which encapsulates the complete optical train.
+
+        Parameters
+        ----------
+        logger : logging.Logger, optional
+            Logger instance for diagnostics.
+        """
         if logger is None:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
@@ -48,6 +61,31 @@ class LightPath:
     # An optical path is defiend, at least, by the source object emitting the light, the atmosphere and the telescope.
     # Optionally, the telescope can have deformable mirror(s), a wavefront sensor, ncpa and a science camera
     def initialize_path(self, src, atm, tel, dm=None, wfs=None, ncpa=None, sci=None):
+        """
+        Define and configure the optical path with all components.
+
+        Parameters
+        ----------
+        src : Source
+            Light source (NGS, LGS, or Sun).
+        atm : Atmosphere
+            Atmospheric model.
+        tel : Telescope
+            Telescope instance.
+        dm : DeformableMirror or list, optional
+            Deformable mirrors in the path.
+        wfs : ShackHartmann, optional
+            Wavefront sensor.
+        ncpa : object, optional
+            Non-common path aberration object.
+        sci : object, optional
+            Science detector.
+
+        Returns
+        -------
+        bool
+            True if initialization succeeds.
+        """
         self.logger.debug('LightPath::initialize_path')
         # Assign the objects to class attributes
         # The objects cannot be affected by paralell processing, their inner set of parameters must be modified externally at the main thread
@@ -78,6 +116,23 @@ class LightPath:
     # parallel_dms: if True, each DM getOPD is executed in parallel
     # interaction_matrix: if True, the Atmosphere is not added to the DM OPD during the IM measurement
     def propagate(self, parallel_atm=False, parallel_dms=False, interaction_matrix=False):
+        """
+        Simulate light propagation through the configured optical path.
+
+        Parameters
+        ----------
+        parallel_atm : bool, optional
+            If True, compute atmosphere OPD in parallel.
+        parallel_dms : bool, optional
+            If True, compute DMs in parallel.
+        interaction_matrix : bool, optional
+            If True, disable atmosphere during propagation (used for IM calibration).
+
+        Returns
+        -------
+        bool
+            True if propagation was successful.
+        """
         self.logger.debug('LightPath::propagate')
 
         ## The first two tasks consist of getting the effect of the atmosphere and DMs on the light

@@ -1,18 +1,34 @@
-import numpy as np
 import time
 import zmq
 import pickle
-
-from joblib import Parallel, delayed
-
-from OOPAO.LightPath import LightPath
 
 import logging
 import logging.handlers
 from queue import Queue
 
+"""
+Sharepoint Module
+=================
+
+This module contains the `Sharepoint` class, used for to share the data of adaptive optics simulations.
+"""
+
 class Sharepoint:
     def __init__(self, logger=None, port=5555, ip="localhost", protocol="tcp"):
+        """
+        Initialize the Sharepoint publisher for sharing light path data.
+
+        Parameters
+        ----------
+        logger : logging.Logger, optional
+            External logger to use. If None, initializes internal logging.
+        port : int, optional
+            Port number for ZeroMQ publisher. Default is 5555.
+        ip : str, optional
+            IP address to bind the publisher. Default is localhost.
+        protocol : str, optional
+            Communication protocol (e.g., 'tcp').
+        """
         if logger is None:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
@@ -28,6 +44,19 @@ class Sharepoint:
         self.socket.bind(protocol + '://' + ip + ':' + str(port))
     
     def shareData(self, light_path):
+        """
+        Publish all configured attributes of the light path over ZeroMQ.
+
+        Parameters
+        ----------
+        light_path : list
+            List of LightPath objects containing simulation results.
+
+        Returns
+        -------
+        bool
+            True if data was sent successfully.
+        """
         self.logger.debug('Sharepoint::shareData')
 
         # Check Light Path dimensions:

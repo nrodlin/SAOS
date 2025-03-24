@@ -3,9 +3,12 @@
 Created on Thu May 20 17:52:09 2021
 
 @author: cheritie
+
+Major update on March 24 2025
+@author: nrodlin
 """
 
-import inspect
+
 import time
 
 import logging
@@ -18,12 +21,12 @@ import scipy as sp
 from .Detector import Detector
 from .tools.tools import bin_ndarray
 
-try:
-    from joblib import Parallel, delayed
-except:
-    print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-    print('WARNING: The joblib module is not installed. This would speed up considerably the operations.')
-    print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+"""
+Shack Hartmann Wavefron Sensor Module
+=================
+
+This module contains the `ShackHartmann` class, used for modeling a SH-WFS in adaptive optics simulations.
+"""
 
 class ShackHartmann:
     def __init__(self,nSubap:float,
@@ -39,91 +42,35 @@ class ShackHartmann:
                  unit_in_rad = False,
                  logger=None):
         
-        """SHACK-HARTMANN
-        A Shack Hartmann object consists in defining a 2D grd of lenslet arrays located in the pupil plane of the telescope to estimate the local tip/tilt seen by each lenslet. 
-        By default the Shack Hartmann detector is considered to be noise-free (for calibration purposes). These properties can be switched on and off on the fly (see properties)
-        It requires the following parameters: 
+        """
+        Initialize a Shack-Hartmann Wavefront Sensor (WFS).
 
         Parameters
         ----------
         nSubap : float
-            The number of subapertures (micro-lenses) along the diameter defined by the telescope.pupil.
-        telescope : TYPE
-            The telescope object to which the Shack Hartmann is associated. 
-            This object carries the phase, flux and pupil information.
-        src : TYPE
-            The source object to which the Shack Hartmann is associated.
-            This objects carries the flux, number of photons and wavelength information.
+            Number of subapertures across the pupil diameter.
+        telescope : Telescope
+            Telescope object to which the WFS is attached.
+        src : Source
+            Source object (NGS or LGS).
         lightRatio : float
-            Criterion to select the valid subaperture based on flux considerations.
+            Threshold ratio to select valid subapertures based on flux.
         threshold_cog : float, optional
-            Threshold (with respect to the maximum value of the image) 
-            to apply to compute the center of gravity of the spots.
-            The default is 0.01.
+            Threshold for center-of-gravity spot detection.
         is_geometric : bool, optional
-            Flag to enable the geometric WFS. 
-            If True, enables the geometric Shack Hartmann (direct measurement of gradient).
-            If False, the diffractive computation is considered.
-            The default is False.
+            Enable geometric mode (gradient-based measurement).
         binning_factor : int, optional
-            Binning factor of the detector.
-            The default is 1.
+            Pixel binning factor for spot images.
         padding_extension_factor : int, optional
-            Zero-padding factor on the spots intensity images. 
-            This is a fast way to provide a larger field of view before the convolution 
-            with LGS spots is achieved and allow to prevent wrapping effects.
-            The default is 1.
+            Multiplier to extend spot field-of-view.
         threshold_convolution : float, optional
-            Threshold considered to force the gaussian spots (elungated spots) to go to zero on the edges.
-            The default is 0.05.
+            Cut-off threshold for Gaussian convolution.
         shannon_sampling : bool, optional
-            If True, the lenslet array spots are sampled at the same sampling as the FFT (2 pix per FWHM).
-            If False, the sampling is 1 pix per FWHM (default).
-            The default is False.
+            If True, sample at 2 pixels per FWHM.
         unit_in_rad : bool, optional
-                If True, the slopes units are in radians.
-                If False, the slopes units are in px.
-                The default is False.
-
-        Raises
-        ------
-        AttributeError
-            DESCRIPTION.
-
-        Returns
-        -------
-        None.
-
-        ************************** PROPAGATING THE LIGHT TO THE SH OBJECT **************************
-        The light can be propagated from a telescope object tel through the Shack Hartmann object wfs using the * operator:        
-        _ tel*wfs
-        This operation will trigger:
-            _ propagation of the tel.src light through the Shack Hartmann detector (phase and flux)
-            _ binning of the SH signals
-            _ addition of eventual photon noise and readout noise
-            _ computation of the Shack Hartmann signals
-        
-    
-        ************************** PROPERTIES **************************
-        
-        The main properties of a Telescope object are listed here: 
-        _ wfs.signal                     : signal measured by the Shack Hartmann
-        _ wfs.signal_2D                  : 2D map of the signal measured by the Shack Hartmann
-        _ wfs.random_state_photon_noise  : a random state cycle can be defined to reproduces random sequences of noise -- default is based on the current clock time 
-        _ wfs.random_state_readout_noise : a random state cycle can be defined to reproduces random sequences of noise -- default is based on the current clock time   
-        _ wfs.random_state_background    : a random state cycle can be defined to reproduces random sequences of noise -- default is based on the current clock time   
-        _ wfs.fov_lenslet_arcsec         : Field of View of the subapertures in arcsec
-        _ wfs.fov_pixel_binned_arcsec    : Field of View of the pixel in arcsec
-        
-        The main properties of the object can be displayed using :
-            wfs.print_properties()
-        
-        the following properties can be updated on the fly:
-            _ wfs.is_geometric          : switch between diffractive and geometric shackHartmann
-            _ wfs.cam.photonNoise       : Photon noise can be set to True or False
-            _ wfs.cam.readoutNoise      : Readout noise can be set to True or False
-            _ wfs.lightRatio            : reset the valid subaperture selection considering the new value
-        
+            Return slopes in radians if True, pixels otherwise.
+        logger : logging.Logger, optional
+            Logger for WFS diagnostics.
         """
         if logger is None:
             self.queue_listerner = self.setup_logging()
@@ -250,6 +197,21 @@ class ShackHartmann:
         self.initialize_wfs(telescope, src)       
         
     def initialize_wfs(self, telescope, src):
+        """
+        Initialize the Shack-Hartmann WFS by measuring reference slopes
+        and determining slope units.
+
+        Parameters
+        ----------
+        telescope : Telescope
+            The telescope object providing phase and pupil info.
+        src : Source
+            Source object for flux and wavelength reference.
+
+        Returns
+        -------
+        None
+        """
         self.isInitialized = False
 
         readoutNoise = np.copy(self.cam.readoutNoise)
@@ -301,6 +263,21 @@ class ShackHartmann:
         self.print_properties()
 
     def centroid(self,image,threshold =0.01):
+        """
+        Compute center of gravity for subaperture spots.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Subaperture image cube.
+        threshold : float, optional
+            Minimum intensity to include in centroid.
+
+        Returns
+        -------
+        np.ndarray
+            X and Y centroids per subaperture.
+        """
         im = np.atleast_3d(image.copy())    
         im[im<(threshold*im.max())] = 0
         centroid_out         = np.zeros([im.shape[0],2])
@@ -314,7 +291,20 @@ class ShackHartmann:
 #%% DIFFRACTIVE
 
     def initialize_flux(self, src, norm_flux_map):
+        """
+        Initialize per-subaperture flux distribution.
 
+        Parameters
+        ----------
+        src : Source
+            Light source object.
+        norm_flux_map : np.ndarray
+            Normalized flux across telescope pupil.
+
+        Returns
+        -------
+        None
+        """
         # Create the flux cube storing the flux at each subaperture
         self.cube_flux = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init],dtype=float)
 
@@ -337,6 +327,19 @@ class ShackHartmann:
     # The subapertures are sorted from left to right, top to bottom.
 
     def get_lenslet_em_field(self, phase):
+        """
+        Get the electromagnetic field per subaperture based on input phase.
+
+        Parameters
+        ----------
+        phase : np.ndarray
+            Wavefront phase in radians.
+
+        Returns
+        -------
+        np.ndarray
+            Complex field per subaperture.
+        """
         self.logger.debug('ShackHartmann::get_lenslet_em_field')
         # Create the output with the dimensions
         cube_em = np.zeros([self.nSubap**2,self.n_pix_lenslet_init,self.n_pix_lenslet_init],dtype=complex)
@@ -354,6 +357,19 @@ class ShackHartmann:
         return cube_em
   
     def create_full_frame(self, subaps):
+        """
+        Combine subaperture images into full detector frame.
+
+        Parameters
+        ----------
+        subaps : np.ndarray
+            Subaperture spot images.
+
+        Returns
+        -------
+        np.ndarray
+            Reconstructed full sensor image.
+        """
         self.logger.debug('shackHartmann::create_full_frame')
         
         ideal_frame = np.zeros([self.n_pix_subap*(self.nSubap)//self.binning_factor,
@@ -371,6 +387,19 @@ class ShackHartmann:
         return ideal_frame
 
     def get_subaps(self, noisy_frame):
+        """
+        Extract individual lenslet spot images from full detector image.
+
+        Parameters
+        ----------
+        noisy_frame : np.ndarray
+            2D detector frame.
+
+        Returns
+        -------
+        np.ndarray
+            Subaperture cubes [nSubaps, width, height].
+        """
         self.logger.debug('shackHartmann::get_subaps')
         
         subaps = noisy_frame.reshape(self.nSubap, self.n_pix_subap, 
@@ -388,12 +417,37 @@ class ShackHartmann:
     #%% GEOMETRIC    
          
     def gradient_2D(self,arr):
+        """
+        Compute X and Y gradients of a phase screen.
+
+        Parameters
+        ----------
+        arr : np.ndarray
+            2D array of phase values.
+
+        Returns
+        -------
+        tuple
+            Gradient in X and Y.
+        """
         res_x = (np.gradient(arr,axis=0)/self.telescope.pixelSize)*self.telescope.pupil
         res_y = (np.gradient(arr,axis=1)/self.telescope.pixelSize)*self.telescope.pupil
         return res_x,res_y
         
     def lenslet_propagation_geometric(self,arr):
-        
+        """
+        Compute geometric propagation through lenslets.
+
+        Parameters
+        ----------
+        arr : np.ndarray
+            Input phase screen.
+
+        Returns
+        -------
+        np.ndarray
+            Concatenated slope vector.
+        """        
         [SLx,SLy]  = self.gradient_2D(arr)
         
         sy = (bin_ndarray(SLx, [self.nSubap,self.nSubap], operation='sum'))
@@ -403,6 +457,18 @@ class ShackHartmann:
             
     #%% LGS
     def get_convolution_spot(self, src): 
+        """
+        Compute LGS spot convolution kernel based on sodium profile.
+
+        Parameters
+        ----------
+        src : Source
+            Laser guide star source object.
+
+        Returns
+        -------
+        None
+        """
         # compute the projection of the LGS on the subaperture to simulate 
         #  the spots elongation using a convulotion with gaussian spot
         [X0,Y0]             = [src.laser_coordinates[1],-src.laser_coordinates[0]]     # coordinates of the LLT in [m] from the center (sign convention adjusted to match display position on camera)
@@ -512,6 +578,21 @@ class ShackHartmann:
     
 #%% SH Measurement
     def wfs_integrate(self, ideal_frame, subaps):
+        """
+        Integrate the full detector image and compute valid slopes.
+
+        Parameters
+        ----------
+        ideal_frame : np.ndarray
+            Full-frame ideal image.
+        subaps : np.ndarray
+            Spot images per subaperture.
+
+        Returns
+        -------
+        tuple
+            Slopes 1D, slopes 2D, and final noisy image.
+        """
         # propagate to detector to add noise and detector effects
         noisy_frame = self.cam.integrate(ideal_frame)
         subaps = self.get_subaps(noisy_frame)
@@ -554,6 +635,23 @@ class ShackHartmann:
     # Receives the phase [rad]] and return the slopes measured by the SH in [px]
     # Expects the ideal frame WITHOUT pupil applied.
     def wfs_measure(self,phase_in, src, integrate = True):
+        """
+        Measure slopes from a wavefront phase using the SH-WFS.
+
+        Parameters
+        ----------
+        phase_in : np.ndarray
+            Phase map input [radians].
+        src : Source
+            Source object.
+        integrate : bool, optional
+            Whether to include camera integration effects.
+
+        Returns
+        -------
+        tuple
+            Slopes 1D, slopes 2D, and detector image.
+        """
         self.logger.debug("ShackHartmann::wfs_measure")
         # Check input parameters
         if (phase_in is None) or (src is None):
@@ -635,6 +733,13 @@ class ShackHartmann:
         return signal, signal_2D, noisy_frame
 
     def print_properties(self):
+        """
+        Print Shack-Hartmann configuration and diagnostic values.
+
+        Returns
+        -------
+        None
+        """
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SHACK HARTMANN WFS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
         print('{: ^20s}'.format('Subapertures')         + '{: ^18s}'.format(str(self.nSubap))                                   )
         print('{: ^20s}'.format('Subaperture Size')     + '{: ^18s}'.format(str(np.round(self.subaperture_size, 2)))         +'{: ^18s}'.format('[m]'     ))

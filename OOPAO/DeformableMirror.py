@@ -3,10 +3,12 @@
 Created on Thu Feb 20 11:32:10 2020
 
 @author: cheritie
+
+Major update on March 24 2025
+@author: nrodlin
 """
 
-import inspect
-import sys
+
 import time
 
 import numpy as np
@@ -37,6 +39,12 @@ class dmLayerClass():
         self.pupil_footprint        = None # 2D telescope pupil projected to the altitude layer
         self.OPD                    = None # stores the layer OPD without projection to any source (full pupil/metapupil)
         
+"""
+Deformable Mirror Module
+=================
+
+This module contains the `DeformableMirror` class, used for modeling a deformable mirror in adaptive optics simulations.
+"""
 
 class DeformableMirror:
     def __init__(self,
@@ -56,113 +64,43 @@ class DeformableMirror:
                  valid_act_thresh_outer = None, 
                  valid_act_thresh_inner = None,
                  logger = None):
-        """DEFORMABLE MIRROR
-        A Deformable Mirror object consists in defining the 2D maps of influence functions of the actuators. 
-        By default, the actuator grid is cartesian in a Fried Geometry with respect to the nSubap parameter. 
-        The Deformable Mirror is considered to to be in a pupil plane.
-        By default, the influence functions are 2D Gaussian functions normalized to 1 [m]. 
-        IMPORTANT: The deformable mirror is considered to be transmissive instead of reflective. 
-        This is to prevent any confusion with an eventual factor 2 in OPD due to the reflection.
+        """
+        Initialize a Deformable Mirror (DM) with zonal or modal influence functions.
 
         Parameters
         ----------
         telescope : Telescope
-            the telescope object associated. 
-            In case no coordinates are provided, the selection of the valid actuator is based on the radius
-            of the telescope (assumed to be circular) and the central obstruction value (assumed to be circular).
-            The telescope spiders are not considered in the selection of the valid actuators. 
-            For more complex selection of actuators, specify the coordinates of the actuators using
-            the optional parameter "coordinates" (see below).
+            Telescope associated with this DM.
         nSubap : float
-            This parameter is used when no user-defined coordinates / modes are specified. This is used to compute
-            the DM actuator influence functions in a fried geometry with respect to nSubap subapertures along the telescope 
-            diameter. 
-            If the optional parameter "pitch" is not specified, the Deformable Mirror pitch property is computed 
-            as the ratio of the Telescope Diameter with the number of subaperture nSubap. 
-            This impacts how the DM influence functions mechanical coupling is computed. .
+            Number of subapertures across the pupil diameter.
         mechCoupling : float, optional
-            This parameter defines the mechanical coupling between the influence functions. 
-            A value of 0.35 which means that if an actuator is pushed to an arbitrary value 1, 
-            the mechanical deformation at a circular distance of "pitch" from this actuator is equal to 0.35. 
-            By default, "pitch" is the inter-actuator distance when the Fried Geometry is considered.   
-            If the parameter "modes" is used, this parameter is ignored. The default is 0.35.
+            Coupling factor between actuators, by default 0.35.
         coordinates : np.ndarray, optional
-            User defined coordinates for the DM actuators. Be careful to specify the pitch parameter associated, 
-            otherwise the pitch is computed using its default value (see pitch parameter). 
-            If this parameter is specified, all the actuators are considered to be valid 
-            (no selection based on the telescope pupil).
-            The default is None.
+            Custom actuator coordinates. Overrides default grid.
         pitch : float, optional
-            pitch considered to compute the Gaussian Influence Functions, associated to the mechanical coupling. 
-            If no pitch is specified, the pitch is computed to match a Fried geometry according to the nSubap parameter.  
-            The default is None.
+            Actuator pitch in meters.
         modes : np.ndarray, optional
-            User defined influence functions or modes (modal DM) can be input to the Deformable Mirror. 
-            They must match the telescope resolution and be input as a 2D matrix, where the 2D maps are 
-            reshaped as a 1D vector of size n_pix*n_pix : size = [n_pix**2,n_modes].
-            The default is None.
-        misReg : TYPE, optional
-            A Mis-Registration object (See the Mis-Registration class) can be input to apply some geometrical transformations
-            to the Deformable Mirror. When using user-defined influence functions, this parameter is ignored.
-            Consider to use the function applyMisRegistration in OOPAO/mis_registration_identification_algorithm/ to perform interpolations.
-            The default is None.
-        customDM : Parameter File, optional
-            Parameter File for a custom DM computation. The default is None.
-        print_dm_properties : bool, optional
-            Boolean to print the dm properties. The default is True.
+            Influence functions or modal basis.
+        misReg : MisRegistration, optional
+            Misregistration object for geometrical offsets.
+        customDM : dict, optional
+            Custom DM setup configuration.
         floating_precision : int, optional
-            If set to 32, uses float32 precision to save memory. The default is 64.
+            Use 32 or 64-bit floats, by default 64.
         altitude : float, optional
-            Altitude to which the DM is conjugated. The default is None and corresponds to a DM conjugated to the ground.
+            Conjugation altitude of the DM in meters.
+        flip : bool, optional
+            Flip the influence functions vertically.
+        flip_lr : bool, optional
+            Flip the influence functions left-right.
+        sign : int, optional
+            Sign of actuation.
+        valid_act_thresh_outer : float, optional
+            Threshold for validating actuators outside pupil.
         valid_act_thresh_inner : float, optional
-            Maximum distance from one actuator to the edge of the mirror in the obscuration inner circle so that it is consider valid.
-        valid_act_thresh_inner : float, optional
-            Maximum distance from one actuator to the edge of the mirror in the outer circle so that it is consider valid.
-
-        Returns
-        -------
-        None.
-
-        ************************** MAIN PROPERTIES **************************
-        
-        The main properties of a Deformable Mirror object are listed here: 
-        _ dm.coefs             : dm coefficients in units of dm.modes, if using the defauly gaussian influence functions, in [m].
-        _ dm.modes             : matrix of size: [n_pix**2,n_modes]. 2D maps of the dm influence functions (or modes for a modal dm) where the 2D maps are reshaped as a 1D vector of size n_pix*n_pix.
-        _ dm.nValidAct         : number of valid actuators
-        _ dm.nAct              : Total number of actuator along the diameter (valid only for the default case using cartesian fried geometry).
-                                 Otherwise nAct = dm.nValidAct.
-        _ dm.coordinates       : coordinates in [m] of the dm actuators (should be input as a 2D array of dimension [nAct,2])
-        _ dm.pitch             : pitch used to compute the gaussian influence functions
-        _ dm.misReg            : MisRegistration object associated to the dm object
-        _ dm_layer.OPD         : the 2D map of the optical path difference in [m] 
-        
-        The main properties of the object can be displayed using :
-            dm.print_properties()
-        
-        To update the shape of the DM, there are two mechanism:
-        _ dm.updateDMShape(coef_new_value)
-        _ dm.coefs = coefs_new_value -> this triggers a setter that call updateDMShape()
-        _ dm.coefs[index] = val -> This does not update the OPD!
-                 
-        ************************** EXEMPLE **************************
-        
-        1) Create an 8-m diameter circular telescope with a central obstruction of 15% and the pupil sampled with 100 pixels along the diameter. 
-        tel = Telescope(resolution = 100, diameter = 8, centralObstruction = 0.15)
-        
-        2) Create a source object in H band with a magnitude 8 and combine it to the telescope
-        src = Source(optBand = 'H', magnitude = 8) 
-        
-        3) Create a Deformable Mirror object with 21 actuators along the diameters (20 in the pupil) and influence functions with a coupling of 45 %.
-        dm = DeformableMirror(telescope = tel, nSubap = 20, mechCoupling = 0.45)
-        
-        4) Assign a random vector for the coefficients and propagate the light
-        dm. coefs = numpy.random.randn(dm.nValidAct)
-        dm.get_dm_opd(src)
-        
-        5) To visualize the influence function as seen by the telescope: 
-        dm. coefs = numpy.eye(dm.nValidAct)
-        dm.get_dm_opd(src)
-
+            Threshold for validating actuators inside central obstruction.
+        logger : logging.Logger, optional
+            Logger instance.
         """
         # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
         if logger is None:
@@ -361,6 +299,21 @@ class DeformableMirror:
     # The DM can be considered as an atmospheric layers with discrete points actuated, which are then connected with their influence functions, 
     # shaping a continuous 2D surface. 
     def buildLayer(self, telescope, altitude):
+        """
+        Construct and configure the DM layer at a given conjugation altitude.
+
+        Parameters
+        ----------
+        telescope : Telescope
+            Telescope providing aperture and resolution information.
+        altitude : float
+            Altitude in meters to conjugate the DM layer.
+
+        Returns
+        -------
+        dmLayerClass
+            Configured DM layer with geometric and aperture metadata.
+        """
         self.logger.debug('DeformableMirror::buildLayer')
         # initialize layer object
         layer                   = dmLayerClass()
@@ -386,6 +339,19 @@ class DeformableMirror:
     # When the DM is located at an altitude layer, the phase of the DMs affect differently the sources dpending on their coordinates in sky. 
     # Before return the phase of the DM, we need to select the correct region of the DM affecting the source, which is done by masking the pupil
     def get_dm_pupil(self, src):
+        """
+        Compute pupil mask seen by a source at the DM altitude.
+
+        Parameters
+        ----------
+        src : Source
+            Source object with angular position.
+
+        Returns
+        -------
+        np.ndarray
+            Binary pupil mask (1s where pupil is seen by the source).
+        """
         self.logger.debug('DeformableMirror::get_dm_pupil')
         
         # Source coordinates are [angle_fov["], zenith_angle[rad]]. Hence, to obtain the location of the object at the DM altitude plane:
@@ -416,6 +382,19 @@ class DeformableMirror:
     # Returns the OPD [m] and the phase [rad], for which the wavelength of the input source is used. 
     # The shape of the output is [telescope.resolution, telescope.resolution] [px]
     def get_dm_opd(self, source):
+        """
+        Compute the Optical Path Difference (OPD) and phase from the DM for a given source.
+
+        Parameters
+        ----------
+        source : Source
+            Source object defining wavelength and position.
+
+        Returns
+        -------
+        tuple of np.ndarray
+            OPD in meters and phase in radians.
+        """
         self.logger.debug('DeformableMirror::get_dm_opd')
         # Get the pupil for the object. For the case of the sun, only the central subdir is considered.
         pupil = self.get_dm_pupil(source)
@@ -454,6 +433,19 @@ class DeformableMirror:
     # Please notice that in this context, the modes do not refer to the AO control modal base but the intrinsic mechanical behaviour of the DM.
     # The shape of the mirror is computed as the matricial product of modes x coeffs -> modes [dm_layer.D_px, nValidActs], coefs [nValidActs, 1]    
     def updateDMShape(self, val):
+        """
+        Update the OPD map from the current coefficients or 2D grid.
+
+        Parameters
+        ----------
+        val : np.ndarray
+            Either a coefficient vector or a 2D shape map.
+
+        Returns
+        -------
+        bool
+            True if update was successful.
+        """
         self.logger.debug('DeformableMirror::updateDMShape') 
 
         if isinstance(val, np.ndarray):
@@ -476,12 +468,50 @@ class DeformableMirror:
         return True
     
     def rotateDM(self,x,y,angle):
+        """
+        Rotate coordinates of the DM actuators.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            X coordinates.
+        y : np.ndarray
+            Y coordinates.
+        angle : float
+            Rotation angle in radians.
+
+        Returns
+        -------
+        tuple
+            Rotated x and y arrays.
+        """
         self.logger.debug('DeformableMirror::rotateDM')
         xOut =   x*np.cos(angle)-y*np.sin(angle)
         yOut =   y*np.cos(angle)+x*np.sin(angle)
         return xOut,yOut
 
     def anamorphosis(self,x,y,angle,mRad,mNorm):
+        """
+        Apply anamorphic transformation to actuator coordinates.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            X coordinates.
+        y : np.ndarray
+            Y coordinates.
+        angle : float
+            Rotation angle in radians.
+        mRad : float
+            Radial scaling.
+        mNorm : float
+            Tangential scaling.
+
+        Returns
+        -------
+        tuple
+            Transformed x and y coordinates.
+        """
         self.logger.debug('DeformableMirror::anamorphosis')
         mRad  += 1
         mNorm += 1
@@ -491,6 +521,21 @@ class DeformableMirror:
         return xOut,yOut
         
     def modesComputation(self,i,j):
+        """
+        Compute Gaussian influence function at a given location.
+
+        Parameters
+        ----------
+        i : float
+            X center of actuator.
+        j : float
+            Y center of actuator.
+
+        Returns
+        -------
+        np.ndarray
+            Influence function as flattened array.
+        """
         self.logger.debug('DeformableMirror::modesComputation')
         x0 = i
         y0 = j
@@ -525,6 +570,13 @@ class DeformableMirror:
         return output
     
     def print_properties(self):
+        """
+        Print a summary of the DM configuration.
+
+        Returns
+        -------
+        None
+        """
         self.logger.info('DeformableMirror::print_properties')
         self.logger.info('DeformableMirror::print_properties')
         self.logger.info('{: ^21s}'.format('Controlled Actuators')                     + '{: ^18s}'.format(str(self.nValidAct)))
@@ -576,4 +628,3 @@ class DeformableMirror:
         self.logger.debug('DeformableMirror::coefs')
         self.updateDMShape(val)
 
-     

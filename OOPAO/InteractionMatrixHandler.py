@@ -15,8 +15,24 @@ import logging
 import logging.handlers
 from queue import Queue
 
+"""
+Interaction Matrix Module
+=================
+
+This module contains the `InteractionMatrixHandler` class, used for helping wit the measurement of the interaction 
+matrix and the modal basis generation in adaptive optics simulations.
+"""
+
 class InteractionMatrixHandler:
     def __init__(self, logger):
+        """
+        Initialize the InteractionMatrixHandler for managing IM acquisition.
+
+        Parameters
+        ----------
+        logger : logging.Logger
+            Logger instance to record operations.
+        """
         if logger is None:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
@@ -36,6 +52,19 @@ class InteractionMatrixHandler:
     # Checks the Light Paths defined to knwo the interaction matrices that are necessary and prepares the measurement procedure
 
     def initialize_im_class(self, light_path_list):
+        """
+        Analyze the light path setup and prepare the IM scanning structure.
+
+        Parameters
+        ----------
+        light_path_list : list
+            List of LightPath objects.
+
+        Returns
+        -------
+        bool
+            True if initialization succeeds.
+        """
         self.logger.debug('interactionMatrixHandler::initialize_im_class')
 
         # Check if the light path is a list:
@@ -97,6 +126,14 @@ class InteractionMatrixHandler:
         return True
     
     def generate_modal_basis(self):
+        """
+        Generate all modal bases (zonal, Zernike, KL, Hadamard, DH) for each DM.
+
+        Returns
+        -------
+        bool
+            True when all bases are generated.
+        """
         # Finally, generate the modal basis for each DM to speed up the measuring later
         self.modal_basis = []
         self.logger.info('InteractionMatrixHandler::generate_modal_basis - Generating modal basis')
@@ -132,6 +169,23 @@ class InteractionMatrixHandler:
     # stroke is in [m] and can be a scalar or a list, to let the user set a common stroke for all the DMs or define it per DM.
     # nModes is by default None, which will use all the modes of the DMs. If define, it shall be a list specifying the number of modes per DM
     def measure(self, modal_basis, stroke, nModes=None):
+        """
+        Measure interaction matrices for each WFS-DM pair defined in the system.
+
+        Parameters
+        ----------
+        modal_basis : str or list
+            Modal basis to use ('zonal', 'zernike', etc.).
+        stroke : float or list
+            Stroke amplitude in meters.
+        nModes : list or None
+            Number of modes per DM, or None to use all.
+
+        Returns
+        -------
+        bool
+            True if all IMs are successfully measured.
+        """
         # Check modal_basis parameter
         modal_basis_per_DM = []
         if isinstance(modal_basis, list):
@@ -227,6 +281,19 @@ class InteractionMatrixHandler:
         return True
     
     def save_IM(self, filename=None):
+        """
+        Save the interaction matrix warehouse to a FITS file.
+
+        Parameters
+        ----------
+        filename : str
+            Path to save the IM file.
+
+        Returns
+        -------
+        bool
+            True if save is successful.
+        """
         self.logger.debug('InteractionMatrixHandler::save_IM')
 
         if self.interaction_matrix_warehouse is None:
@@ -272,6 +339,19 @@ class InteractionMatrixHandler:
         self.logger.info('InteractionMatrixHandler::save_IM - Saved.')
     
     def save_modalBasis(self, filename):
+        """
+        Save the generated modal bases to a FITS file.
+
+        Parameters
+        ----------
+        filename : str
+            Output filename (without extension).
+
+        Returns
+        -------
+        bool
+            True if saved correctly.
+        """
         self.logger.debug('InteractionMatrixHandler::save_modalBasis')
 
         if self.modal_basis is None:
@@ -302,6 +382,19 @@ class InteractionMatrixHandler:
         self.logger.info('InteractionMatrixHandler::save_IM - Saved.')        
 
     def load_IM(self, filename):
+        """
+        Load a previously saved interaction matrix warehouse.
+
+        Parameters
+        ----------
+        filename : str
+            File path without .fits extension.
+
+        Returns
+        -------
+        bool
+            True if loaded successfully.
+        """
         # To load the IM warehouse, we need to know the LightPath and DMs properties first to check if the warehouse is valid for the current setup.
         if self.im_boolean_matrix is None:
             self.logger.error('InteractionMatrixHandler::load_IM - The class has not been initialize, the im_boolean_matrix is None.')
@@ -368,6 +461,19 @@ class InteractionMatrixHandler:
             return True
 
     def load_modalBasis(self, filename):
+        """
+        Load a previously saved modal basis FITS file.
+
+        Parameters
+        ----------
+        filename : str
+            File path without .fits extension.
+
+        Returns
+        -------
+        bool
+            True if loaded successfully.
+        """
         # We need to check if the content of the file is compatible with current simulation setup
         if self.dm_scanned_list is None:
             self.logger.error('InteractionMatrixHandler::load_modalBasis - The class has not been initialize, the dm_scanned_list is None.')
