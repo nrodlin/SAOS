@@ -27,54 +27,31 @@ from .phaseStats import ft_phase_screen, ft_sh_phase_screen, makeCovarianceMatri
 from .tools.displayTools import makeSquareAxes
 from .tools.interpolateGeometricalTransformation import interpolate_cube, interpolate_image
 from .tools.tools import globalTransformation, pol2cart, translationImageMatrix
+from .Layer import LayerClass
 
-class LayerClass:
-    def __init__(self):
-        # The Layer class defines the main variables that are required to constitute a layer of turbulence.
-        # The atmosphere class is made of several layer objects.
 
-        # Scalar variables 
-        self.id = 0
-        self.D = 0
-        self.D_fov = 0
-        self.altitude = 0
-        self.d0 = 0
-        self.direction = 0
-        self.extra_sx = 0
-        self.extra_sy = 0
-        self.nExtra = 0
-        self.nPixel = 0
-        self.notDoneOnce = False
-        self.resolution = 0
-        self.resolution_fov = 0
-        self.seed = 0
-        self.vX = 0
-        self.vY = 0
-        self.windSpeed = 0
-        self.fractionalR0 = 0
-        # Arrays 
-        self.A = np.array([])
-        self.B = np.array([])
-        self.BBt = np.array([])
-        self.XXt = np.array([])
-        self.XXt_r0 = np.array([])
-        self.ZXt = np.array([])
-        self.ZXt_r0 = np.array([])
-        self.ZZt = np.array([])
-        self.ZZt_inv = np.array([])
-        self.ZZt_inv_r0 = np.array([])
-        self.ZZt_r0 = np.array([])
-        self.initialPhase = np.array([])
-        self.innerMask = np.array([])
-        self.innerZ = np.array([])
-        self.mapShift = np.array([])
-        self.outerMask = np.array([])
-        self.outerZ = np.array([])
-        self.ratio = np.zeros(2)
-        self.randomState = RandomState(0)
+"""
+Atmosphere Module
+=================
 
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CLASS INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+This module contains the `Atmosphere` class, used for modeling a multi-layer turbulent atmosphere in adaptive optics simulations.
+"""
+
 class Atmosphere:
+    """
+    The `Atmosphere` class represents a multi-layer atmosphere with Von Kármán statistics.
+
+    Each layer is defined with altitude, wind speed/direction, and Cn2 contribution. Layers can be updated, saved to disk,
+    and used to compute the OPD (Optical Path Difference) for various line-of-sight sources.
+
+    Attributes:
+        r0 (float): Fried parameter at 500 nm.
+        L0 (float): Outer scale of turbulence.
+        windSpeed (List[float]): Wind speeds per layer.
+        windDirection (List[float]): Wind directions per layer.
+        altitude (List[float]): Altitudes of each layer.
+        fractionalR0 (List[float]): Relative contribution of each layer to turbulence.
+    """
     def __init__(self,
                  r0:float,
                  L0:float,
@@ -84,90 +61,27 @@ class Atmosphere:
                  altitude:list,
                  mode:float=1,
                  logger=None):
-        """ ATMOSPHERE.
-        An Atmosphere is made of one or several layer of turbulence that follow the Van Karmann statistics. 
-        Each layer is considered to be independant to the other ones and has its own properties (direction, speed, etc.)
-        The Atmosphere object can be defined for a single Source object (default) or multi Source Object. 
-        The Source coordinates allow to span different areas in the field (defined as well by the tel.fov).
-        If the source type is an LGS the cone effect is considered using an interpolation. 
-        NGS and LGS can be combined together in the Asterism object. 
-        The convention chosen is that all the wavelength-dependant atmosphere parameters are expressed at 500 nm. 
+        """
+        Initialize an Atmosphere object representing layered atmospheric turbulence.
 
         Parameters
         ----------
-        telescope : Telescope
-            The telescope object to which the Atmosphere is associated. 
-            This object carries the phase, flux, pupil information and sampling time as well as the type of source (NGS/LGS, source/asterism).
         r0 : float
-            the Fried Parameter in m, at 500 nm.
+            Fried parameter at 500 nm [m].
         L0 : float
-            Outer scale parameter.
-        windSpeed : list
-            List of wind-speed for each layer in [m/s].
-        fractionalR0 : list
-            Cn2 profile of the turbulence. This should be a list of values for each layer.
-        windDirection : list
-            List of wind-direction for each layer in [deg].
-        altitude : list
-            List of altitude for each layer in [m].
+            Outer scale of turbulence [m].
+        windSpeed : list of float
+            Wind speed for each layer [m/s].
+        fractionalR0 : list of float
+            Cn2 profile; fractional contribution to turbulence per layer.
+        windDirection : list of float
+            Wind direction for each layer [degrees].
+        altitude : list of float
+            Altitude of each layer [m].
         mode : float, optional
-            Method to compute the atmospheric spectrum from which are computed the atmospheric phase screens. 
-            1 : using OOPAO depencancy with subharmonics
-            otherwisw : using OOPAO dependancy without subharmonics
-            The default is 1.
-        param : Parameter File Object, optional
-            Parameter file of the system. Once computed, the covariance matrices are saved in the calibration data folder and loaded instead of re-computed evry time.
-            The default is None.
-        asterism : Asterism, optional
-            If the system contains multiple source, an astrism should be input to the atmosphere object.
-            The default is None.
-
-        Raises
-        ------
-        AttributeError
-            DESCRIPTION.
-
-        Returns
-        -------
-        None.
-
-        ************************** COUPLING A TELESCOPE AND AN ATMOSPHERE OBJECT **************************
-        A Telescope object "tel" can be coupled to an Atmosphere object "atm" using: 
-            _ tel + atm
-        This means that a bridge is created between atm and tel: everytime that atm.OPD is updated, the tel.OPD property is automatically set to atm.OPD to reproduce the effect of the turbulence.
-        
-        A Telescope object "tel" can be separated of an Atmosphere object "atm" using: 
-            _ tel - atm
-        This corresponds to a diffraction limited case (no turbulence)
-
-    
-        ************************** PROPERTIES **************************
-        
-        The main properties of the Atmosphere object are listed here: 
-    
-        _ atm.OPD : Optical Path Difference in [m] truncated by the telescope pupil. If the atmosphere has multiple sources, the OPD is a list of OPD for each source
-        _ atm.OPD_no_pupil : Optical Path Difference in [m]. If the atmosphere has multiple sources, the OPD is a list of OPD for each source
-        _ atm.r0                   
-        _ atm.L0
-        _ atm.nLayer                                : number of turbulence layers
-        _ atm.seeingArcsec                          : seeing in arcsec at 500 nm
-        _ atm.layer_X                               : access the child object corresponding to the layer X where X starts at 0   
-        
-        The main properties of the object can be displayed using :
-            atm.print_properties()
-            
-        the following properties can be updated on the fly:
-            _ atm.r0            
-            _ atm.windSpeed      
-            _ atm.windDirection 
-        ************************** FUNCTIONS **************************
-
-        _ atm.update()                              : update the OPD of the atmosphere for each layer according to the time step defined by tel.samplingTime  
-        _ atm.update(OPD)                           : update the OPD of the atmosphere using a user defined OPD                   
-        _ atm.print_atm_at_wavelength(wavelength)   : prompt seeing and r0 at specified wavelength
-        _ atm.print_atm()                           : prompt the main properties of the atm object
-        _ display_atm_layers(layer_index)           : imshow the OPD of each layer with the intersection beam for each source
-        
+            Method for computing phase screen (1 = with subharmonics), by default 1.
+        logger : logging.Logger, optional
+            Logger instance for this object, by default None.
         """
         if logger is None:
             self.queue_listerner = self.setup_logging()
@@ -193,10 +107,24 @@ class Atmosphere:
         self.seeingArcsec           = 206265*(self.wavelength/self.r0)
         self.mode = mode
         
-    # Gets the telescope information (or checks if it is defined, in case it was loaded from file) and runs in parallel the creation of each atmospheric layer
-    # When the atmosphere is initialized, prints the properties of the atmosphere.
-    # Returns True if succesful. 
     def initializeAtmosphere(self,telescope,compute_covariance =True, randomState=None):
+        """
+        Initialize the atmosphere layers and associate them with a telescope.
+
+        Parameters
+        ----------
+        telescope : Telescope or None
+            Telescope object to derive spatial and temporal resolution.
+        compute_covariance : bool, optional
+            Whether to compute covariance matrices, by default True.
+        randomState : int or None
+            Seed for reproducible random number generation, by default None.
+
+        Returns
+        -------
+        bool
+            True if initialization succeeded, False otherwise.
+        """
         self.logger.debug('Atmosphere::initializeAtmosphere')
         self.compute_covariance = compute_covariance
 
@@ -233,11 +161,23 @@ class Atmosphere:
         self.print_properties()
         return True
             
-    # Creates each layer of the atmosphere. This functions is run in parallel
-    # Returns the layer initialized
     def buildLayer(self, i_layer, randomState = None, from_file=False):
         """
-            Generation of phase screens using the method introduced in Assemat et al (2006)
+        Build and initialize a single atmospheric layer.
+
+        Parameters
+        ----------
+        i_layer : int
+            Index of the layer to build.
+        randomState : int, optional
+            Seed for the random number generator.
+        from_file : bool, optional
+            If True, reuse existing layer data loaded from file.
+
+        Returns
+        -------
+        LayerClass
+            The initialized atmospheric layer.
         """
         self.logger.debug('Atmosphere::buildLayer - layer '+str(i_layer+1))
          
@@ -324,9 +264,20 @@ class Atmosphere:
     
         return layer
     
-    # Computes the covariance matrices required for the implementation of Assemat et al. (2006)
-    # Returns True
     def get_covariance_matrices(self, layer):
+        """
+        Compute the covariance matrices (Assemat et al. 2006) for a layer.
+
+        Parameters
+        ----------
+        layer : LayerClass
+            The atmospheric layer for which to compute matrices.
+
+        Returns
+        -------
+        bool
+            True upon successful computation.
+        """
         self.logger.debug('Atmosphere::get_covariance_matrices')
         # Compute the covariance matrices - Implements the paper from Assemat et al. (2006)
         self.logger.debug('Atmosphere::get_covariance_matrices')
@@ -349,10 +300,20 @@ class Atmosphere:
         layer.ZZt_inv_r0 = layer.ZZt_inv/((self.r0_def/self.r0)**(5/3))
         return True
     
-    # Saves the atmosphere phase screens.
-    # If returns False, there was an error.
-    # Filename shall contain the name of the folder + filename without extension '.fits'
     def save(self, filename=None):
+        """
+        Save the state of the atmosphere to a FITS file.
+
+        Parameters
+        ----------
+        filename : str
+            Path and base filename (without extension) to save the FITS file.
+
+        Returns
+        -------
+        bool
+            True if saved successfully, False otherwise.
+        """
         self.logger.debug('Atmosphere::save')
 
         if self.hasNotBeenInitialized:
@@ -395,11 +356,20 @@ class Atmosphere:
         hdul.writeto(filename + '.fits', overwrite=True)
         self.logger.info('Atmosphere::save - Saved.')
     
-    # Creates the layers and assings the attibutes, then it recomputes all the necessary variables
-    # that are not saved. 
-    # filename should not contain the extension '.fits'
-    # if returns True, the process was successful
     def load(self, filename): 
+        """
+        Load an atmosphere configuration from a FITS file.
+
+        Parameters
+        ----------
+        filename : str
+            Path and base filename (without extension) of the FITS file to load.
+
+        Returns
+        -------
+        bool
+            True if loaded successfully, False otherwise.
+        """
         self.logger.debug('Atmosphere::load')
 
         with fits.open(filename + '.fits') as hdul:
@@ -454,9 +424,20 @@ class Atmosphere:
             else:
                 self.logger.error(f"Atmosphere::load - Could not initialize the atmosphere, check the input file content and formatting.")     
     
-    # Checks the parameters of the atmosphere object to see if they match the parameters of the telescope
-    # If returns False, the telescope does not match the content inside the atmosphere.
     def matchParameters(self, telescope):
+        """
+        Check if telescope parameters match the atmosphere configuration.
+
+        Parameters
+        ----------
+        telescope : Telescope
+            Telescope object to compare with.
+
+        Returns
+        -------
+        bool
+            True if parameters match, False otherwise.
+        """
         self.logger.info('Atmosphere::matchParameters - Checking parameters')
         if self.hasNotBeenInitialized:
             self.logger.error('Atmosphere::matchParameters - The atmosphere is not initialized.')
@@ -488,10 +469,15 @@ class Atmosphere:
         
         return True
 
-    # Updates the atmosphere given the wind speed, direction and sampling time. 
-    # Each layer is updated in parallel
-    # If returns True, the Update was successful
     def update(self):
+        """
+        Update all atmospheric layers based on wind and time step.
+
+        Returns
+        -------
+        bool
+            True if update was successful.
+        """
         self.logger.debug('Atmosphere::update')
         # Update each layer at a different process to speed up the computation.
         # Threads are faster than multiprocessing due to the overheads of making the copies. 
@@ -505,9 +491,22 @@ class Atmosphere:
         self.logger.debug('Atmosphere::update - Updated.')
         return True
         
-    # Updates each layer
-    # Returns the layer updated
     def updateLayer(self,updatedLayer,shift = None):
+        """
+        Update a single atmospheric layer, shifting the phase screen.
+
+        Parameters
+        ----------
+        updatedLayer : LayerClass
+            The layer to update.
+        shift : list of float, optional
+            Optional shift to apply in pixels [x, y].
+
+        Returns
+        -------
+        LayerClass
+            The updated layer.
+        """
         self.logger.debug('Atmosphere::updateLayer')
         ps_loop         = updatedLayer.D / (updatedLayer.resolution)
         ps_turb_x       = updatedLayer.vX*self.samplingTime 
@@ -567,9 +566,24 @@ class Atmosphere:
 
         return updatedLayer
 
-    # Shifts one row the atmosphere layer
-    # Returns the layer shifted one pixel
     def add_row(self,layer,stepInPixel,map_full = None):
+        """
+        Shift the phase screen of a layer by one or more pixels.
+
+        Parameters
+        ----------
+        layer : LayerClass
+            Atmospheric layer to update.
+        stepInPixel : list of int
+            Pixel shift [dx, dy] to apply.
+        map_full : np.ndarray, optional
+            Full phase map to use; if None, uses layer.mapShift.
+
+        Returns
+        -------
+        np.ndarray
+            Updated one-pixel-shifted phase screen.
+        """
         self.logger.debug('Atmosphere::add_row')
         if map_full is None:
             map_full = layer.mapShift
@@ -582,11 +596,20 @@ class Atmosphere:
         map_full[layer.outerMask==0]  = np.reshape(onePixelShiftedPhaseScreen,layer.resolution*layer.resolution)
         return onePixelShiftedPhaseScreen 
 
-    # Given a source NGS or Sun
-    # Returns the OPD for each line of sight
-    # IMPORTANT: the content of the atmosphere class does not depend on the sources, so this methods just projects the sources 
-    # into the atmosphere to find the new OPD. Hence, each projection can run in parallel.
     def getOPD(self, src):
+        """
+        Compute the Optical Path Difference (OPD) for a given source.
+
+        Parameters
+        ----------
+        src : Source or ExtendedSource
+            The light source for which to compute the OPD.
+
+        Returns
+        -------
+        np.ndarray
+            OPD values in meters (or list of OPDs if multiple sources).
+        """
         self.logger.debug('Atmosphere::getOPD - Getting the OPD for each source.')
 
         # First, we need to check the source tbecause the sun is made of an asterism, 
@@ -617,11 +640,21 @@ class Atmosphere:
         result_opd_no_pupil = Parallel(n_jobs=len(list_src), prefer="threads")(delayed(self.get_opd_per_src)(list_src[i], result_phase[i]) for i in range(len(list_src)))
 
         return result_opd_no_pupil[0]
-        
-    # Use the src position on sky to get the region of interest for the line of sight, selecting it through a binary mask (footprint)
-    # Returns a list with the footprint per layer and a list with the center offset per axis [x, y] due to discretization
-    
+           
     def get_pupil_footprint(self, src):
+        """
+        Determine the pupil footprint and discretization offset for a source.
+
+        Parameters
+        ----------
+        src : Source
+            Light source object.
+
+        Returns
+        -------
+        Tuple[list, list]
+            A tuple of two lists: pupil footprint per layer and center offset.
+        """
         self.logger.debug('Atmosphere::set_pupil_footprint')
         footprint_per_layer = []
         extra_s = []
@@ -659,10 +692,24 @@ class Atmosphere:
             footprint_per_layer.append(pupil_footprint)
         return footprint_per_layer, extra_s
             
-    # This function receives the src and footprints to compute the phase per layer and line of sight. The computation is parallelized per layer, 
-    # although it turned out to be slower so n_jobs is set to 1
-    # Returns a list containing the phase per layer for the input object
     def project_phase(self, src, pupil_footprint, extra_s):
+        """
+        Project atmospheric phase through layers for a given source.
+
+        Parameters
+        ----------
+        src : Source
+            Light source object.
+        pupil_footprint : list of np.ndarray
+            Pupil masks per layer.
+        extra_s : list
+            Offset due to discretization for each layer.
+
+        Returns
+        -------
+        list
+            List of phase screens per layer.
+        """
         self.logger.debug('Atmosphere::fill_phase_support')
 
         # Each layer shall run in parallel to reduce time consumption. Returns a list containing the phase per layer for the source line of sight
@@ -671,10 +718,26 @@ class Atmosphere:
         
         return result_phase
 
-    # Given an object, a layer, and the footprint, this function gets the corresponding phase with the adequate dimensions
-    # Returns the phase for the set of inputs
     def get_phase_layered(self, src, layer, pupil_footprint, extra_s):
+        """
+        Compute phase at a given atmospheric layer for a specific source.
 
+        Parameters
+        ----------
+        src : Source
+            Light source.
+        layer : LayerClass
+            Atmospheric layer.
+        pupil_footprint : np.ndarray
+            Pupil mask for the layer.
+        extra_s : list
+            Offset due to discretization.
+
+        Returns
+        -------
+        np.ndarray
+            Phase screen for the layer.
+        """
         if src.tag == 'LGS':
             sub_im = np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])
 
@@ -703,16 +766,41 @@ class Atmosphere:
             else:
                 return np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])* np.sqrt(layer.fractionalR0)
     
-    # Adds the phase contribution of each layer to the pupil, computing the OPD for a given source. The function can be executed in parallel.
-    # Returns the OPD without pupil in [meters]
     def get_opd_per_src(self, src, phase):
+        """
+        Sum up the phases from all layers to compute the OPD for a source.
+
+        Parameters
+        ----------
+        src : Source
+            Light source.
+        phase : list of np.ndarray
+            Phase per layer for the source.
+
+        Returns
+        -------
+        np.ndarray
+            Optical Path Difference (OPD) in meters.
+        """
         self.logger.debug('Atmosphere::get_opd_per_src')
 
         opd_no_pupil = np.sum(phase,axis=0) * src.wavelength/2/np.pi # the phase is defined in rad, and the OPD in m
         return opd_no_pupil
-    
 
     def print_atm_at_wavelength(self,wavelength):
+        """
+        Print r0 and seeing for the atmosphere at a specific wavelength.
+
+        Parameters
+        ----------
+        wavelength : float
+            Wavelength at which to compute seeing [m].
+
+        Returns
+        -------
+        bool
+            True when completed.
+        """
 
         r0_wvl              = self.r0*((wavelength/self.wavelength)**(5/3))
         seeingArcsec_wvl    = 206265*(wavelength/r0_wvl)
@@ -724,6 +812,14 @@ class Atmosphere:
         return True            
        
     def print_properties(self):
+        """
+        Print the properties of the atmosphere object.
+
+        Returns
+        -------
+        bool
+            True when completed.
+        """
         self.logger.info('%%%%%%%%%%%Atmosphere::print_properties - ATMOSPHERE%%%%%%%%%%%%')
         self.logger.info('{: ^12s}'.format('Layer') + '{: ^12s}'.format('Direction')+ '{: ^12s}'.format('Speed')+ '{: ^12s}'.format('Altitude')+ '{: ^12s}'.format('Cn2')+ '{: ^12s}'.format('Diameter') )
         self.logger.info('{: ^12s}'.format('') + '{: ^12s}'.format('[deg]')+ '{: ^12s}'.format('[m/s]')+ '{: ^12s}'.format('[m]')+ '{: ^12s}'.format('[m-2/3]') + '{: ^12s}'.format('[m]'))
@@ -745,6 +841,22 @@ class Atmosphere:
         return True
     
     def display_atm_layers(self,layer_index= None,fig_index = None,list_src = None):
+        """
+        Display the OPD of specified atmospheric layers and optionally source beams.
+
+        Parameters
+        ----------
+        layer_index : list of int, optional
+            Indices of layers to display. If None, shows all layers.
+        fig_index : int, optional
+            Figure index for matplotlib.
+        list_src : list of Source, optional
+            List of sources to project beams.
+
+        Returns
+        -------
+        None
+        """
         display_cn2 = False
         
         if layer_index is None:
@@ -857,7 +969,6 @@ class Atmosphere:
             ax.arrow(center, center, center+normalized_speed[i_l]*(tmpLayer.D_fov/2)*np.cos(np.deg2rad(tmpLayer.direction)),center+normalized_speed[i_l]*(tmpLayer.D_fov/2)*np.sin(np.deg2rad(tmpLayer.direction)),length_includes_head=True,width=0.25, facecolor = [0,0,0],alpha=0.3,edgecolor= None)
             ax.text(center+tmpLayer.D_fov/8*np.cos(np.deg2rad(tmpLayer.direction)), center+tmpLayer.D_fov/8*np.sin(np.deg2rad(tmpLayer.direction)),str(self.windSpeed[i_l])+' m/s', fontweight=100,color=[1,1,1],fontsize = 18)
  # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ATM PROPERTIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-   
     
     @property
     def r0(self):
