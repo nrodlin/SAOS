@@ -3,8 +3,10 @@
 Created on Wed Feb 19 10:32:15 2020
 
 @author: cheritie
+
+Update on March 24 2025
+@author: nrodlin
 """
-import inspect
 
 import logging
 import logging.handlers
@@ -13,7 +15,12 @@ from queue import Queue
 import numpy as np
 
 
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CLASS INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+"""
+Source Module
+=================
+
+This module contains the `Source` class, used for modeling a natural star in adaptive optics simulations.
+"""
 
 class Source:    
     def __init__(self,
@@ -26,74 +33,29 @@ class Source:
                  FWHM_spot_up:float = None,
                  chromatic_shift:list = None,
                  logger = None):
-        """SOURCE
-        A source object can be defined as a point source at infinite distance (NGS) or as a extended object
+        """
+        Initialize a Source object.
 
         Parameters
         ----------
         optBand : str
-            The optical band of the source (see the method photometry)
-            ex, 'V' corresponds to a wavelength of 500 nm
-.
+            Optical band identifier (e.g., 'V', 'H').
         magnitude : float
-            The magnitude of the star.
+            Apparent magnitude of the star.
         coordinates : list, optional
-            DESCRIPTION. The default is [0,0], in [deg]
+            Sky coordinates [zenith, azimuth] in [arcsec, degrees], by default [0, 0].
         altitude : float, optional
-            DESCRIPTION. The default is np.inf.
+            Altitude of the source in meters. Defaults to infinity (NGS).
         laser_coordinates : list, optional
-            DESCRIPTION. The default is [0,0].
+            Launch coordinates for a laser source [x, y] in meters.
         Na_profile : float, optional
-            DESCRIPTION. The default is None.
+            Sodium layer profile [altitudes, values]. Required for LGS.
         FWHM_spot_up : float, optional
-            DESCRIPTION. The default is None.
+            FWHM of the LGS spot in arcsec.
         chromatic_shift : list, optional
-            DESCRIPTION. The default is None.
-
-        Returns
-        -------
-        None.
-
-        """
-        """
-        ************************** REQUIRED PARAMETERS **************************
-        
-        A Source object is characterised by two parameter:
-        _ optBand               : the optical band of the source (see the method photometry)
-        _ magnitude             : The magnitude of the star
-                            
-        ************************** COUPLING A SOURCE OBJECT **************************
-        
-        Once generated, a Source object "src" can be coupled to a Telescope "tel" that contains the OPD.
-        _ This is achieved using the * operator     : src*tel
-        _ It can be accessed using                  : tel.src       
-
-    
-        ************************** MAIN PROPERTIES **************************
-        
-        The main properties of a Source object are listed here: 
-        _ src.phase     : 2D map of the phase scaled to the src wavelength corresponding to tel.OPD
-        _ src.type      : Ngs or LGS  
-
-        _ src.nPhoton   : number of photons per m2 per s. if this property is changed after the initialization, the magnitude is automatically updated to the right value. 
-        _ src.fluxMap   : 2D map of the number of photons per pixel per frame (depends on the loop frequency defined by tel.samplingTime)  
-        _ src.chromatic_shift : list of shift in arcesc to be applied to the pupil footprint at each layer of the atmosphere object. 
-        
-        The main properties of the object can be displayed using :
-            src.print_properties()
-            
-        ************************** OPTIONAL PROPERTIES **************************
-        _ altitude              : altitude of the source. Default is inf (NGS) 
-        _ laser_coordinates     : The coordinates in [m] of the laser launch telescope
-        _ Na_profile            : An array of 2 dimensions and n sampling points for the Sodium profile. The first dimension corresponds to the altitude and the second dimention to the sodium profile value.
-        _ FWHM_spot_up          : FWHM of the LGS spot in [arcsec]
-        ************************** EXEMPLE **************************
-
-        Create a source object in H band with a magnitude 8 and combine it to the telescope
-        src = Source(opticalBand = 'H', magnitude = 8) 
-        src*tel
-
-        
+            Shift per atmospheric layer due to chromatic dispersion, in arcsec.
+        logger : logging.Logger, optional
+            Logger instance for logging.
         """
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
         # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
@@ -176,6 +138,19 @@ class Source:
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SOURCE PHOTOMETRY %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
 
     def photometry(self,arg):
+        """
+        Returns photometric properties of the selected band.
+
+        Parameters
+        ----------
+        arg : str
+            Name of the photometric band (e.g., 'V', 'H', 'Na').
+
+        Returns
+        -------
+        list or int
+            List of [wavelength, bandwidth, zero-point flux] or -1 if invalid.
+        """
         self.logger.debug('Source::photometry')
         # photometry object [wavelength, bandwidth, zeroPoint]
         class phot:
@@ -245,6 +220,13 @@ class Source:
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
             
     def print_properties(self):
+        """
+        Print the main properties of the source.
+
+        Returns
+        -------
+        None
+        """
         self.logger.info('Source::print_properties')
         self.logger.info('{: ^8s}'.format('Source') +'{: ^10s}'.format('Wavelength')+ '{: ^8s}'.format('Zenith')+ '{: ^10s}'.format('Azimuth')+ '{: ^10s}'.format('Altitude')+ '{: ^10s}'.format('Magnitude') + '{: ^10s}'.format('Flux'))
         self.logger.info('{: ^8s}'.format('') +'{: ^10s}'.format('[m]')+ '{: ^8s}'.format('[arcsec]')+ '{: ^10s}'.format('[deg]')+ '{: ^10s}'.format('[m]')+ '{: ^10s}'.format('') + '{: ^10s}'.format('[phot/m2/s]') )

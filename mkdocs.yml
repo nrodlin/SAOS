@@ -10,3 +10,4 @@ plugins:
 nav:
   - Home: index.md
   - Atmosphere: atmosphere.md
+  - Source: source.md
