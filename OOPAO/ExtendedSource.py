@@ -28,6 +28,7 @@ class ExtendedSource(Source):
                  img_path="OOPAO/OOPAO/images/imsol.fits",
                  img_PS=1/60,
                  nSubDirs=1,
+                 maxnSubDirs=7,
                  patch_padding=5,
                  subDir_margin=1.0,
                  logger=None):
@@ -50,6 +51,8 @@ class ExtendedSource(Source):
             Plate scale in arcsec/pixel, by default 1/60.
         nSubDirs : int, optional
             Number of sub-directions across the extended source.
+        maxnSubDirs : int, optional
+            Maximum number of sub-directions allowed for processing limits.        
         patch_padding : float, optional
             Padding beyond FOV for sub-region extraction.
         subDir_margin : float, optional
@@ -89,8 +92,8 @@ class ExtendedSource(Source):
            
         self.sun_nopad, self.sun_padded = self.load_sun_img()   # Take sun patch, pad + no pad
 
-        if self.nSubDirs > 7:
-            raise BaseException("ExtendedSource::__init__ - Too many subdirections, processing will not be feasible")
+        if self.nSubDirs > maxnSubDirs:
+            raise ValueError("ExtendedSource::__init__ - Too many subdirections, processing will not be feasible")
         
         self.subDirs_coordinates, self.subDirs_sun = self.get_subDirs() # Coordinates are in polar [r, theta(radians)] + FoV [arcsec]
                                                                         # The origin is the telescope axis.
@@ -175,16 +178,16 @@ class ExtendedSource(Source):
         phot.V     =  [0.500e-6, 0.0, 3.31e12]#[0.500e-6, 0.0, 3.5e20]
         phot.R     =  [0.700e-6, 0.0, 2.25e20]
         phot.IR    =  [1.300e-6, 0.0, 0.5e20]
-        
+         
         if isinstance(arg,str):
             if hasattr(phot,arg):
                 return getattr(phot,arg)
             else:
-                self.logger.error('ExtendedSource::photometry - Wrong name for the photometry object')
-                return -1
+                self.logger.error('ExtendedSource::photometry - Wrong name for the photometry object.')
+                raise ValueError('Wrong name for the photometry object.')
         else:
-            self.logger.error('ExtendedSource::photometry - The photometry object takes a scalar as an input')
-            return -1   
+            self.logger.error('ExtendedSource::photometry - The photometry object takes a scalar as an input.')
+            raise ValueError('The photometry object takes a scalar as an input.')
     @property
     def nPhoton(self):
         return self._nPhoton       
@@ -223,7 +226,11 @@ class ExtendedSource(Source):
             (unpadded image patch, padded image patch)
         """
         self.logger.info('ExtendedSource::load_sun_img')
-        tmp_sun = fits.open(self.img_path)[0].data.astype('<f4')
+        try:
+            tmp_sun = fits.open(self.img_path)[0].data.astype('<f4')
+        except:
+            self.logger.error('ExtendedSource::load_sun_img - Error loading the FITS file')
+            raise FileExistsError('Error loading the FITS file')
         
         cnt_x = (self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[0]//2
         cnt_y = (self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[1]//2
@@ -259,7 +266,8 @@ class ExtendedSource(Source):
         else:
             subDir_size = self.fov+self.patch_padding
         
-        subDir_imgs = np.zeros((np.ceil((subDir_size+self.subDir_margin)/self.img_PS).astype(int), np.ceil((subDir_size+self.subDir_margin)/self.img_PS).astype(int), self.nSubDirs, self.nSubDirs))
+        subDir_width = np.round((subDir_size+self.subDir_margin)/self.img_PS).astype(int)
+        subDir_imgs = np.zeros((subDir_width, subDir_width, self.nSubDirs, self.nSubDirs))
         
         tel_x = self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1]))
         tel_y = self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1]))
@@ -280,10 +288,12 @@ class ExtendedSource(Source):
                 # Finally, crop the region
 
                 cx = (dirx_c / self.img_PS) + self.sun_padded.shape[0]//2
-                cy = (diry_c / self.img_PS) + self.sun_padded.shape[1]//2               
+                cy = (diry_c / self.img_PS) + self.sun_padded.shape[1]//2
 
-                subDir_imgs[:,:,dirX,dirY] = self.sun_padded[np.round(cx-(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int):np.round(cx+(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int),
-                                                             np.round(cy-(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int):np.round(cy+(subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int)]       
+                corner_x = np.round(cx - (subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int)
+                corner_y = np.round(cy - (subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int)
+
+                subDir_imgs[:,:,dirX,dirY] = self.sun_padded[corner_x : corner_x+subDir_width, corner_y : corner_y+subDir_width]
         
         return subDir_loc, subDir_imgs
 
