@@ -13,7 +13,7 @@ class LoggingHelper:
         queue_handler = logging.handlers.QueueHandler(log_queue)
         root_logger = logging.getLogger()
         root_logger.setLevel(logging_level)  # Minimum log level
-
+        
         # Setup of the formatting
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(message)s"

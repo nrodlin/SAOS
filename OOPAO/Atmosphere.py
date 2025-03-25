@@ -131,7 +131,7 @@ class Atmosphere:
         self.compute_covariance = compute_covariance
 
         if telescope is not None:
-            self.logger.info('Atmosphere::initializeAtmosphere - Taking key parameters from the telescope.')
+            self.logger.debug('Atmosphere::initializeAtmosphere - Taking key parameters from the telescope.')
             self.resolution = telescope.resolution
             self.D = telescope.D
             self.samplingTime = telescope.samplingTime
@@ -151,7 +151,7 @@ class Atmosphere:
 
         if self.hasNotBeenInitialized:
             self.initial_r0 = self.r0
-            self.logger.info('Atmosphere::initializeAtmosphere - Creating layers...')
+            self.logger.debug('Atmosphere::initializeAtmosphere - Creating layers...')
             results_layers = Parallel(n_jobs=self.nLayer, prefer="threads")(delayed(self.buildLayer)(i_layer, randomState, from_file) for i_layer in range(self.nLayer))
             for i_layer in range(self.nLayer):
                 setattr(self,'layer_'+str(i_layer+1),results_layers[i_layer])
@@ -160,7 +160,6 @@ class Atmosphere:
             return True
         
         self.hasNotBeenInitialized  = False 
-        self.print_properties()
         return True
             
     def buildLayer(self, i_layer, randomState = None, from_file=False):
@@ -223,7 +222,7 @@ class Atmosphere:
         # number of pixel for the phase screens computation
         layer.nExtra        = self.nExtra
         layer.nPixel        = int(1+np.round(layer.D/layer.d0))
-        self.logger.info('Atmosphere::buildLayer - Creating layer '+str(i_layer+1))    
+        self.logger.debug('Atmosphere::buildLayer - Creating layer '+str(i_layer+1))    
         a=time.time()
         if self.mode == 1:  # with subharmonics
             layer.phase        = ft_sh_phase_screen(self, layer.resolution, layer.D/layer.resolution, seed=seed)
@@ -231,7 +230,7 @@ class Atmosphere:
             layer.phase        = ft_phase_screen(self, layer.resolution, layer.D/layer.resolution, seed=seed)                    
         layer.initialPhase = layer.phase.copy()
         b=time.time()
-        self.logger.info('Atmosphere::buildLayer - elapsed time to generate the phase screen : ' +str(b-a) +' s')
+        self.logger.debug('Atmosphere::buildLayer - elapsed time to generate the phase screen : ' +str(b-a) +' s')
         
         # Outer ring of pixel for the phase screens update 
         layer.outerMask             = np.ones([layer.resolution+layer.nExtra,layer.resolution+layer.nExtra])
@@ -262,7 +261,7 @@ class Atmosphere:
         layer.mapShift[layer.outerMask==0] = np.reshape(layer.phase,layer.resolution*layer.resolution)
         layer.notDoneOnce                  = True
 
-        self.logger.info('Atmosphere::buildLayer - Layer '+str(i_layer+1)+' created.')      
+        self.logger.debug('Atmosphere::buildLayer - Layer '+str(i_layer+1)+' created.')      
     
         return layer
     
@@ -288,13 +287,13 @@ class Atmosphere:
         layer.ZZt_inv = np.linalg.pinv(layer.ZZt)
 
         d=time.time()
-        self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' ZZt.. : ' +str(d-c) +' s')
+        self.logger.debug('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' ZZt.. : ' +str(d-c) +' s')
         layer.ZXt = makeCovarianceMatrix(layer.innerZ,layer.outerZ,self)
         e=time.time()
-        self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' ZXt.. : ' +str(e-d) +' s')
+        self.logger.debug('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' ZXt.. : ' +str(e-d) +' s')
         layer.XXt = makeCovarianceMatrix(layer.outerZ,layer.outerZ,self)
         f=time.time()
-        self.logger.info('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' XXt.. : ' +str(f-e) +' s')
+        self.logger.debug('Atmosphere::get_covariance_matrices - Layer ' + str(layer.id) + ' XXt.. : ' +str(f-e) +' s')
         
         layer.ZZt_r0     = layer.ZZt*(self.r0_def/self.r0)**(5/3)
         layer.ZXt_r0     = layer.ZXt*(self.r0_def/self.r0)**(5/3)

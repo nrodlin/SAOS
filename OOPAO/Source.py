@@ -171,12 +171,6 @@ class Source:
     def nPhoton(self,val):
         self._nPhoton  = val
         self.magnitude = -2.5*np.log10(val/self.zeroPoint)
-        if self.is_initialized:
-            self.logger.info('Source::nPhoton - NGS flux updated!')
-            self.logger.info('Wavelength \t'+str(round(self.wavelength*1e6,3)) + ' \t [microns]')
-            self.logger.info('Optical Band \t'+self.optBand)
-            self.logger.info('Magnitude \t' + str(self.magnitude))
-            self.logger.info('Flux \t\t'+ str(np.round(self.nPhoton)) + str('\t [photons/m2/s]'))
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
             
