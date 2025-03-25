@@ -760,13 +760,6 @@ class Atmosphere:
             resolution_out  = self.resolution
             return np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out)).T* np.sqrt(layer.fractionalR0)
         else:
-            vmin = np.min(layer.phase)
-            vmax = np.max(layer.phase)
-            fig, axs = plt.subplots(1,3)
-            axs[0].imshow(layer.phase, vmin=vmin, vmax=vmax)
-            axs[1].imshow(layer.phase*pupil_footprint, vmin=vmin, vmax=vmax)
-            axs[2].imshow(np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution]), vmin=vmin, vmax=vmax)
-            plt.show()
             return np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])* np.sqrt(layer.fractionalR0)
     
     def get_opd_per_src(self, src, phase):
