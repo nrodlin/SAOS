@@ -620,8 +620,8 @@ class Atmosphere:
         list_src = []
 
         if src.tag == 'sun':
-            for src in src.sun_subDir_ast.src:
-                list_src.append(src)
+            for subDir in src.sun_subDir_ast.src:
+                list_src.append(subDir)
         else:
             list_src.append(src)
 
@@ -641,7 +641,7 @@ class Atmosphere:
         # The OPD is in [meters]
         result_opd_no_pupil = Parallel(n_jobs=len(list_src), prefer="threads")(delayed(self.get_opd_per_src)(list_src[i], result_phase[i]) for i in range(len(list_src)))
 
-        return result_opd_no_pupil[0]
+        return np.squeeze(result_opd_no_pupil)
            
     def get_pupil_footprint(self, src):
         """
