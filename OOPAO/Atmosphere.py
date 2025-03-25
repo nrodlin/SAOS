@@ -27,7 +27,7 @@ import matplotlib.gridspec as gridspec
 # Self dependencies
 from .phaseStats import ft_phase_screen, ft_sh_phase_screen, makeCovarianceMatrix
 from .tools.displayTools import makeSquareAxes
-from .tools.interpolateGeometricalTransformation import interpolate_cube, interpolate_image
+from .tools.interpolateGeometricalTransformation import interpolate_cube
 from .tools.tools import globalTransformation, pol2cart, translationImageMatrix
 from .Layer import LayerClass
 
@@ -760,13 +760,14 @@ class Atmosphere:
             resolution_out  = self.resolution
             return np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out)).T* np.sqrt(layer.fractionalR0)
         else:
-            if extra_s[0] !=0 or extra_s[1] != 0:        
-                pixel_size_in   = 1
-                pixel_size_out  = 1
-                resolution_out  = self.resolution
-                return np.squeeze(interpolate_image(layer.phase, pixel_size_in, pixel_size_out, resolution_out, shift_x =layer.extra_sx, shift_y= layer.extra_sy))
-            else:
-                return np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])* np.sqrt(layer.fractionalR0)
+            vmin = np.min(layer.phase)
+            vmax = np.max(layer.phase)
+            fig, axs = plt.subplots(1,3)
+            axs[0].imshow(layer.phase, vmin=vmin, vmax=vmax)
+            axs[1].imshow(layer.phase*pupil_footprint, vmin=vmin, vmax=vmax)
+            axs[2].imshow(np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution]), vmin=vmin, vmax=vmax)
+            plt.show()
+            return np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])* np.sqrt(layer.fractionalR0)
     
     def get_opd_per_src(self, src, phase):
         """
