@@ -3,15 +3,31 @@
 Created on Wed Apr  3 14:18:03 2024
 
 @authors: astriffl & cheritie
+
+Update on March 26 2025
+@author: nrodlin
 """
 
 import numpy as np
 import time
 from OOPAO.tools.tools import set_binning
 
+import logging
+import logging.handlers
+from queue import Queue
+
+
+"""
+Detector sensor Module
+=================
+
+This module contains the `Detector` class, used for modeling a camera in adaptive optics simulations.
+"""
+
 class Detector:
     def __init__(self,
-                 nRes:int=None,
+                 nRes:int,
+                 samplingTime:float,
                  integrationTime:float=None,
                  bits:int=None,
                  output_precision:int =None,
@@ -20,86 +36,73 @@ class Detector:
                  sensor:str='CCD',
                  QE:float=1,
                  binning:int=1,
-                 psf_sampling:float=2,
                  darkCurrent:float=0,
                  readoutNoise:float=0,
                  photonNoise:bool=False,
                  backgroundNoise:bool=False,
                  backgroundFlux:float=None,
-                 backgroundMap:float = None):
+                 backgroundMap:float = None,
+                 logger=None):
         '''
-        The Detector allows to simulate the effects ot a real detector (noise, quantification...).
-        
+        Initialize a Detector object to simulate real detector effects like noise, saturation, and quantization.
 
         Parameters
         ----------
         nRes : int
-            Resolution in pixel of the detector. This value is ignored for the computation of PSFs using the Telescope class (see Telescope class for further documentation). 
-            In that case, the sampling of the detector is driven by the psf_sampling property
+            Resolution in pixels of the detector.
+        samplingTime : float
+            Minimal sampling time for the camera [s].
         integrationTime : float, optional
-        Integration time of the detector object in [s]. 
-        
-            - If integrationTime is None, the value is set to the AO loop 
-            frequency defined by the samplingTime property of the Telescope. 
-        
-            - If integrationTime >= samplingTime is requested, the Detector
-            frames are concatenated into the buffer_frames property. 
-            When the integration is completed, the frames are summed together 
-            and readout by the Detector. 
-
-            - If integrationTime < samplingTime an error is raised.
-            
-            The default is None.
+            Integration time of the detector in [s]. Default is sampling time.
         bits : int, optional
-            Quantification of the pixel in [bits] to simulate the finite 
-            precision of the Detector. If set to None the effect is ignored
-            The default is None.
+            Bit depth for quantization. Default is None.
+        output_precision : int, optional
+            Output precision in bits. Default is None.
         FWC : int, optional
-            Full Well Capacity of the pixels in [e-] to simulate the 
-            saturation of the pixels. If set to None the effect is ignored.
-            The default is None.
+            Full Well Capacity of pixels in electrons. Default is None.
         gain : int, optional
-            Gain of the detector. The default is 1.
+            Gain of the detector. Default is 1.
         sensor : str, optional
-            Flag to specify if the sensor is a CCD/CMOS/EMCCD. This is used to
-            simulate the associated noise effects when the gain property is set.
-            The default is 'CCD'.
+            Sensor type ('CCD', 'CMOS', 'EMCCD'). Default is 'CCD'.
         QE : float, optional
-            Quantum efficiency of the Detector. The default is 1.
+            Quantum efficiency (0-1). Default is 1.
         binning : int, optional
-            Binning factor of the Detector. The default is 1.
-        psf_sampling : float, optional
-            ZeroPadding factor of the FFT to compute PSFs from a Telescope (see Telescope class for further documentation).
-            The default is 2 (Shannon-sampled PSFs).
+            Binning factor. Default is 1.
         darkCurrent : float, optional
-            Dark current of the Detector in [e-/pixel/s]. The default is 0.
+            Dark current in e-/pixel/s. Default is 0.
         readoutNoise : float, optional
-            Readout noise of the detector in [e-/pixel]. The default is 0.
+            Readout noise in e-/pixel. Default is 0.
         photonNoise : bool, optional
-            Flag to apply the photon noise to the detector frames.
-            The default is False.
+            Enable photon noise. Default is False.
         backgroundNoise : bool, optional
-            Flag to apply the background Noise to the detector frames.
-            The default is False.
+            Enable background noise. Default is False.
         backgroundFlux : float, optional
-            Background 2D map to consider to apply the background noise.
-            The default is None.
-        backgroundFlux : float, optional
-            Background 2D map to consider to be substracted to each frame.
-            The default is None.
-
-        -------
-        None.
-
+            Background flux level. Default is None.
+        backgroundMap : float, optional
+            Background noise map. Default is None.
+        logger : logging.Logger, optional
+            Logger instance for diagnostics.
         '''
+        
+        if logger is None:
+            self.queue_listerner = self.setup_logging()
+            self.logger = logging.getLogger()
+            self.external_logger_flag = False
+        else:
+            self.external_logger_flag = True
+            self.logger = logger
+
         self.resolution         = nRes
-        self.integrationTime    = integrationTime
+        self.samplingTime       = samplingTime
+
+        if integrationTime is None:
+            self.integrationTime = samplingTime
+
         self.bits               = bits
         self.output_precision   = output_precision
         self.FWC                = FWC
         self.gain               = gain
         self.sensor             = sensor
-        self.psf_sampling       = psf_sampling
         if self.sensor not in ['EMCCD','CCD','CMOS']:
             raise ValueError("Sensor must be 'EMCCD', 'CCD', or 'CMOS'")
         self.QE                 = QE
@@ -110,56 +113,92 @@ class Detector:
         self.backgroundNoise    = backgroundNoise   
         self.backgroundFlux     = backgroundFlux
         self.backgroundMap      = backgroundMap
-        if self.resolution is not None:
-            self.frame              = np.zeros([self.resolution,self.resolution])
-        else:
-            self.frame              = np.zeros([2,2])            
+        
+        self.frame              = np.zeros([self.resolution,self.resolution])          
                 
         self.saturation         = 0
         self.tag                = 'detector'   
         self._integrated_time   = 0
-        self.fov_arcsec         = None
-        self.pixel_size_rad     = None
-        self.pixel_size_arcsec  = None
-        
-        # noise initialisation
-        self.quantification_noise = 0
-        self.photon_noise         = 0
-        self.dark_shot_noise      = 0
+
+        # Precision
+        if self.output_precision is not None:
+            self.set_output_precision(self.output_precision)
+        else:
+            self.set_output_precision(self.bits)
+
+        # Noise 
+        if self.FWC is not None:
+            self.SNR_max = self.FWC / np.sqrt(self.FWC)
+        else:
+            self.SNR_max = np.nan
+
+        if self.FWC:
+            self.quantification_noise = self.FWC * 2**(-self.bits) / np.sqrt(12)
+        else:
+            self.quantification_noise = 0
+
+        self.dark_shot_noise = np.sqrt(self.darkCurrent * self.integrationTime)
         
         # random state to create random values for the noise
         self.random_state_photon_noise      = np.random.RandomState(seed=int(time.time()))      # random states to reproduce sequences of noise 
         self.random_state_readout_noise     = np.random.RandomState(seed=int(time.time()))      # random states to reproduce sequences of noise 
         self.random_state_background_noise  = np.random.RandomState(seed=int(time.time()))      # random states to reproduce sequences of noise 
-        self.random_state_dark_shot_noise   = np.random.RandomState(seed=int(time.time()))      # random states to reproduce sequences of noise 
-        self.print_properties()
-        
+        self.random_state_dark_shot_noise   = np.random.RandomState(seed=int(time.time()))      # random states to reproduce sequences of noise       
 
 
     def rebin(self,arr, new_shape):
-            shape = (new_shape[0], arr.shape[0] // new_shape[0],
-                     new_shape[1], arr.shape[1] // new_shape[1])        
-            out = (arr.reshape(shape).mean(-1).mean(1)) * (arr.shape[0] // new_shape[0]) * (arr.shape[1] // new_shape[1])        
-            return out
+        '''
+        Rebin an array to a new shape by averaging values.
+
+        Parameters
+        ----------
+        arr : np.ndarray
+            Input array.
+        new_shape : tuple
+            New shape of the array.
+
+        Returns
+        -------
+        np.ndarray
+            Rebinned array.
+        '''            
+        shape = (new_shape[0], arr.shape[0] // new_shape[0],
+                    new_shape[1], arr.shape[1] // new_shape[1])        
+        out = (arr.reshape(shape).mean(-1).mean(1)) * (arr.shape[0] // new_shape[0]) * (arr.shape[1] // new_shape[1])        
+        return out
         
         
     def set_binning(self, array, binning_factor,mode='sum'):
+        '''
+        Apply binning to an array.
+
+        Parameters
+        ----------
+        array : np.ndarray
+            Input array.
+        binning_factor : int
+            Binning factor.
+        mode : str, optional
+            Mode of binning ('sum' or 'mean'). Default is 'sum'.
+
+        Returns
+        -------
+        np.ndarray
+            Binned array.
+        '''        
         frame = set_binning(array, binning_factor,mode)
         return frame
 
+   
+    def set_output_precision(self, value):
+        '''
+        Set the output precision in bits.
 
-    def set_sampling(self,array):
-        sx, sy = array.shape
-        pad_x = int(np.round((sx * (self.psf_sampling-1)) / 2))
-        pad_y = int(np.round((sy * (self.psf_sampling-1)) / 2))
-        array_padded = np.pad(array, (pad_x,pad_y))
-        return array_padded
-    
-    def set_output_precision(self):
-        if self.output_precision is not None:         
-            value = self.output_precision
-        else:
-            value = self.bits
+        Parameters
+        ----------
+        value : int
+            Bit depth for output precision.
+        '''        
             
         if value ==8:
             self.output_precision = np.uint8
@@ -178,118 +217,241 @@ class Detector:
         return 
     
     def conv_photon_electron(self,frame):
+        '''
+        Convert photon counts to electrons using the detector's quantum efficiency.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Input frame with photon counts.
+
+        Returns
+        -------
+        np.ndarray
+            Frame converted to electrons.
+        '''        
         frame = (frame * self.QE)
         return frame
         
     
     def set_saturation(self,frame):
-        self.saturation = (100*frame.max()/self.FWC)
+        '''
+        Apply saturation limits based on full well capacity (FWC).
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Input frame.
+
+        Returns
+        -------
+        np.ndarray
+            Clipped frame respecting FWC.
+        '''        
+        
+        saturation = (100*frame.max()/self.FWC)
+        
         if frame.max() > self.FWC:
-            print('Warning: the detector is saturating, %.1f %%'%self.saturation)
+            self.logger.warning('Detector::set_saturation - The detector is saturating, %.1f %%' % saturation)
+        
         return np.clip(frame, a_min = 0, a_max = self.FWC)
     
     
-    def digitalization(self,frame):
+    def digitalization(self, frame):
+        '''
+        Apply digital quantization to a frame.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Input frame.
+
+        Returns
+        -------
+        np.ndarray
+            Quantized frame.
+        '''
         if self.FWC is None:
             return (frame / frame.max() * 2**self.bits).astype(self.output_precision)
-            self.quantification_noise = 0
         else:
-            self.quantification_noise = self.FWC * 2**(-self.bits) / np.sqrt(12)
-            self.saturation = (100*frame.max()/self.FWC)
+            saturation           = (100*frame.max()/self.FWC)
+
             if frame.max() > self.FWC:
-                print('Warning: the ADC is saturating (gain applyed %i), %.1f %%'%(self.gain,self.saturation))
+                self.logger.warning('Detector::digitalization the ADC is saturating (gain applyed %i), %.1f %%' % (self.gain, saturation))
+            
             frame = (frame / self.FWC * (2**self.bits-1)).astype(self.output_precision) 
             return np.clip(frame, a_min=frame.min(), a_max=2**self.bits-1)
 
     
     def set_photon_noise(self,frame):
-        self.photon_noise = np.sqrt(self.signal)
+        '''
+        Apply Poisson-distributed photon noise.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Input frame.
+
+        Returns
+        -------
+        np.ndarray
+            Frame with photon noise.
+        '''        
         return self.random_state_photon_noise.poisson(frame)
 
 
     def set_background_noise(self,frame):
+        '''
+        Apply background noise to the detector frame.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Input frame.
+
+        Returns
+        -------
+        np.ndarray
+            Frame with background noise applied.
+        '''        
         if hasattr(self,'backgroundFlux') is False or self.backgroundFlux is None:
             raise ValueError('The background map backgroundFlux is not properly set. A map of shape '+str(frame.shape)+' is expected')
         else:
-            self.backgroundNoiseAdded = self.random_state_background.poisson(self.backgroundFlux)
-            frame += self.backgroundNoiseAdded
+            backgroundNoiseAdded = self.random_state_background.poisson(self.backgroundFlux)
+            frame += backgroundNoiseAdded
             return frame
-        
-        
+
     def set_readout_noise(self,frame):
+        '''
+        Apply readout noise to a frame.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Input frame.
+
+        Returns
+        -------
+        np.ndarray
+            Frame with readout noise.
+        '''        
         noise = (np.round(self.random_state_readout_noise.randn(frame.shape[0],frame.shape[1])*self.readoutNoise)).astype(int)  #before np.int64(...)
         frame += noise
         return frame
     
     
     def set_dark_shot_noise(self,frame):
-        self.dark_shot_noise = np.sqrt(self.darkCurrent * self.integrationTime) 
+        '''
+        Apply dark shot noise to the detector frame.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Input frame.
+
+        Returns
+        -------
+        np.ndarray
+            Frame with dark shot noise applied.
+        '''        
         dark_current_map = np.ones(frame.shape) * (self.darkCurrent * self.integrationTime)
         dark_shot_noise_map = self.random_state_dark_shot_noise.poisson(dark_current_map)
         frame += dark_shot_noise_map
         return frame 
     
-    def remove_bakground(self,frame):
+    def remove_background(self,frame):
+        '''
+        Remove background from the detector frame.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Input frame.
+
+        Returns
+        -------
+        np.ndarray
+            Frame with background removed.
+        '''        
         try:
             frame -= self.backgroundMap        
             return frame
         except:
-            raise AttributeError('The shape of the background map does not match the ')
+            raise AttributeError('Detector::remove_background - The shape of the background map does not match the frame shape')
     
     
     def readout(self, frame):
-                        
-            if self.darkCurrent!=0:
-                frame = self.set_dark_shot_noise(frame)
-            
-            # Simulate the saturation of the detector (without blooming and smearing)
-            if self.FWC is not None:
-                frame = self.set_saturation(frame)    
-            
-            # If the sensor is EMCCD the applyed gain is before the analog-to-digital conversion
-            if self.sensor == 'EMCCD': 
-                frame *= self.gain
-    
-            # Simulate hardware binning of the detector
-            if self.binning != 1:
-                frame = set_binning(frame,self.binning)
-           
-            # set precision of output
-            self.set_output_precision()
-            
-            # Apply readout noise
-            if self.readoutNoise!=0:    
-                frame = self.set_readout_noise(frame)    
+        '''
+        Simulate detector readout including noise and quantization.
 
-            # Apply the CCD/CMOS gain
-            if self.sensor == 'CCD' or self.sensor == 'CMOS':
-                frame *= self.gain
-                
-            # Apply the digital quantification of the detector
-            if self.bits is not None:
-                frame = self.digitalization(frame)
+        Parameters
+        ----------
+        frame : np.ndarray
+            Input frame.
+
+        Returns
+        -------
+        np.ndarray
+            Processed detector frame.
+        '''            
+        self.logger.debug('Detector::readout')
+
+        if frame.shape[0] != self.resolution:
+            raise ValueError('Detector::readout - The frame shape does not match the resolution of the detector')      
+
+        if self.darkCurrent!=0:
+            frame = self.set_dark_shot_noise(frame)
         
-            # Remove the dark fromthe detector
-            if self.backgroundMap is not None:
-                frame = self.remove_bakground(frame)
-            # Save the integrated frame and buffer
-            self.frame  = frame.copy()
-            if self.resolution is None:
-                self.resolution       = self.frame.shape[0]
-            if self.fov_arcsec is not None:
-                self.pixel_size_rad     = self.fov_rad/self.resolution 
-                self.pixel_size_arcsec  = self.fov_arcsec/self.resolution
-            
-            # reset the buffer and _integrated_time property
-            self._integrated_time = 0
+        # Simulate the saturation of the detector (without blooming and smearing)
+        if self.FWC is not None:
+            frame = self.set_saturation(frame)    
+        
+        # If the sensor is EMCCD the applyed gain is before the analog-to-digital conversion
+        if self.sensor == 'EMCCD': 
+            frame *= self.gain
 
-            return self.frame
+        # Simulate hardware binning of the detector
+        if self.binning != 1:
+            frame = set_binning(frame,self.binning)
+                    
+        # Apply readout noise
+        if self.readoutNoise!=0:    
+            frame = self.set_readout_noise(frame)    
+
+        # Apply the CCD/CMOS gain
+        if self.sensor == 'CCD' or self.sensor == 'CMOS':
+            frame *= self.gain
+            
+        # Apply the digital quantification of the detector
+        if self.bits is not None:
+            frame = self.digitalization(frame)
+    
+        # Remove the dark fromthe detector
+        if self.backgroundMap is not None:
+            frame = self.remove_bakground(frame)
+        # Save the integrated frame and buffer
+        self.frame  = frame.copy()
+
+        # add the integrated time
+        self._integrated_time += self.samplingTime
+
+        return self.frame
              
     
     def integrate(self,frame):
-        self.perfect_frame = frame.copy()
-        self.flux_max_px = self.perfect_frame.max() 
-        self.signal = self.QE * self.flux_max_px
+        '''
+        Integrate multiple exposures and apply detector effects.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Input frame.
+
+        Returns
+        -------
+        np.ndarray
+            Integrated frame.
+        '''        
         # Apply photon noise 
         if self.photonNoise!=0:
             frame = self.set_photon_noise(frame)
@@ -301,39 +463,58 @@ class Detector:
         # Simulate the quantum efficiency of the detector (photons to electrons)
         frame = self.conv_photon_electron(frame)
         
-        if self.integrationTime is None:
-            noisy_frame = self.readout(frame)
-        else:                
-            if self._integrated_time>=self.integrationTime: 
-                noisy_frame = self.readout()
-        
-        return noisy_frame
-
-
-    def computeSNR(self):
-        if self.FWC is not None:
-            self.SNR_max = self.FWC / np.sqrt(self.FWC)
+        if self.integrationTime == self.samplingTime:
+            return self.readout(frame) # Noisy frame
+        elif self.integrationTime > self.samplingTime:
+            self.logger.warning('Detector::integrate - Integration during a window larger than the sampling is not currently supported, \
+                                 returning the instant noisy frame.')
+            return self.readout(frame) # Noisy frame
         else:
-            self.SNR_max = np.NaN
+            raise ValueError('Detector::integrate - The integration time is smaller than the sampling time.')
+
+    def computeSNR(self, perfect_frame):
+        '''
+        Compute the Signal-to-Noise Ratio (SNR) for the detector.
+
+        Parameters
+        ----------
+        perfect_frame : np.ndarray
+            Ideal noise-free frame.
+
+        Returns
+        -------
+        float
+            Computed SNR value.
+        '''
+        flux_max_px = perfect_frame.max() 
+        signal = self.QE * flux_max_px
         
-        self.SNR = self.signal / np.sqrt(self.quantification_noise**2 + self.photon_noise**2 + self.readoutNoise**2 + self.dark_shot_noise**2) 
-        print()
-        print('Theoretical maximum SNR: %.2f'%self.SNR_max)
-        print('Current SNR: %.2f'%self.SNR)
+        photon_noise = np.sqrt(signal)
+
+        SNR = signal / np.sqrt(self.quantification_noise**2 + photon_noise**2 + self.readoutNoise**2 + self.dark_shot_noise**2) 
+
+        self.logger.info('Theoretical maximum SNR: %.2f'%self.SNR_max)
+        self.logger.info('Current SNR: %.2f'%SNR)
+
+        return SNR
     
     
     def displayNoiseError(self):
-        print()
-        print('------------ Noise error ------------')
+        '''
+        Display a summary of noise effects in the detector.
+
+        Returns
+        -------
+        None
+        '''        
+        self.logger.debug('Detector::displayNoiseError')
+        self.logger.info('------------ Noise error ------------')
         if self.bits is not None:
-            print('{:^25s}|{:^9.4f}'.format('Quantization noise [e-]',self.quantification_noise))
-        if self.photonNoise is True:
-            print('{:^25s}|{:^9.4f}'.format('Photon noise [e-]',self.photon_noise))
+            self.logger.info('{:^25s}|{:^9.4f}'.format('Quantization noise [e-]',self.quantification_noise))
         if self.darkCurrent!=0:    
-            print('{:^25s}|{:^9.4f}'.format('Dark shot noise [e-]',self.dark_shot_noise))
+            self.logger.info('{:^25s}|{:^9.4f}'.format('Dark shot noise [e-]',self.dark_shot_noise))
         if self.readoutNoise!=0:
-            print('{:^25s}|{:^9.1f}'.format('Readout noise [e-]',self.readoutNoise))
-        print('-------------------------------------')
+            self.logger.info('{:^25s}|{:^9.1f}'.format('Readout noise [e-]',self.readoutNoise))
         pass
     
     
@@ -343,15 +524,16 @@ class Detector:
     
     @backgroundNoise.setter
     def backgroundNoise(self,val):
+        self.logger.debug('Detector::backgroundNoise')
         self._backgroundNoise = val
         if val == True:
             if hasattr(self,'backgroundFlux') is False or self.backgroundFlux is None:
-                print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-                print('Warning: The background noise is enabled but no property backgroundFlux is set.\nA map of shape '+str(self.frame.shape)+' is expected')
-                print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+                self.logger.info('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
+                self.logger.info('Warning: The background noise is enabled but no property backgroundFlux is set.\nA map of shape '+str(self.frame.shape)+' is expected')
+                self.logger.info('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
             else:
-                print('Background Noise enabled! Using the following backgroundFlux:')
-                print(self.backgroundFlux)
+                self.logger.info('Background Noise enabled! Using the following backgroundFlux:')
+                self.logger.info(self.backgroundFlux)
     @property
     def integrationTime(self):
         return self._integrationTime
@@ -364,25 +546,52 @@ class Detector:
              
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
     def print_properties(self):
-        print()
-        print('------------ Detector ------------')
-        print('{:^25s}|{:^9s}'.format('Sensor type',self.sensor))
+        self.logger.debug('Detector::print_properties')
+        self.logger.info('------------ Detector ------------')
+        self.logger.info('{:^25s}|{:^9s}'.format('Sensor type',self.sensor))
         if self.resolution is not None:
-            print('{:^25s}|{:^9d}'.format('Resolution [px]',self.resolution//self.binning))
+            self.logger.info('{:^25s}|{:^9d}'.format('Resolution [px]',self.resolution//self.binning))
         if self.integrationTime is not None:
-            print('{:^25s}|{:^9.4f}'.format('Exposure time [s]',self.integrationTime))
+            self.logger.info('{:^25s}|{:^9.4f}'.format('Exposure time [s]',self.integrationTime))
         if self.bits is not None:
-            print('{:^25s}|{:^9d}'.format('Quantization [bits]',self.bits))
+            self.logger.info('{:^25s}|{:^9d}'.format('Quantization [bits]',self.bits))
         if self.FWC is not None:
-            print('{:^25s}|{:^9d}'.format('Full well capacity [e-]',self.FWC))
-        print('{:^25s}|{:^9d}'.format('Gain',self.gain))
-        print('{:^25s}|{:^9d}'.format('Quantum efficiency [%]',int(self.QE*100)))
-        print('{:^25s}|{:^9s}'.format('Binning',str(self.binning)+'x'+str(self.binning)))
-        print('{:^25s}|{:^9d}'.format('Dark current [e-/pixel/s]',self.darkCurrent))
-        print('{:^25s}|{:^9s}'.format('Photon noise',str(self.photonNoise)))
-        print('{:^25s}|{:^9s}'.format('Bkg noise [e-]',str(self.backgroundNoise)))
-        print('{:^25s}|{:^9.1f}'.format('Readout noise [e-/pixel]',self.readoutNoise))
-        print('----------------------------------')
-    def __repr__(self):
-        self.print_properties()
-        return ' '
+            self.logger.info('{:^25s}|{:^9d}'.format('Full well capacity [e-]',self.FWC))
+        self.logger.info('{:^25s}|{:^9d}'.format('Gain',self.gain))
+        self.logger.info('{:^25s}|{:^9d}'.format('Quantum efficiency [%]',int(self.QE*100)))
+        self.logger.info('{:^25s}|{:^9s}'.format('Binning',str(self.binning)+'x'+str(self.binning)))
+        self.logger.info('{:^25s}|{:^9d}'.format('Dark current [e-/pixel/s]',self.darkCurrent))
+        self.logger.info('{:^25s}|{:^9s}'.format('Photon noise',str(self.photonNoise)))
+        self.logger.info('{:^25s}|{:^9s}'.format('Bkg noise [e-]',str(self.backgroundNoise)))
+        self.logger.info('{:^25s}|{:^9.1f}'.format('Readout noise [e-/pixel]',self.readoutNoise))
+        self.logger.info('----------------------------------')
+    
+    def setup_logging(self, logging_level=logging.WARNING):
+        #  Setup of logging at the main process using QueueHandler
+        log_queue = Queue()
+        queue_handler = logging.handlers.QueueHandler(log_queue)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging_level)  # Minimum log level
+
+        # Setup of the formatting
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
+        )
+
+        # Output to terminal
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+
+        # Qeue handler captures the messages from the different logs and serialize them
+        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
+        root_logger.addHandler(queue_handler)
+        queue_listener.start()
+
+        return queue_listener
+    
+    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
+    # If the logger is external, then the queue is stop outside of the class scope and we shall
+    # avoid to attempt its destruction
+    def __del__(self):
+        if not self.external_logger_flag:
+            self.queue_listerner.stop()
