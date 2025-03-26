@@ -97,6 +97,8 @@ class Detector:
 
         if integrationTime is None:
             self.integrationTime = samplingTime
+        else:
+            self.integrationTime = integrationTime
 
         self.bits               = bits
         self.output_precision   = output_precision
@@ -533,16 +535,7 @@ class Detector:
                 self.logger.info('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
             else:
                 self.logger.info('Background Noise enabled! Using the following backgroundFlux:')
-                self.logger.info(self.backgroundFlux)
-    @property
-    def integrationTime(self):
-        return self._integrationTime
-      
-    @integrationTime.setter
-    def integrationTime(self,val):          
-        self._integrationTime = val
-        self._integrated_time = 0
-        
+                self.logger.info(self.backgroundFlux)      
              
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
     def print_properties(self):
