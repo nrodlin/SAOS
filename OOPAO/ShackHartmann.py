@@ -21,7 +21,7 @@ from .Detector import Detector
 from .tools.tools import bin_ndarray
 
 """
-Shack Hartmann Wavefron Sensor Module
+Shack Hartmann Wavefront Sensor Module
 =================
 
 This module contains the `ShackHartmann` class, used for modeling a SH-WFS in adaptive optics simulations.
@@ -65,7 +65,9 @@ class ShackHartmann:
         threshold_convolution : float, optional
             Cut-off threshold for Gaussian convolution.
         shannon_sampling : bool, optional
-            If True, sample at 2 pixels per FWHM.
+            If True, sample at 2 pixels per@author: cheritie
+
+Major update FWHM.
         unit_in_rad : bool, optional
             Return slopes in radians if True, pixels otherwise.
         logger : logging.Logger, optional
