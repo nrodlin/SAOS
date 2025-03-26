@@ -196,9 +196,8 @@ class LightPath:
         self.sci_phase = self.sci_opd * (2 * np.pi /self.src.wavelength)
 
         # Generate the Science frame, if defined
-        # TODO: Update the detector class to match the new scheme
         if self.sci is not None:
-            self.sci_frame = self.sci.sci_measure(self.sci_phase, self.src)
+            self.sci_frame = self.sci.get_frame(self.src, self.sci_phase)
         
         return True
     
