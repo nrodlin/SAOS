@@ -55,7 +55,7 @@ class ScienceCam:
         
         self.nPix = int(np.round(self.fieldOfView / self.plate_scale))
 
-        self.pupil = telescope.pupil.copy()
+        self.pupil = telescope.pupil.copy().astype(float)
 
         # TODO: Add noise during the initialization
         
@@ -64,7 +64,7 @@ class ScienceCam:
 
     def get_frame(self, src, phase):
         if src.tag == 'source':
-            coherence = self.compute_coherence(phase, self.nPix)
+            coherence = self.compute_psf(phase, self.nPix)
             
             frame = self.cam.integrate(coherence.detach().numpy()) # The coherence is the PSF because the object is a point-source
         
@@ -74,36 +74,44 @@ class ScienceCam:
             npix = src.subDirs_sun.shape[0]
 
             # Compute in parallel the PSF for each subdir
-            coherence = Parallel(n_jobs=len(list_phase))(delayed(self.compute_psf)(list_phase[i], npix) for i in range(len(list_phase)))
+            coherence = Parallel(n_jobs=1, prefer='threads')(delayed(self.compute_psf)(list_phase[i], npix) for i in range(len(list_phase)))
 
             # Convolute in prallel the PSF of each subDir with the sun patch of that subdir
 
-            sun_patches = Parallel(n_jobs=len(list_phase))(delayed(self.compute_image)(src.subDirs_sun[:,:,i//src.nSubDirs, i%src.nSubDirs], coherence[i], npix) 
+            sun_patches = Parallel(n_jobs=1, prefer='threads')(delayed(self.compute_image)(src.subDirs_sun[:,:,i//src.nSubDirs, i%src.nSubDirs], coherence[i], npix) 
                                                            for i in range(len(list_phase)))
             
             # Combine the sun patches into a unique PSF
 
-            frame = torch.zeros(self.nPix, self.nPix)
-
-            offset = np.round(self.src.patch_padding/(2*self.plate_scale)).astype(int)
+            sun_PSF_combined = torch.zeros(np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), 
+                                           np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int))
+            
+            sun_psf_tmp_3D = torch.zeros((np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), 
+                                          np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), src.nSubDirs*src.nSubDirs))
 
             for i in range(len(sun_patches)):
                 dirX = i//src.nSubDirs
                 dirY = i%src.nSubDirs
                 
-                global_corner_x = np.round(dirX*((src.subDirs_coordinates[2,0,0])/(2*self.plate_scale))).astype(int)
-                global_corner_y = np.round(dirY*((src.subDirs_coordinates[2,0,0])/(2*self.src.plate_scale))).astype(int)
+                gcorner_x = np.round(dirX*((src.subDirs_coordinates[2,0,0])/(2*self.plate_scale))).astype(int)
+                gcorner_y = np.round(dirY*((src.subDirs_coordinates[2,0,0])/(2*self.plate_scale))).astype(int)
 
-                global_corner_x_end = global_corner_x + np.round((self.src.subDirs_coordinates[2,0,0])/(self.plate_scale)).astype(int)
-                global_corner_y_end = global_corner_y + np.round((self.src.subDirs_coordinates[2,0,0])/(self.plate_scale)).astype(int)
+                gcorner_x_end = gcorner_x + np.round((src.subDirs_coordinates[2,0,0])/(self.plate_scale)).astype(int)
+                gcorner_y_end = gcorner_y + np.round((src.subDirs_coordinates[2,0,0])/(self.plate_scale)).astype(int)
+
+                start = npix//2 - src.filter_2D.shape[0]//2
                 
-                frame[global_corner_x:global_corner_x_end,
-                      global_corner_y:global_corner_y_end] += sun_patches[i] * src.filter_2D[:,:,i//src.nSubDirs, i%src.nSubDirs]
+                sun_psf_tmp_3D[gcorner_x:gcorner_x_end, gcorner_y:gcorner_y_end, i] = sun_patches[i][start:start+src.filter_2D.shape[0], 
+                                                                                                     start:start+src.filter_2D.shape[0]] * src.filter_2D[:,:,i//src.nSubDirs, i%src.nSubDirs]
             
             # Crop the external region, which might be affected by the windowing effect.
             # The patch is larger so that the final crop matches the FoV of the object.
-            frame = frame[offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int), 
-                                                    offset:np.round(offset+(self.src.fov/self.src.img_PS)).astype(int)].detach().numpy()
+            sun_PSF_combined = torch.sum(sun_psf_tmp_3D,axis=2)
+            
+            offset = np.round(src.patch_padding/(2*self.plate_scale)).astype(int)
+
+            frame = sun_PSF_combined[offset:np.round(offset+(src.fov/src.img_PS)).astype(int), 
+                                                    offset:np.round(offset+(src.fov/self.plate_scale)).astype(int)].detach().numpy()
             
             # Add detector noise
 
@@ -116,29 +124,36 @@ class ScienceCam:
     
     def compute_psf(self, phase, npix):
 
-        phase_interpolated = torch.from_numpy(cv2.resize(phase, (npix, npix), interpolation=cv2.INTER_LINEAR))
-        phase_torch = torch.from_numpy(phase_interpolated.astype(float))
+        phase_torch = torch.from_numpy(cv2.resize(phase, (npix, npix), interpolation=cv2.INTER_LINEAR))
 
-        pupil_interpolated = cv2.resize(self.pupil, (npix, npix), interpolation=cv2.INTER_LINEAR)
-        pupil_torch = torch.from_numpy(pupil_interpolated.astype(float))
+        pupil_torch = torch.from_numpy(cv2.resize(self.pupil, (npix, npix), interpolation=cv2.INTER_LINEAR))
 
-        return torch.abs(torch.fft.fft2(pupil_torch * torch.exp(1j * phase_torch), 
-                                                 s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='forward'))
+        psf_zeropadded = torch.abs(torch.fft.fftshift(torch.fft.fft2(pupil_torch * torch.exp(1j * phase_torch), 
+                                                 s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='forward')))
+        
+        start = psf_zeropadded.shape[0]//2 - npix//2
+        psf_nopad = psf_zeropadded[start:start+npix, start:start+npix]
+        return psf_nopad / torch.max(psf_nopad)
     
     def compute_image(self, object, coherence, npix):
         
-        object_torch = torch.from_numpy(object)
+        object_torch = torch.from_numpy(object.copy())
 
         # Compute FFT2
 
-        object_fft    = torch.fft.fft2(object_torch, s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='forward')
-        coherence_fft = torch.fft.fft2(coherence, s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='forward')
+        object_fft    = torch.fft.fft2(object_torch, s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='backward')
+        coherence_fft = torch.fft.fft2(coherence, s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='backward')
 
         # Convolute
 
-        image = torch.abs(torch.fft.fftshift(torch.fft.ifft2(object_fft*coherence_fft, s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='forward')))
+        image_zeropadded = torch.abs(torch.fft.ifft2(object_fft*coherence_fft, s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='backward'))
 
-        return image
+        start = image_zeropadded.shape[0]//2 - npix//2
+
+        image_nopad = image_zeropadded[start:start+npix, start:start+npix]
+
+
+        return image_nopad / torch.max(image_nopad)
         
         
 
