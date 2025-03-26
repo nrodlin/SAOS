@@ -8,7 +8,6 @@ Major update on March 24 2025
 @author: nrodlin
 """
 
-
 import time
 
 import logging
@@ -124,7 +123,7 @@ class ShackHartmann:
         # Compute camera frame in case of multiple measurements
         self.get_raw_data_multi     = False
         # detector camera
-        self.cam                        = Detector(round(nSubap*self.n_pix_subap))                     # WFS detector object
+        self.cam                        = Detector(round(nSubap*self.n_pix_subap), samplingTime=telescope.samplingTime, logger=self.logger)   # WFS detector object
         self.cam.photonNoise            = 0
         self.cam.readoutNoise           = 0        # single lenslet
         # noies random states
