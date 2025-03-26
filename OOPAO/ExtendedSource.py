@@ -225,7 +225,7 @@ class ExtendedSource(Source):
         tuple of np.ndarray
             (unpadded image patch, padded image patch)
         """
-        self.logger.info('ExtendedSource::load_sun_img')
+        self.logger.debug('ExtendedSource::load_sun_img')
         try:
             tmp_sun = fits.open(self.img_path)[0].data.astype('<f4')
         except:
@@ -259,7 +259,7 @@ class ExtendedSource(Source):
         tuple of (np.ndarray, np.ndarray)
             Coordinates [r, theta] and subregion image cubes.
         """
-        self.logger.info('ExtendedSource::get_subDirs')
+        self.logger.debug('ExtendedSource::get_subDirs')
         subDir_loc = np.zeros((3,self.nSubDirs, self.nSubDirs))
         if self.nSubDirs > 1:
             subDir_size = (2*(self.fov+self.patch_padding)) / (self.nSubDirs+1) # This guarantees a superposition of the 50% of the subdirs
