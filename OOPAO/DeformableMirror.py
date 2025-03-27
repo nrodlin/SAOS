@@ -9,8 +9,6 @@ Major update on March 24 2025
 """
 
 
-import time
-
 import numpy as np
 import torch
 import cv2
@@ -21,7 +19,7 @@ import logging.handlers
 from queue import Queue
 
 from .MisRegistration import MisRegistration
-from .tools.interpolateGeometricalTransformation import interpolate_cube, interpolate_image
+from .tools.interpolateGeometricalTransformation import interpolate_cube
 from .tools.tools import pol2cart
 
 
@@ -127,53 +125,8 @@ class DeformableMirror:
 
         # The DM can be customized, defining the Influence Functions
         if customDM is not None:
-            self.logger.info('DeformableMirror::__init__ - Building the set of influence functions for the custom DM...')
-            # generate the M4 influence functions            
-
-            pup = telescope.pupil
-            filename = customDM['m4_filename']
-            nAct = customDM['nActuator']
-            
-            a = time.time()
-            # compute M4 influence functions
-            # TODO: implement makeInfluenceFunctions for custom DMs
-            try:
-                coordinates_M4 = makeM4influenceFunctions(pup                   = pup,\
-                                                            filename              = filename,\
-                                                            misReg                = misReg,\
-                                                            dm                    = self,\
-                                                            nAct                  = nAct,\
-                                                            nJobs                 = 30,\
-                                                            nThreads              = 20,\
-                                                            order                 = customDM['order_m4_interpolation'],\
-                                                            floating_precision    = floating_precision)
-            except:
-                coordinates_M4 = makeM4influenceFunctions(pup                   = pup,\
-                                                            filename              = filename,\
-                                                            misReg                = misReg,\
-                                                            dm                    = self,\
-                                                            nAct                  = nAct,\
-                                                            nJobs                 = 30,\
-                                                            nThreads              = 20,\
-                                                            floating_precision    = floating_precision)
-
-#            selection of the valid M4 actuators
-            if customDM['validActCriteria']!=0:
-                IF_STD = np.std(np.squeeze(self.modes[telescope.pupilLogical,:]), axis=0)
-                ACTXPC=np.where(IF_STD >= np.mean(IF_STD) * customDM['validActCriteria'])
-                self.modes         = self.modes[:,ACTXPC[0]]
-            
-                coordinates = coordinates_M4[ACTXPC[0],:]
-            else:
-                coordinates = coordinates_M4
-            # normalize coordinates 
-            coordinates   = (coordinates/telescope.resolution - 0.5)*40
-            self.M4_param = M4_param
-
-            b = time.time()
-            self.logger.info(f'DeformableMirror::__init__ - Done! M4 influence functions computed in {b-a} [s]')
-
-            self.isCustom = True
+            self.logger.warning('DeformableMirror::__init__ - Custon DM IF is not yet supported in this new version, using default.')
+            self.isCustom = False
         else:
             self.isCustom = False
         # Define the DM layer       
@@ -287,7 +240,7 @@ class DeformableMirror:
                 self.nValidAct = self.modes.shape[1]
             self.logger.info('DeformableMirror::__init__ - Done!')
         else:
-            self.logger.info('DeformableMirror::__init__ - Using M4 Influence Functions.')
+            self.logger.info('DeformableMirror::__init__ - Using Custom Influence Functions.')
         
         # Setting the precision for the actuation commands
 
