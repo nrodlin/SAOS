@@ -1,3 +1,8 @@
+"""
+Created on March 24 2025
+@author: nrodlin
+"""
+
 import numpy as np
 
 from joblib import Parallel, delayed
