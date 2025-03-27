@@ -834,8 +834,11 @@ class Atmosphere:
         self.logger.info('{: ^18s}'.format('Frequency') + '{: ^18s}'.format(str(np.round(1/self.samplingTime,2))+' [Hz]' ))
         self.logger.info('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
         return True
-    
+    # TODO: Reimplement this method
     def display_atm_layers(self,layer_index= None,fig_index = None,list_src = None):
+        self.logger.error('Atmosphere::display_atm_layers - This method needs to be update yet.')
+        if True:
+            return False
         """
         Display the OPD of specified atmospheric layers and optionally source beams.
 
@@ -962,94 +965,7 @@ class Atmosphere:
             makeSquareAxes(plt.gca())
 
             ax.arrow(center, center, center+normalized_speed[i_l]*(tmpLayer.D_fov/2)*np.cos(np.deg2rad(tmpLayer.direction)),center+normalized_speed[i_l]*(tmpLayer.D_fov/2)*np.sin(np.deg2rad(tmpLayer.direction)),length_includes_head=True,width=0.25, facecolor = [0,0,0],alpha=0.3,edgecolor= None)
-            ax.text(center+tmpLayer.D_fov/8*np.cos(np.deg2rad(tmpLayer.direction)), center+tmpLayer.D_fov/8*np.sin(np.deg2rad(tmpLayer.direction)),str(self.windSpeed[i_l])+' m/s', fontweight=100,color=[1,1,1],fontsize = 18)
- # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% ATM PROPERTIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-    
-    @property
-    def r0(self):
-         return self._r0
-    
-    @r0.setter
-    def r0(self,val):
-         self._r0 = val
-
-         if self.hasNotBeenInitialized is False:
-             self.logger.info('Atmosphere::r0.setter - Updating the Atmosphere covariance matrices...')             
-             self.seeingArcsec           = 206265*(self.wavelength/val)
-             self.cn2 = (self.r0**(-5. / 3) / (0.423 * (2*np.pi/self.wavelength)**2))/np.max([1, np.max(self.altitude)]) # Cn2 m^(-2/3)             
-             for i_layer in range(self.nLayer):
-                 tmpLayer = getattr(self,'layer_'+str(i_layer+1))
-
-                 tmpLayer.ZZt_r0        = tmpLayer.ZZt*(self.r0_def/self.r0)**(5/3)
-                 tmpLayer.ZXt_r0        = tmpLayer.ZXt*(self.r0_def/self.r0)**(5/3)
-                 tmpLayer.XXt_r0        = tmpLayer.XXt*(self.r0_def/self.r0)**(5/3)
-                 tmpLayer.ZZt_inv_r0    = tmpLayer.ZZt_inv/((self.r0_def/self.r0)**(5/3))
-                 BBt                    = tmpLayer.XXt_r0 -  np.matmul(tmpLayer.A,tmpLayer.ZXt_r0)
-                 tmpLayer.B             = np.linalg.cholesky(BBt)
-
-    @property
-    def L0(self):
-         return self._L0
-    
-    @L0.setter
-    def L0(self,val):
-         self._L0 = val
-         if self.hasNotBeenInitialized is False:
-             self.logger.info('Atmosphere::L0.setter - Updating the Atmosphere covariance matrices...')
-
-             self.hasNotBeenInitialized = True
-             del self.ZZt
-             del self.XXt
-             del self.ZXt
-             del self.ZZt_inv
-             self.initializeAtmosphere(self.telescope)
-    @property
-    def windSpeed(self):
-         return self._windSpeed
-    
-    @windSpeed.setter
-    def windSpeed(self,val):
-        self._windSpeed = val
-
-        if self.hasNotBeenInitialized is False:
-            if len(val)!= self.nLayer:
-                self.logger.error('Atmosphere::windSpeed.setter - Error! Wrong value for the wind-speed! Make sure that you input a wind-speed for each layer')
-            else:
-                self.logger.info('Atmosphere::windSpeed.setter - Updating the wind speed...')
-                for i_layer in range(self.nLayer):
-                    tmpLayer = getattr(self,'layer_'+str(i_layer+1))
-                    tmpLayer.windSpeed = val[i_layer]
-                    tmpLayer.vY            = tmpLayer.windSpeed*np.cos(np.deg2rad(tmpLayer.direction))                    
-                    tmpLayer.vX            = tmpLayer.windSpeed*np.sin(np.deg2rad(tmpLayer.direction))
-                    ps_turb_x = tmpLayer.vX*self.telescope.samplingTime
-                    ps_turb_y = tmpLayer.vY*self.telescope.samplingTime
-                    tmpLayer.ratio[0] = ps_turb_x/self.ps_loop
-                    tmpLayer.ratio[1] = ps_turb_y/self.ps_loop
-                    setattr(self,'layer_'+str(i_layer+1),tmpLayer )
-                
-    @property
-    def windDirection(self):
-         return self._windDirection
-    
-    @windDirection.setter
-    def windDirection(self,val):
-        self._windDirection = val
-
-        if self.hasNotBeenInitialized is False:
-            if len(val)!= self.nLayer:
-                self.logger.error('Atmosphere::windSpeed.setter - Error! Wrong value for the wind-speed! Make sure that you inpute a wind-speed for each layer')
-            else:
-                self.logger.info('Atmosphere::windSpeed.setter - Updating the wind direction...')
-                for i_layer in range(self.nLayer):
-                    tmpLayer = getattr(self,'layer_'+str(i_layer+1))
-                    tmpLayer.direction = val[i_layer]
-                    tmpLayer.vY            = tmpLayer.windSpeed*np.cos(np.deg2rad(tmpLayer.direction))                    
-                    tmpLayer.vX            = tmpLayer.windSpeed*np.sin(np.deg2rad(tmpLayer.direction))
-                    ps_turb_x = tmpLayer.vX*self.telescope.samplingTime
-                    ps_turb_y = tmpLayer.vY*self.telescope.samplingTime
-                    tmpLayer.ratio[0] = ps_turb_x/self.ps_loop
-                    tmpLayer.ratio[1] = ps_turb_y/self.ps_loop
-                    setattr(self,'layer_'+str(i_layer+1),tmpLayer )                
+            ax.text(center+tmpLayer.D_fov/8*np.cos(np.deg2rad(tmpLayer.direction)), center+tmpLayer.D_fov/8*np.sin(np.deg2rad(tmpLayer.direction)),str(self.windSpeed[i_l])+' m/s', fontweight=100,color=[1,1,1],fontsize = 18)    
                             
     def setup_logging(self, logging_level=logging.WARNING):
         #
