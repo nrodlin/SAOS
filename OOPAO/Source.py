@@ -161,18 +161,6 @@ class Source:
         else:
             self.logger.error('Source::photometry - The photometry object takes a scalar as an input.')
             raise ValueError('The photometry object takes a scalar as an input.')   
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SOURCE PROPERTIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
-
-    @property
-    def nPhoton(self):
-        return self._nPhoton
-    
-    @nPhoton.setter
-    def nPhoton(self,val):
-        self._nPhoton  = val
-        self.magnitude = -2.5*np.log10(val/self.zeroPoint)
-
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
             
     def print_properties(self):
         """

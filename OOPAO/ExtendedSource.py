@@ -188,18 +188,6 @@ class ExtendedSource(Source):
         else:
             self.logger.error('ExtendedSource::photometry - The photometry object takes a scalar as an input.')
             raise ValueError('The photometry object takes a scalar as an input.')
-    @property
-    def nPhoton(self):
-        return self._nPhoton       
-    @nPhoton.setter
-    def nPhoton(self,val):
-        self._nPhoton  = val
-        if self.is_initialized:
-
-            self.logger.info('Source::nPhoton - NGS flux updated!')
-            self.logger.info('Wavelength \t'+str(round(self.wavelength*1e6,3)) + ' \t [microns]')
-            self.logger.info('Optical Band \t'+self.optBand)
-            self.logger.info('Flux \t\t'+ str(np.round(self.nPhoton)) + str('\t [photons/m2/s]'))
 
     def print_properties(self):
         """

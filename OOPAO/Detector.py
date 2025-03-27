@@ -518,26 +518,7 @@ class Detector:
         if self.readoutNoise!=0:
             self.logger.info('{:^25s}|{:^9.1f}'.format('Readout noise [e-]',self.readoutNoise))
         pass
-    
-    
-    @property
-    def backgroundNoise(self):
-        return self._backgroundNoise
-    
-    @backgroundNoise.setter
-    def backgroundNoise(self,val):
-        self.logger.debug('Detector::backgroundNoise')
-        self._backgroundNoise = val
-        if val == True:
-            if hasattr(self,'backgroundFlux') is False or self.backgroundFlux is None:
-                self.logger.info('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-                self.logger.info('Warning: The background noise is enabled but no property backgroundFlux is set.\nA map of shape '+str(self.frame.shape)+' is expected')
-                self.logger.info('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-            else:
-                self.logger.info('Background Noise enabled! Using the following backgroundFlux:')
-                self.logger.info(self.backgroundFlux)      
-             
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% END %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
+                     
     def print_properties(self):
         self.logger.debug('Detector::print_properties')
         self.logger.info('------------ Detector ------------')

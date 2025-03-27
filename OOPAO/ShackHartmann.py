@@ -65,9 +65,7 @@ class ShackHartmann:
         threshold_convolution : float, optional
             Cut-off threshold for Gaussian convolution.
         shannon_sampling : bool, optional
-            If True, sample at 2 pixels per@author: cheritie
-
-Major update FWHM.
+            If True, sample at 2 pixels per@author: FWHM.
         unit_in_rad : bool, optional
             Return slopes in radians if True, pixels otherwise.
         logger : logging.Logger, optional
@@ -757,59 +755,6 @@ Major update FWHM.
         print('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')        
         if self.is_geometric:
             print('WARNING: THE PHOTON AND READOUT NOISE ARE NOT CONSIDERED FOR GEOMETRIC SH-WFS')
-
-# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% WFS PROPERTIES %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-        
-    @property
-    def is_geometric(self):
-        return self._is_geometric
-    
-    @is_geometric.setter
-    def is_geometric(self,val):
-        self._is_geometric = val
-        if hasattr(self,'isInitialized'):
-            if self.isInitialized:
-                print('Re-initializing WFS...')
-                self.initialize_wfs()
-    @property
-    def C(self):
-        return self._C
-    
-    @C.setter
-    def C(self,val):
-        self._C = val
-        if hasattr(self,'isInitialized'):
-            if self.isInitialized:
-                print('Re-initializing WFS...')
-                self.initialize_wfs()      
-    @property
-    def lightRatio(self):
-        return self._lightRatio
-    
-    @lightRatio.setter
-    def lightRatio(self,val):
-        self._lightRatio = val
-        if hasattr(self,'isInitialized'):
-            if self.isInitialized:
-                print('Selecting valid subapertures based on flux considerations..')
-
-                self.valid_subapertures = np.reshape(self.photon_per_subaperture >= self.lightRatio*np.max(self.photon_per_subaperture), [self.nSubap,self.nSubap])
-        
-                self.valid_subapertures_1D = np.reshape(self.valid_subapertures,[self.nSubap**2])
-
-                [self.validLenslets_x , self.validLenslets_y] = np.where(self.photon_per_subaperture_2D >= self.lightRatio*np.max(self.photon_per_subaperture))
-        
-                # index of valid slopes X and Y
-                self.valid_slopes_maps = np.concatenate((self.valid_subapertures,self.valid_subapertures))
-        
-                # number of valid lenslet
-                self.nValidSubaperture = int(np.sum(self.valid_subapertures))
-        
-                self.nSignal = 2*self.nValidSubaperture
-                
-                print('Re-initializing WFS...')
-                self.initialize_wfs()
-                print('Done!')
       
     def setup_logging(self, logging_level=logging.WARNING):
         #  Setup of logging at the main process using QueueHandler
