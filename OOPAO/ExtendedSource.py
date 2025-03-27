@@ -297,53 +297,6 @@ class ExtendedSource(Source):
         
         return subDir_loc, subDir_imgs
 
-    def __mul__(self,obj):
-        # TODO: Remove
-        if obj.tag =='telescope':
-            if (type(obj.OPD) is not list) and (np.ndim(obj.OPD) <= 2):
-                tmp_OPD = obj.OPD.copy()
-                obj.OPD = [tmp_OPD for i in range(self.nSubDirs*self.nSubDirs)]
-                
-                tmp_OPD = obj.OPD_no_pupil.copy()
-                obj.OPD_no_pupil = [tmp_OPD for i in range(self.nSubDirs*self.nSubDirs)]
-                obj.PSF_sun_norma = self.sun_nopad
-                obj.PSF_sun = self.sun_nopad
-            else:
-                if np.ndim(obj.OPD) == 4:
-                    obj.resetOPD()
-            for i in range(self.nSubDirs*self.nSubDirs):
-                if np.ndim(obj.OPD) == 4: 
-                    # This occurs during the calibration matrix generation
-                    temp_pupil = obj.pupil[...,np.newaxis]
-                    obj.OPD[i] = obj.OPD[i]*temp_pupil
-                else:
-                    obj.OPD[i] = obj.OPD[i]*obj.pupil # here to ensure that a new pupil is taken into account
-
-                # update the phase of the source
-                self.sun_subDir_ast.src[i].phase = obj.OPD[i]*2*np.pi/self.sun_subDir_ast.src[i].wavelength
-                self.sun_subDir_ast.src[i].phase_no_pupil = obj.OPD_no_pupil[i]*2*np.pi/self.sun_subDir_ast.src[i].wavelength
-        
-                # compute the variance in the pupil
-                self.sun_subDir_ast.src[i].var        = np.var(self.sun_subDir_ast.src[i].phase[np.where(obj.pupil==1)])
-                # assign the source object to the obj object
-
-                self.sun_subDir_ast.src[i].fluxMap    = obj.pupilReflectivity*(1/self.nSubDirs**2)*self.sun_subDir_ast.src[i].nPhoton*obj.samplingTime*(obj.D/obj.resolution)**2
-                if obj.optical_path is None:
-                    obj.optical_path = []
-                    obj.optical_path.append([self.sun_subDir_ast.src[i].type + '('+self.sun_subDir_ast.src[i].optBand+')',id(self)])
-                    obj.optical_path.append([obj.tag,id(obj)])
-                else:
-                    obj.optical_path[0] =[self.type + '(' + self.sun_subDir_ast.src[i].optBand + ')', id(self)]   
-            # assign the source object to the telescope object
-            obj.src   = self
-                
-            return obj
-        elif obj.tag == 'atmosphere':
-            obj*self
-            return obj
-        else:
-            raise AttributeError('The Source can only be paired to a Telescope!')
-
     def setup_logging(self, logging_level=logging.WARNING):
         #
         #  Setup of logging at the main process using QueueHandler
