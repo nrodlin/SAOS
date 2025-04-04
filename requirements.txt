@@ -1,4 +1,4 @@
-astropy==7.1.dev471+g07df8c9085
+astropy>=7.1.dev471+g07df8c9085
 joblib==1.4.2
 jsonpickle==4.0.1
 matplotlib==3.10.0
@@ -8,7 +8,7 @@ numexpr==2.10.2
 numpy==2.1.2
 opencv-contrib-python==4.11.0.86
 psutil==6.1.1
-scikit-learn==1.6.1
-scipy==1.15.1
-tqdm==4.67.1
-torch==2.7.0.dev20250209+cpu
+scikit-learn>=1.6.1
+scipy>=1.15.1
+tqdm>=4.67.1
+torch>=2.7.0.dev20250209+cpu
