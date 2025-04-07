@@ -228,7 +228,7 @@ class DeformableMirror:
                 self.logger.info('DeformableMirror::__init__ - Computing the 2D zonal modes..')
                 # FWHM of the gaussian depends on the anamorphosis
                 def joblib_construction():
-                    Q=Parallel(n_jobs=8,prefer='threads')(delayed(self.modesComputation)(i,j) for i,j in zip(u0x,u0y))
+                    Q=Parallel(n_jobs=1,prefer='threads')(delayed(self.modesComputation)(i,j) for i,j in zip(u0x,u0y))
                     return Q 
                 self.modes = np.ascontiguousarray(np.squeeze(np.moveaxis(np.asarray(joblib_construction()),0,-1))).reshape(self.dm_layer.D_px,
                                                                                                                            self.dm_layer.D_px,
@@ -412,7 +412,13 @@ class DeformableMirror:
             self._coefs = val
 
         if len(val)==self.nValidAct:
-            temp = torch.matmul(self.modes_torch, torch.tensor(self._coefs))
+            phase_3d = self.modes_torch * torch.tensor(self._coefs) # element-wise product, generate a 3D matrix each of which 
+                                                                    # contains the IF by the stroke according to the cmd
+            
+            # Combination of the IF: maximum in absolute value at each phase point
+            idx = torch.argmax(torch.abs(phase_3d), dim=2, keepdim=True)
+            temp = torch.gather(phase_3d, dim=2, index=idx).squeeze(2)
+
             self.dm_layer.OPD = temp.view(self.dm_layer.D_px,self.dm_layer.D_px).double().numpy()
         else:
             self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, only a 1D vector or a valid 2D matrix is expected.')    
@@ -505,7 +511,7 @@ class DeformableMirror:
         b = -np.sin(2*theta)/(4*cx**2)   +  np.sin(2*theta)/(4*cy**2)
         c = np.sin(theta)**2/(2*cx**2)  +  np.cos(theta)**2/(2*cy**2)
     
-        G = self.sign * np.exp(-(a*(X-x0)**2 +2*b*(X-x0)*(Y-y0) + c*(Y-y0)**2))
+        G = self.sign * np.exp(-(a*(X-x0)**2 +2*b*(X-x0)*(Y-y0) + c*(Y-y0)**2)/(self.dm_layer.D_px/self.nAct))
         
         if self.flip_lr:
             G = np.fliplr(G)
@@ -515,7 +521,7 @@ class DeformableMirror:
             
         output = np.reshape(G,[1,self.dm_layer.D_px **2])
         
-        output[output < 1e-10] = 0
+        output[output < 1e-4] = 0
 
         if self.floating_precision == 32:
             output = np.float32(output)
