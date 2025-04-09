@@ -214,8 +214,8 @@ class DeformableMirror:
         self.yIF = yIF
 
         # corresponding coordinates on the pixel grid
-        u0x      = self.dm_layer.D_px /2 + xIF*self.dm_layer.D_px /self.dm_layer.D_fov
-        u0y      = self.dm_layer.D_px /2 + yIF*self.dm_layer.D_px /self.dm_layer.D_fov      
+        u0x      = self.validAct_2D.shape[0] /2 + xIF*self.validAct_2D.shape[0] /self.dm_layer.D_fov
+        u0y      = self.validAct_2D.shape[0] /2 + yIF*self.validAct_2D.shape[0] /self.dm_layer.D_fov      
         self.nIF = len(xIF)
         # store the coordinates
         self.coordinates        = np.zeros([self.nIF, 2])
@@ -231,8 +231,8 @@ class DeformableMirror:
                 def joblib_construction():
                     Q=Parallel(n_jobs=1,prefer='threads')(delayed(self.modesComputation)(i,j) for i,j in zip(u0x,u0y))
                     return Q 
-                self.modes = np.ascontiguousarray(np.squeeze(np.moveaxis(np.asarray(joblib_construction()),0,-1))).reshape(self.dm_layer.D_px,
-                                                                                                                           self.dm_layer.D_px,
+                self.modes = np.ascontiguousarray(np.squeeze(np.moveaxis(np.asarray(joblib_construction()),0,-1))).reshape(self.validAct_2D.shape[0],
+                                                                                                                           self.validAct_2D.shape[0],
                                                                                                                            self.nValidAct)
                 self.modes_torch = torch.tensor(self.modes).contiguous()
             else:
@@ -425,8 +425,9 @@ class DeformableMirror:
 
             # temp = torch.matmul(self.modes_torch, torch.tensor(self._coefs)) # matrix product between the IF and the stroke for each mode
                         
-            # self.dm_layer.OPD = temp.view(self.dm_layer.D_px,self.dm_layer.D_px).double().numpy()
-
+            # temp = temp.view(self.validAct_2D.shape[0], self.validAct_2D.shape[1]).double().numpy()
+            
+            # temp[self.validAct_2D] = np.mean(temp[self.validAct_2D])
             self.dm_layer.OPD = cv2.resize(temp, (self.dm_layer.D_px, self.dm_layer.D_px), interpolation=cv2.INTER_LINEAR) * self.dm_layer.metapupil
 
             with np.errstate(divide='ignore', invalid='ignore'):
@@ -510,12 +511,12 @@ class DeformableMirror:
         self.logger.debug('DeformableMirror::modesComputation')
         x0 = i
         y0 = j
-        cx = (1+self.misReg.radialScaling)*(self.dm_layer.D_px /self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
-        cy = (1+self.misReg.tangentialScaling)*(self.dm_layer.D_px /self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
+        cx = (1+self.misReg.radialScaling)*(self.validAct_2D.shape[0] /self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
+        cy = (1+self.misReg.tangentialScaling)*(self.validAct_2D.shape[0] /self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
 
         # Radial direction of the anamorphosis
         theta  = self.misReg.anamorphosisAngle*np.pi/180
-        x      = np.linspace(0,1,self.dm_layer.D_px )*self.dm_layer.D_px 
+        x      = np.linspace(0,1,self.validAct_2D.shape[0] )*self.validAct_2D.shape[0] 
         X,Y    = np.meshgrid(x,x)
     
         # Compute the 2D Gaussian coefficients
@@ -523,7 +524,7 @@ class DeformableMirror:
         b = -np.sin(2*theta)/(4*cx**2)   +  np.sin(2*theta)/(4*cy**2)
         c = np.sin(theta)**2/(2*cx**2)  +  np.cos(theta)**2/(2*cy**2)
     
-        G = self.sign * np.exp(-(a*(X-x0)**2 +2*b*(X-x0)*(Y-y0) + c*(Y-y0)**2)/(self.dm_layer.D_px/self.nAct))
+        G = self.sign * np.exp(-(a*(X-x0)**2 +2*b*(X-x0)*(Y-y0) + c*(Y-y0)**2)/(self.validAct_2D.shape[0]/self.nAct))
         
         if self.flip_lr:
             G = np.fliplr(G)
@@ -531,7 +532,7 @@ class DeformableMirror:
         if self.flip_:
             G = np.flip(G)
             
-        output = np.reshape(G,[1,self.dm_layer.D_px **2])
+        output = np.reshape(G,[1,self.validAct_2D.shape[0] **2])
         
         output[output < 1e-4] = 0
 
