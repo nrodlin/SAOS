@@ -229,7 +229,7 @@ class DeformableMirror:
                 self.logger.info('DeformableMirror::__init__ - Computing the 2D zonal modes..')
                 # FWHM of the gaussian depends on the anamorphosis
                 def joblib_construction():
-                    Q=Parallel(n_jobs=1,prefer='threads')(delayed(self.modesComputation)(i,j) for i,j in zip(u0x,u0y))
+                    Q=Parallel(n_jobs=8,prefer='threads')(delayed(self.modesComputation)(i,j) for i,j in zip(u0x,u0y))
                     return Q 
                 self.modes = np.ascontiguousarray(np.squeeze(np.moveaxis(np.asarray(joblib_construction()),0,-1))).reshape(self.validAct_2D.shape[0],
                                                                                                                            self.validAct_2D.shape[0],
