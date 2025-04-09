@@ -190,6 +190,10 @@ class DeformableMirror:
             
             self.validAct = validAct.astype(int)         
             self.nValidAct = self.nAct 
+        
+        # Gain correction for the borders of the DM due to interpolation errors
+        self.gain_correction   = self.validAct_2D.copy().astype(float)
+        self.gain_correction   = cv2.resize(self.gain_correction, (self.dm_layer.D_px, self.dm_layer.D_px), interpolation=cv2.INTER_LINEAR) * self.dm_layer.metapupil
             
         #  INFLUENCE FUNCTIONS COMPUTATION
         #  initial coordinates
@@ -422,15 +426,11 @@ class DeformableMirror:
             # temp = torch.matmul(self.modes_torch, torch.tensor(self._coefs)) # matrix product between the IF and the stroke for each mode
                         
             # self.dm_layer.OPD = temp.view(self.dm_layer.D_px,self.dm_layer.D_px).double().numpy()
-            interpolation_algorithm = cv2.INTER_LINEAR
 
-            gain_correction   = self.validAct_2D.copy().astype(float)
-            gain_correction   = cv2.resize(gain_correction, (self.dm_layer.D_px, self.dm_layer.D_px), interpolation=interpolation_algorithm) * self.dm_layer.metapupil
-
-            self.dm_layer.OPD = cv2.resize(temp, (self.dm_layer.D_px, self.dm_layer.D_px), interpolation=interpolation_algorithm) * self.dm_layer.metapupil
+            self.dm_layer.OPD = cv2.resize(temp, (self.dm_layer.D_px, self.dm_layer.D_px), interpolation=cv2.INTER_LINEAR) * self.dm_layer.metapupil
 
             with np.errstate(divide='ignore', invalid='ignore'):
-                self.dm_layer.OPD = np.where(gain_correction > 1e-5, self.dm_layer.OPD / gain_correction, 0)
+                self.dm_layer.OPD = np.where(self.gain_correction > 1e-5, self.dm_layer.OPD / self.gain_correction, 0)
 
         else:
             self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, only a 1D vector or a valid 2D matrix is expected.')    
