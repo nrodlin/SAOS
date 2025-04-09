@@ -31,10 +31,10 @@ class dmLayerClass():
         self.D_fov                  = None # diameter of the DM projected into the altitude layer [meters]
         self.D_px                   = None # size of the DM in [pixels]
         self.telescope_D            = None # Telescope diamter in [meters]
-        self.telescope_D_px         = None # Telescope diameter in [px] using the DM resolution
         self.telescope_resolution   = None # Telescope diameter in [px] using the original telescope resolution
         self.center                 = None # center coordinates of the DM [pixels]
-        self.pupil_footprint        = None # 2D telescope pupil projected to the altitude layer
+        self.metapupil              = None # 2D telescope pupil at the DM altitude [circular mask], at 0km equals the pupil without spider nor central obs
+        self.pupil                  = None # 2D telescope pupil [binary mask]
         self.OPD                    = None # stores the layer OPD without projection to any source (full pupil/metapupil)
         
 """
@@ -164,17 +164,14 @@ class DeformableMirror:
             
             # select valid actuators --> removing the central and outer obstruction
             r = np.sqrt(self.xIF0**2 + self.yIF0**2)
+            
             if valid_act_thresh_outer is None: 
                 valid_act_thresh_outer = self.dm_layer.D_fov/2+0.7533*self.pitch
-            if valid_act_thresh_inner is None:
-                valid_act_thresh_inner = telescope.centralObstruction*self.dm_layer.D_fov/2-0.5*self.pitch
             
-            validActInner = r > valid_act_thresh_inner
-            validActOuter = r <= valid_act_thresh_outer
+            self.validAct = r <= valid_act_thresh_outer
     
-            self.validAct = validActInner*validActOuter
             self.validAct_2D = self.validAct.reshape(self.nAct,self.nAct)
-            self.nValidAct = sum(self.validAct) 
+            self.nValidAct   = sum(self.validAct) 
             
         # If the coordinates are specified   
         else:
@@ -285,12 +282,17 @@ class DeformableMirror:
         layer.OPD               = np.zeros([layer.D_px,layer.D_px]) # stores the layer OPD without projection to any source (full pupil/metapupil)
 
         layer.telescope_D          = telescope.D # Telescope diameter in [m]
-        layer.telescope_D_px       = int(np.ceil(telescope.D * (layer.D_px / layer.D_fov))) # Telescope diameter in [px] using the DM resolution
         layer.telescope_resolution = telescope.resolution # Telescope diameter in [px] using the original telescope resolution
+
+        # Circular entrance pupil
+        x = np.linspace(-layer.D_px/2, layer.D_px/2, layer.D_px)
+        xx, yy = np.meshgrid(x, x)
+        layer.metapupil = xx**2 + yy**2 < ((layer.D_px + 1)/2)**2
+        layer.pupil                 = telescope.pupil.copy()
         
         return layer
-    # When the DM is located at an altitude layer, the phase of the DMs affect differently the sources dpending on their coordinates in sky. 
-    # Before return the phase of the DM, we need to select the correct region of the DM affecting the source, which is done by masking the pupil
+    # When the DM is located at an altitude layer, the phase of the DMs affect differently the sources depending on their coordinates in sky. 
+    # Before return the phase of the DM, we need to select the correct region of the DM affecting the source, which is done by masking an square area
     def get_dm_pupil(self, src):
         """
         Compute pupil mask seen by a source at the DM altitude.
@@ -303,7 +305,7 @@ class DeformableMirror:
         Returns
         -------
         np.ndarray
-            Binary pupil mask (1s where pupil is seen by the source).
+            Binary square mask (1s where the source is affected).
         """
         self.logger.debug('DeformableMirror::get_dm_pupil')
         
@@ -321,15 +323,15 @@ class DeformableMirror:
     
         # Finally, we mask the region that sees the source. This region is centered at the location computed in 3) 
         # and its shape equals the telescope pupil with the DM layer diameter in [px]
-        pupil_footprint = np.zeros([self.dm_layer.D_px, self.dm_layer.D_px])
+        square_mask = np.zeros([self.dm_layer.D_px, self.dm_layer.D_px])
         # Define square limits to take the region of the metapupil affecting the source
-        left_corner_x = center_x-self.dm_layer.telescope_D_px//2
-        left_corner_y = center_y-self.dm_layer.telescope_D_px//2
+        left_corner_x = center_x-self.dm_layer.telescope_resolution//2
+        left_corner_y = center_y-self.dm_layer.telescope_resolution//2
         # Mask the region
-        pupil_footprint[left_corner_x:left_corner_x + self.dm_layer.telescope_D_px,
-                        left_corner_y:left_corner_y + self.dm_layer.telescope_D_px] = 1 
+        square_mask[left_corner_x:left_corner_x + self.dm_layer.telescope_resolution,
+                    left_corner_y:left_corner_y + self.dm_layer.telescope_resolution] = 1
         
-        return pupil_footprint
+        return square_mask
 
     # The OPD is computed for a given source - for altitude layers, it depends on its location in sky
     # Returns the OPD [m] and the phase [rad], for which the wavelength of the input source is used. 
@@ -350,9 +352,10 @@ class DeformableMirror:
         """
         self.logger.debug('DeformableMirror::get_dm_opd')
         # Get the pupil for the object. For the case of the sun, only the central subdir is considered.
-        pupil = self.get_dm_pupil(source)
+        pupil = self.get_dm_pupil(source) 
         # Select only the region of the DM that is affecting to the source.
-        OPD = self.dm_layer.OPD[pupil==1].reshape((self.dm_layer.telescope_D_px, self.dm_layer.telescope_D_px))
+        OPD = np.zeros([self.dm_layer.telescope_resolution, self.dm_layer.telescope_resolution])
+        OPD = self.dm_layer.OPD[pupil==1].reshape(self.dm_layer.telescope_resolution, self.dm_layer.telescope_resolution)
         # Depending on the source type, certain action may differ
         if source.tag == 'LGS':
             # This code considers the impact of having an object at a finite altitude (typ. LGS). 
@@ -375,7 +378,7 @@ class DeformableMirror:
             output_OPD = np.asarray(np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, self.dm_layer.telescope_resolution)))
         
         else: # NGS and Sun types can be handled equally. The sun is simplified, only considering the projection of the centrar subdir
-            output_OPD = cv2.resize(OPD, (self.dm_layer.telescope_resolution, self.dm_layer.telescope_resolution), interpolation=cv2.INTER_AREA)
+            output_OPD = OPD * self.dm_layer.pupil
 
         output_phase = output_OPD * (2*np.pi / source.wavelength)       
 
@@ -412,14 +415,23 @@ class DeformableMirror:
             self._coefs = val
 
         if len(val)==self.nValidAct:
-            phase_3d = self.modes_torch * torch.tensor(self._coefs) # element-wise product, generate a 3D matrix each of which 
-                                                                    # contains the IF by the stroke according to the cmd
-            
-            # Combination of the IF: maximum in absolute value at each phase point
-            idx = torch.argmax(torch.abs(phase_3d), dim=2, keepdim=True)
-            temp = torch.gather(phase_3d, dim=2, index=idx).squeeze(2)
 
-            self.dm_layer.OPD = temp.view(self.dm_layer.D_px,self.dm_layer.D_px).double().numpy()
+            temp = np.zeros_like(self.validAct_2D).astype(float)
+            temp[self.validAct_2D] = self._coefs
+
+            # temp = torch.matmul(self.modes_torch, torch.tensor(self._coefs)) # matrix product between the IF and the stroke for each mode
+                        
+            # self.dm_layer.OPD = temp.view(self.dm_layer.D_px,self.dm_layer.D_px).double().numpy()
+            interpolation_algorithm = cv2.INTER_LINEAR
+
+            gain_correction   = self.validAct_2D.copy().astype(float)
+            gain_correction   = cv2.resize(gain_correction, (self.dm_layer.D_px, self.dm_layer.D_px), interpolation=interpolation_algorithm) * self.dm_layer.metapupil
+
+            self.dm_layer.OPD = cv2.resize(temp, (self.dm_layer.D_px, self.dm_layer.D_px), interpolation=interpolation_algorithm) * self.dm_layer.metapupil
+
+            with np.errstate(divide='ignore', invalid='ignore'):
+                self.dm_layer.OPD = np.where(gain_correction > 1e-5, self.dm_layer.OPD / gain_correction, 0)
+
         else:
             self.logger.error('DeformableMirror::updateDMShape - Wrong value for the coefficients, only a 1D vector or a valid 2D matrix is expected.')    
             raise ValueError('DeformableMirror::updateDMShape - Dimensions do not match to the number of valid actuators.')
