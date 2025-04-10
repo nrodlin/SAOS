@@ -364,7 +364,7 @@ class ShackHartmann:
                                                                                                                                  self.npix_phase, self.npix_phase)
         
         phase_rescaled_valids = torch.nn.functional.interpolate(torch.from_numpy(phase_reshaped[self.valid_subapertures_1D]).unsqueeze(1), size=(self.npix_lenslet, self.npix_lenslet), 
-                                                         mode='bilinear', align_corners=False).squeeze(1).numpy()
+                                                         mode='bilinear', align_corners=True).squeeze(1).numpy()
         
         phase_rescaled = np.zeros((self.nSubap**2, self.npix_lenslet, self.npix_lenslet), dtype=float)
         phase_rescaled[self.valid_subapertures_1D] = phase_rescaled_valids
