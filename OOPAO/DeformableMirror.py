@@ -12,6 +12,7 @@ Major update on March 24 2025
 import numpy as np
 import torch
 import cv2
+import scipy as sp
 from joblib import Parallel, delayed
 
 import logging
@@ -59,8 +60,7 @@ class DeformableMirror:
                  flip = False,
                  flip_lr = False,
                  sign = 1,
-                 valid_act_thresh_outer = None, 
-                 valid_act_thresh_inner = None,
+                 valid_act_thresh_outer = None,
                  logger = None):
         """
         Initialize a Deformable Mirror (DM) with zonal or modal influence functions.
@@ -95,8 +95,6 @@ class DeformableMirror:
             Sign of actuation.
         valid_act_thresh_outer : float, optional
             Threshold for validating actuators outside pupil.
-        valid_act_thresh_inner : float, optional
-            Threshold for validating actuators inside central obstruction.
         logger : logging.Logger, optional
             Logger instance.
         """
@@ -152,7 +150,6 @@ class DeformableMirror:
             self.logger.info('DeformableMirror::__init__ - No coordinates loaded.. taking the cartesian geometry as a default') 
 
             self.nAct                               = nSubap+1 # In that case corresponds to the number of actuator along the diameter            
-            self.nActAlongDiameter                  = self.nAct-1 
             
             # set the coordinates of the DM object to produce a cartesian geometry
             x = np.linspace(-(self.dm_layer.D_fov)/2,(self.dm_layer.D_fov)/2,self.nAct)
@@ -184,7 +181,6 @@ class DeformableMirror:
             self.xIF0 = coordinates[:,0]
             self.yIF0 = coordinates[:,1]
             self.nAct = len(self.xIF0) # In that case corresponds to the total number of actuators
-            self.nActAlongDiameter = (self.dm_layer.D_fov)/self.pitch
             
             validAct=(np.arange(0,self.nAct)) # In that case assumed that all the Influence Functions provided are controlled actuators
             
@@ -192,8 +188,8 @@ class DeformableMirror:
             self.nValidAct = self.nAct 
         
         # Gain correction for the borders of the DM due to interpolation errors
-        self.gain_correction   = self.validAct_2D.copy().astype(float)
-        self.gain_correction   = cv2.resize(self.gain_correction, (self.dm_layer.D_px, self.dm_layer.D_px), interpolation=cv2.INTER_LINEAR) * self.dm_layer.metapupil
+        self.gain_correction = self.validAct_2D.copy().astype(float)
+        self.gain_correction = sp.ndimage.zoom(self.gain_correction, (self.dm_layer.D_px/self.validAct_2D.shape[0], self.dm_layer.D_px/self.validAct_2D.shape[0]), order=1)
             
         #  INFLUENCE FUNCTIONS COMPUTATION
         #  initial coordinates
@@ -428,7 +424,8 @@ class DeformableMirror:
             # temp = temp.view(self.validAct_2D.shape[0], self.validAct_2D.shape[1]).double().numpy()
             
             # temp[self.validAct_2D] = np.mean(temp[self.validAct_2D])
-            self.dm_layer.OPD = cv2.resize(temp, (self.dm_layer.D_px, self.dm_layer.D_px), interpolation=cv2.INTER_LINEAR) * self.dm_layer.metapupil
+            self.dm_layer.OPD = sp.ndimage.zoom(temp, (self.dm_layer.D_px/self.validAct_2D.shape[0], self.dm_layer.D_px/self.validAct_2D.shape[0]), order=1)
+            # self.dm_layer.OPD = cv2.resize(temp, (self.dm_layer.D_px, self.dm_layer.D_px), interpolation=cv2.INTER_LINEAR)
 
             with np.errstate(divide='ignore', invalid='ignore'):
                 self.dm_layer.OPD = np.where(self.gain_correction > 1e-5, self.dm_layer.OPD / self.gain_correction, 0)
@@ -511,8 +508,8 @@ class DeformableMirror:
         self.logger.debug('DeformableMirror::modesComputation')
         x0 = i
         y0 = j
-        cx = (1+self.misReg.radialScaling)*(self.validAct_2D.shape[0] /self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
-        cy = (1+self.misReg.tangentialScaling)*(self.validAct_2D.shape[0] /self.nActAlongDiameter)/np.sqrt(2*np.log(1./self.mechCoupling))
+        cx = (1+self.misReg.radialScaling)*(self.validAct_2D.shape[0] /self.nAct)/np.sqrt(2*np.log(1./self.mechCoupling))
+        cy = (1+self.misReg.tangentialScaling)*(self.validAct_2D.shape[0] /self.nAct)/np.sqrt(2*np.log(1./self.mechCoupling))
 
         # Radial direction of the anamorphosis
         theta  = self.misReg.anamorphosisAngle*np.pi/180
