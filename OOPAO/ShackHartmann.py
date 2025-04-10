@@ -16,6 +16,7 @@ from queue import Queue
 
 import numpy as np
 import scipy as sp
+import torch
 
 import cv2
 
@@ -355,19 +356,23 @@ class ShackHartmann:
             Complex field per subaperture.
         """
         self.logger.debug('ShackHartmann::get_lenslet_em_field')
-        # Create the output with the dimensions
-        cube_em = np.zeros([self.nSubap**2,self.npix_lenslet,self.npix_lenslet],dtype=complex)
         # Rescale the phase
-        phase_rescaled = cv2.resize(phase, (self.npix_lenslet*self.nSubap, self.npix_lenslet*self.nSubap), interpolation=cv2.INTER_LINEAR)
+        #phase_rescaled = cv2.resize(phase, (self.npix_lenslet*self.nSubap, self.npix_lenslet*self.nSubap), interpolation=cv2.INTER_LINEAR)    
+        
         # Reshape the subapertures to a grid of subapertures. The sensor can be zeropadded, so the phase is filling the central part of the subaperture
-        phase_reshaped = phase_rescaled.reshape(self.nSubap, self.npix_lenslet, self.nSubap, self.npix_lenslet).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
-                                                                                                                                              self.npix_lenslet, self.npix_lenslet)
+        phase_reshaped = phase.reshape(self.nSubap, self.npix_phase, self.nSubap, self.npix_phase).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
+                                                                                                                                 self.npix_phase, self.npix_phase)
+        
+        phase_rescaled_valids = torch.nn.functional.interpolate(torch.from_numpy(phase_reshaped[self.valid_subapertures_1D]).unsqueeze(1), size=(self.npix_lenslet, self.npix_lenslet), 
+                                                         mode='bilinear', align_corners=False).squeeze(1).numpy()
+        
+        phase_rescaled = np.zeros((self.nSubap**2, self.npix_lenslet, self.npix_lenslet), dtype=float)
+        phase_rescaled[self.valid_subapertures_1D] = phase_rescaled_valids
         # Apply the exponential to full matrix
-        cube_em = np.exp(1j * phase_reshaped)
+        cube_em = np.exp(1j * phase_rescaled)
 
         # Apply light scaling
         cube_em *= np.sqrt(self.cube_flux) * self.phasor_tiled
-
         return cube_em
   
     def create_full_frame(self, subaps):
