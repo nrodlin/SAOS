@@ -38,10 +38,11 @@ class ShackHartmann:
                  lightRatio:float,
                  plate_scale:float,
                  fieldOfView:float,
+                 px_size_pupil:float,
                  guardPx:int,
                  fft_fieldOfView_oversampling:float=0,
                  zeroPadding:int=2,
-                 threshold_cog:float = 0.01,
+                 use_brightest:int = 50,
                  threshold_convolution:float = 0.05,
                  unit_in_rad = False,
                  logger=None):
@@ -63,14 +64,16 @@ class ShackHartmann:
             Plate scale of the WFS in [arcsec/px].
         fieldOfView : float
             Field of view of the WFS in [arcsec].
+        px_size_pupil : float
+            Pixel size t the entrance pupil in [m].
         guardPx : int
             Number of pixels between subapertures.
         fft_fieldOfView_oversampling : float, optional
             Extra FoV in [arcsec] that is taken for the FFT computation, in order to reduce wrapping effects.
         zeroPadding : int, optional
             Zero-padding factor while computing the FFT of the phase. By default is 2.
-        threshold_cog : float, optional
-            Threshold for center-of-gravity spot detection.
+        use_brightest : int, optional
+            Picks the n brightest pixels as threshold for center-of-gravity spot detection.
         is_geometric : bool, optional
             Enable geometric mode (gradient-based measurement).
         threshold_convolution : float, optional
@@ -106,14 +109,22 @@ class ShackHartmann:
         self.nSubap                         = nSubap
         self.lightRatio                     = lightRatio
         self.threshold_convolution          = threshold_convolution
-        self.threshold_cog                  = threshold_cog
+        self.use_brightest                  = use_brightest
         self.unit_in_rad                    = unit_in_rad
        
         # Subapeture definition
+        self.pixel_size_pupil           = px_size_pupil
         self.subaperture_size           = telescope.D / self.nSubap
         self.npix_lenslet               = int(np.round((self.fieldOfView + self.fft_fieldOfView_oversampling) / self.plate_scale))
         self.npix_subap                 = int(np.round(self.fieldOfView / self.plate_scale))
         self.npix_phase                 = telescope.resolution // self.nSubap
+
+        # The FFT is computed over a fixed window. Hence, when the number of subapertures varies, the slopes will vary despite not
+        # varying the input phase nor the plate scale. Therefore, to keep the proportions with the real system, we need to apply a 
+        # correction coefficient that is a scaling factor that automatically scales the input phase to the current WFS configuration 
+        # so that the results are physically comparable with those of the real system.
+        self.simulated_px_size            = self.subaperture_size / self.npix_lenslet 
+        self.subap_correction_coefficient = self.pixel_size_pupil / self.simulated_px_size
 
         # Detector camera 
 
@@ -196,8 +207,14 @@ class ShackHartmann:
         # number of valid lenslet
         self.nValidSubaperture = int(np.sum(self.valid_subapertures))
         
-        self.nSignal = 2*self.nValidSubaperture        
- 
+        self.nSignal = 2*self.nValidSubaperture     
+
+        # Circular pupil for the lenslets
+        x = np.linspace(-self.npix_lenslet/2, self.npix_lenslet/2, self.npix_lenslet)
+        xx, yy = np.meshgrid(x, x)
+        self.circular_pupil = xx**2 + yy**2 < ((self.npix_lenslet/2 + 1)/2)**2
+
+        # LGS spot   
         if self.is_LGS:
             self.get_convolution_spot(src) 
 
@@ -270,7 +287,7 @@ class ShackHartmann:
         
         self.print_properties()
 
-    def centroid(self, image, threshold=0.01):
+    def centroid(self, image, use_brightest=50):
         """
         Compute center of gravity for subaperture spots.
 
@@ -278,7 +295,7 @@ class ShackHartmann:
         ----------
         image : np.ndarray
             Subaperture image cube.
-        threshold : float, optional
+        use_brightest : float, optional
             Minimum intensity to include in centroid.
 
         Returns
@@ -288,9 +305,10 @@ class ShackHartmann:
         """
         im = np.atleast_3d(image.copy())
 
-        max_per_subap = im.max(axis=(1, 2), keepdims=True)
-        mask = im >= threshold * max_per_subap
-        im *= mask
+        threshold = np.partition(im.reshape(im.shape[0],-1), use_brightest, axis=-1)[:, -use_brightest]
+
+        # Filtering those value below the threshold
+        im[im<threshold[:,None,None]] = 0
 
         centroid_out         = np.zeros([im.shape[0],2])
         X_map, Y_map= np.meshgrid(np.arange(im.shape[1]),np.arange(im.shape[2]))
@@ -357,7 +375,6 @@ class ShackHartmann:
         """
         self.logger.debug('ShackHartmann::get_lenslet_em_field')
         # Rescale the phase
-        #phase_rescaled = cv2.resize(phase, (self.npix_lenslet*self.nSubap, self.npix_lenslet*self.nSubap), interpolation=cv2.INTER_LINEAR)    
         
         # Reshape the subapertures to a grid of subapertures. The sensor can be zeropadded, so the phase is filling the central part of the subaperture
         phase_reshaped = phase.reshape(self.nSubap, self.npix_phase, self.nSubap, self.npix_phase).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
@@ -366,13 +383,15 @@ class ShackHartmann:
         phase_rescaled_valids = torch.nn.functional.interpolate(torch.from_numpy(phase_reshaped[self.valid_subapertures_1D]).unsqueeze(1), size=(self.npix_lenslet, self.npix_lenslet), 
                                                          mode='bilinear', align_corners=True).squeeze(1).numpy()
         
+        phase_rescaled_valids *= self.subap_correction_coefficient
+        
         phase_rescaled = np.zeros((self.nSubap**2, self.npix_lenslet, self.npix_lenslet), dtype=float)
         phase_rescaled[self.valid_subapertures_1D] = phase_rescaled_valids
         # Apply the exponential to full matrix
-        cube_em = np.exp(1j * phase_rescaled)
+        cube_em = np.exp(1j * phase_rescaled) * self.circular_pupil
 
         # Apply light scaling
-        cube_em *= np.sqrt(self.cube_flux) * self.phasor_tiled
+        # cube_em *= np.sqrt(self.cube_flux) * self.phasor_tiled
         return cube_em
   
     def create_full_frame(self, subaps):
@@ -434,8 +453,6 @@ class ShackHartmann:
 
         center_offset_x = self.guardPx + (self.npix_lenslet // 2) - self.npix_subap//2
         center_offset_y = self.guardPx + (self.npix_lenslet // 2) - self.npix_subap//2
-
-        subap_offset = (self.npix_lenslet - self.npix_subap) // 2
 
         subaps = np.zeros((self.nValidSubaperture, self.npix_subap, self.npix_subap))
         
@@ -635,7 +652,7 @@ class ShackHartmann:
         subaps = self.get_subaps(noisy_frame)
 
         # compute the centroid on valid subaperture
-        centroid_lenslets = self.centroid(subaps, self.threshold_cog)
+        centroid_lenslets = self.centroid(subaps, self.use_brightest)
         
         # discard nan and inf values
         val_inf = np.where(np.isinf(centroid_lenslets))
@@ -702,7 +719,7 @@ class ShackHartmann:
 
         # compute spot intensity
         sp.fft.set_workers(self.nSubap)  # Use 1 thread per row of subapertures
-        I = (np.abs(sp.fft.fft2(np.asarray(self.get_lenslet_em_field(phase_in)), axes=[1,2]) / norma) ** 2)
+        I = np.abs(sp.fft.fftshift(sp.fft.fft2(np.asarray(self.get_lenslet_em_field(phase_in)), axes=[1,2]), axes=[1,2]) / norma) ** 2
 
         # reduce to valid subaperture
         I = I[self.valid_subapertures_1D,:,:]    
