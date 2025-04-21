@@ -153,7 +153,7 @@ class LightPath:
             self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
         else: # Avoid interacting with the atmosphere while the IM is being measured
             self.atmosphere_opd = 0
-        
+
         if self.dm is not None:
             nthreads = 1
 
