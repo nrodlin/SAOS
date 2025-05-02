@@ -376,12 +376,12 @@ class ShackHartmann:
         square_pupil = np.zeros((nFFT, nFFT), dtype=float)
         square_pupil[start:end, start:end] = 1.0
 
-
+        t0 = time.time()
         # Rescale the phase
         phase_rescaled = torch.nn.functional.interpolate(torch.from_numpy(phase).unsqueeze(0).unsqueeze(0), 
                                                          size=(self.nSubap*self.npix_phase, self.nSubap*self.npix_phase), 
                                                          mode='bilinear', align_corners=True).squeeze().numpy()
-        
+        t1 = time.time()
         # Reshape the subapertures to a grid of subapertures. The sensor can be zeropadded, so the phase is filling the central part of the subaperture
         phase_reshaped = np.zeros((self.nSubap**2, self.npix_phase+1, self.npix_phase+1), dtype=float)
         for i in range(self.nSubap):
@@ -413,14 +413,14 @@ class ShackHartmann:
                     f_interp = sp.interpolate.RegularGridInterpolator((y_orig, x_orig), window, bounds_error=False, fill_value=None)
                     phase_reshaped[i*self.nSubap+j, :, :] = f_interp(points).reshape(phase_reshaped.shape[1], phase_reshaped.shape[2])
 
-                
+        t2 = time.time()        
         # phase_reshaped = phase_rescaled.reshape(self.nSubap, self.npix_phase, self.nSubap, self.npix_phase).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
         #                                                                                                                          self.npix_phase, self.npix_phase)
         
         phase_rescaled_valids = torch.nn.functional.interpolate(torch.from_numpy(phase_reshaped[self.valid_subapertures_1D]).unsqueeze(1), 
                                                                 size=(self.npix_lenslet, self.npix_lenslet), 
                                                                 mode='bilinear', align_corners=True).squeeze(1).numpy()
-
+        t3 = time.time()
         # Generate an array of phase, filling the valid subapertures    
         rows = np.where(square_pupil.any(axis=1))[0]
         cols = np.where(square_pupil.any(axis=0))[0]
@@ -430,7 +430,7 @@ class ShackHartmann:
         
         # Apply the exponential to full matrix
         cube_em = square_pupil * np.exp(1j * phase_rescaled)
-
+        t4 = time.time()
         # Apply light scaling
         # cube_em *= np.sqrt(self.cube_flux) * self.phasor_tiled
 
@@ -439,7 +439,10 @@ class ShackHartmann:
 
         psf = np.abs(sp.fft.fftshift(sp.fft.fft2(cube_em, axes=[1,2]), axes=[1,2]) / nFFT**2) ** 2
         psf = psf[:, start:end, start:end]
-
+        t5 = time.time()
+        self.logger.info(f'ShackHartmann::get_psf - Time taken for each step: '
+                         f'phase rescale: {t1-t0:.4f}s, phase reshape: {t2-t1:.4f}s, phase interpolation: {t3-t2:.4f}s, '
+                         f'phase apply: {t4-t3:.4f}s, PSF computation: {t5-t4:.4f}s')
         return psf
   
     def create_full_frame(self, subaps):
