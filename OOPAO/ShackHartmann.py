@@ -119,12 +119,10 @@ class ShackHartmann:
         self.npix_subap                 = int(np.round(self.fieldOfView / self.plate_scale))
         self.npix_phase                 = telescope.resolution // self.nSubap
 
-        # The FFT is computed over a fixed window. Hence, when the number of subapertures varies, the slopes will vary despite not
-        # varying the input phase nor the plate scale. Therefore, to keep the proportions with the real system, we need to apply a 
-        # correction coefficient that is a scaling factor that automatically scales the input phase to the current WFS configuration 
-        # so that the results are physically comparable with those of the real system.
-        self.simulated_px_size            = self.subaperture_size / self.npix_lenslet 
-        self.subap_correction_coefficient = self.pixel_size_pupil / self.simulated_px_size
+        # Compensate the phase intensity due to the interpolation
+        self.pupil_interpolation_mask   = torch.nn.functional.interpolate(torch.from_numpy(telescope.pupil.astype(float)).unsqueeze(0).unsqueeze(0), 
+                                                                             size=(self.nSubap*self.npix_phase, self.nSubap*self.npix_phase), 
+                                                                             mode='bilinear', align_corners=True).squeeze().numpy()
 
         # Detector camera 
 
@@ -193,7 +191,7 @@ class ShackHartmann:
 
         for i in range(self.nSubap):
             for j in range(self.nSubap):
-                tmp_pupil = np.sum(telescope.pupil[i*self.npix_phase:(i+1)*self.npix_phase, 
+                tmp_pupil = np.sum(self.pupil_interpolation_mask[i*self.npix_phase:(i+1)*self.npix_phase, 
                                                    j*self.npix_phase:(j+1)*self.npix_phase]) / (self.npix_phase**2)
                 if tmp_pupil == 1: # Criteria: there are phase points at every point of the phase
                     self.valid_subapertures[i, j] = True
@@ -208,11 +206,6 @@ class ShackHartmann:
         self.nValidSubaperture = int(np.sum(self.valid_subapertures))
         
         self.nSignal = 2*self.nValidSubaperture     
-
-        # Circular pupil for the lenslets
-        x = np.linspace(-self.npix_lenslet/2, self.npix_lenslet/2, self.npix_lenslet)
-        xx, yy = np.meshgrid(x, x)
-        self.circular_pupil = xx**2 + yy**2 < ((self.npix_lenslet/2 + 1)/2)**2
 
         # LGS spot   
         if self.is_LGS:
@@ -305,7 +298,7 @@ class ShackHartmann:
         """
         im = np.atleast_3d(image.copy())
 
-        threshold = np.partition(im.reshape(im.shape[0],-1), use_brightest, axis=-1)[:, -use_brightest]
+        threshold = np.partition(im.reshape(im.shape[0],-1), np.prod(im[0,:,:].shape) - use_brightest, axis=-1)[:, -use_brightest]
 
         # Filtering those value below the threshold
         im[im<threshold[:,None,None]] = 0
@@ -359,7 +352,7 @@ class ShackHartmann:
     # by the complex phase to obtain the PSF per subaperture, as an array of dimensions (nSubap**2, n_pix_lenslet_init, n_pix_lenslet_init)
     # The subapertures are sorted from left to right, top to bottom.
 
-    def get_lenslet_em_field(self, phase):
+    def get_psf(self, phase, fwhm):
         """
         Get the electromagnetic field per subaperture based on input phase.
 
@@ -373,26 +366,81 @@ class ShackHartmann:
         np.ndarray
             Complex field per subaperture.
         """
-        self.logger.debug('ShackHartmann::get_lenslet_em_field')
+
+        self.logger.debug('ShackHartmann::get_psf')
+        # Get dimensions to keep the FWHM stable during the computation
+        nFFT = np.round(fwhm * self.npix_lenslet).astype(int)
+        # Define pupil
+        start = (nFFT - self.npix_lenslet) // 2
+        end = start + self.npix_lenslet
+        square_pupil = np.zeros((nFFT, nFFT), dtype=float)
+        square_pupil[start:end, start:end] = 1.0
+
+
         # Rescale the phase
+        phase_rescaled = torch.nn.functional.interpolate(torch.from_numpy(phase).unsqueeze(0).unsqueeze(0), 
+                                                         size=(self.nSubap*self.npix_phase, self.nSubap*self.npix_phase), 
+                                                         mode='bilinear', align_corners=True).squeeze().numpy()
         
         # Reshape the subapertures to a grid of subapertures. The sensor can be zeropadded, so the phase is filling the central part of the subaperture
-        phase_reshaped = phase.reshape(self.nSubap, self.npix_phase, self.nSubap, self.npix_phase).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
-                                                                                                                                 self.npix_phase, self.npix_phase)
+        phase_reshaped = np.zeros((self.nSubap**2, self.npix_phase+1, self.npix_phase+1), dtype=float)
+        for i in range(self.nSubap):
+            for j in range(self.nSubap):
+                start_x = i*self.npix_phase
+                start_y = j*self.npix_phase
+                if i == self.nSubap - 1:
+                    end_x = (i+1)*self.npix_phase
+                else:
+                    end_x = (i+1)*self.npix_phase + 1
+
+                if j == self.nSubap - 1:
+                    end_y = (j+1)*self.npix_phase
+                else:
+                    end_y = (j+1)*self.npix_phase + 1
+
+                window = phase_rescaled[start_x:end_x, start_y:end_y]
+
+                if (window.shape[0] == phase_reshaped.shape[1]) and (window.shape[1] == phase_reshaped.shape[2]):
+                    phase_reshaped[i*self.nSubap+j, :, :] = window
+                else:
+                    x_orig = np.linspace(0, window.shape[1]-1, window.shape[1])
+                    y_orig = np.linspace(0, window.shape[0]-1, window.shape[0])
+                    x_new = np.arange(phase_reshaped.shape[2]) 
+                    y_new = np.arange(phase_reshaped.shape[1])
+
+                    points = np.array([(yi, xi) for yi in y_new for xi in x_new])
+
+                    f_interp = sp.interpolate.RegularGridInterpolator((y_orig, x_orig), window, bounds_error=False, fill_value=None)
+                    phase_reshaped[i*self.nSubap+j, :, :] = f_interp(points).reshape(phase_reshaped.shape[1], phase_reshaped.shape[2])
+
+                
+        # phase_reshaped = phase_rescaled.reshape(self.nSubap, self.npix_phase, self.nSubap, self.npix_phase).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
+        #                                                                                                                          self.npix_phase, self.npix_phase)
         
-        phase_rescaled_valids = torch.nn.functional.interpolate(torch.from_numpy(phase_reshaped[self.valid_subapertures_1D]).unsqueeze(1), size=(self.npix_lenslet, self.npix_lenslet), 
-                                                         mode='bilinear', align_corners=True).squeeze(1).numpy()
+        phase_rescaled_valids = torch.nn.functional.interpolate(torch.from_numpy(phase_reshaped[self.valid_subapertures_1D]).unsqueeze(1), 
+                                                                size=(self.npix_lenslet, self.npix_lenslet), 
+                                                                mode='bilinear', align_corners=True).squeeze(1).numpy()
+
+        # Generate an array of phase, filling the valid subapertures    
+        rows = np.where(square_pupil.any(axis=1))[0]
+        cols = np.where(square_pupil.any(axis=0))[0]
+
+        phase_rescaled = np.zeros((self.nSubap**2, nFFT, nFFT), dtype=float)
+        phase_rescaled[np.ix_(self.valid_subapertures_1D,rows,cols)] = phase_rescaled_valids
         
-        phase_rescaled_valids *= self.subap_correction_coefficient
-        
-        phase_rescaled = np.zeros((self.nSubap**2, self.npix_lenslet, self.npix_lenslet), dtype=float)
-        phase_rescaled[self.valid_subapertures_1D] = phase_rescaled_valids
         # Apply the exponential to full matrix
-        cube_em = np.exp(1j * phase_rescaled) * self.circular_pupil
+        cube_em = square_pupil * np.exp(1j * phase_rescaled)
 
         # Apply light scaling
         # cube_em *= np.sqrt(self.cube_flux) * self.phasor_tiled
-        return cube_em
+
+        # Get the PSF
+        sp.fft.set_workers(self.nSubap)  # Use 1 thread per row of subapertures
+
+        psf = np.abs(sp.fft.fftshift(sp.fft.fft2(cube_em, axes=[1,2]), axes=[1,2]) / nFFT**2) ** 2
+        psf = psf[:, start:end, start:end]
+
+        return psf
   
     def create_full_frame(self, subaps):
         """
@@ -711,15 +759,10 @@ class ShackHartmann:
             self.logger.info('ShackHartmann::wfs_measure - Number of photons changed, updating flux on subaps')
             self.initialize_flux(src, self.norm_flux)   
         
-        # Diffractive applies the phase and compute the Fourier transformed object, later applying a centroid algorithm.
-        # Geometric computes the slope directly from the phase points, which reduces the execution time, though it is less realistic
-
-        # normalization for FFT
-        norma = self.cube.shape[1]
-
-        # compute spot intensity
-        sp.fft.set_workers(self.nSubap)  # Use 1 thread per row of subapertures
-        I = np.abs(sp.fft.fftshift(sp.fft.fft2(np.asarray(self.get_lenslet_em_field(phase_in)), axes=[1,2]), axes=[1,2]) / norma) ** 2
+        # compute fwhm
+        fwhm = src.wavelength * 206265 / (self.subaperture_size * self.plate_scale)
+        # compute the PSF intensity
+        I = self.get_psf(phase_in, fwhm)
 
         # reduce to valid subaperture
         I = I[self.valid_subapertures_1D,:,:]    
