@@ -360,6 +360,9 @@ class ShackHartmann:
         ----------
         phase : np.ndarray
             Wavefront phase in radians.
+        fwhm : float
+            Full width at half maximum for the PSF in [px].
+        
 
         Returns
         -------
@@ -378,71 +381,76 @@ class ShackHartmann:
 
         t0 = time.time()
         # Rescale the phase
-        phase_rescaled = torch.nn.functional.interpolate(torch.from_numpy(phase).unsqueeze(0).unsqueeze(0), 
-                                                         size=(self.nSubap*self.npix_phase, self.nSubap*self.npix_phase), 
-                                                         mode='bilinear', align_corners=True).squeeze().numpy()
+        input_phase_torch = torch.from_numpy(phase).contiguous()
+        square_pupil_torch = torch.from_numpy(square_pupil).contiguous()
+
+        phase_rescaled = torch.nn.functional.interpolate(input_phase_torch.unsqueeze(0).unsqueeze(0), 
+                                                            size=(self.nSubap*self.npix_phase, self.nSubap*self.npix_phase), 
+                                                            mode='bilinear', align_corners=True).squeeze().contiguous()
         t1 = time.time()
         # Reshape the subapertures to a grid of subapertures. The sensor can be zeropadded, so the phase is filling the central part of the subaperture
-        phase_reshaped = np.zeros((self.nSubap**2, self.npix_phase+1, self.npix_phase+1), dtype=float)
-        for i in range(self.nSubap):
-            for j in range(self.nSubap):
-                start_x = i*self.npix_phase
-                start_y = j*self.npix_phase
-                if i == self.nSubap - 1:
-                    end_x = (i+1)*self.npix_phase
-                else:
-                    end_x = (i+1)*self.npix_phase + 1
+        phase_reshaped = torch.empty((self.nSubap**2, self.npix_phase+1, self.npix_phase+1), dtype=torch.float32).contiguous()
 
-                if j == self.nSubap - 1:
-                    end_y = (j+1)*self.npix_phase
-                else:
-                    end_y = (j+1)*self.npix_phase + 1
+        H, W = phase_rescaled.shape
 
-                window = phase_rescaled[start_x:end_x, start_y:end_y]
+        # Build row indices
+        row_ids = torch.arange(H)
+        insert_rows = (row_ids % self.npix_phase == 0) & (row_ids < H - 2) & (row_ids > 0) | (row_ids == (H - self.npix_phase -1))
+        extra_rows = row_ids[insert_rows]
+        row_idx = torch.cat([row_ids, extra_rows]).sort().values
+        row_idx[-self.npix_phase-2:-self.npix_phase] = row_idx[-self.npix_phase-2:-self.npix_phase].flip(0)
 
-                if (window.shape[0] == phase_reshaped.shape[1]) and (window.shape[1] == phase_reshaped.shape[2]):
-                    phase_reshaped[i*self.nSubap+j, :, :] = window
-                else:
-                    x_orig = np.linspace(0, window.shape[1]-1, window.shape[1])
-                    y_orig = np.linspace(0, window.shape[0]-1, window.shape[0])
-                    x_new = np.arange(phase_reshaped.shape[2]) 
-                    y_new = np.arange(phase_reshaped.shape[1])
+        # Build column indices
+        col_ids = torch.arange(H)
+        insert_cols = (col_ids % self.npix_phase == 0) & (col_ids < H - 2) & (col_ids > 0) | (col_ids == (H - self.npix_phase -1))
+        extra_cols = col_ids[insert_cols]
+        col_idx = torch.cat([col_ids, extra_cols]).sort().values
+        col_idx[-self.npix_phase-2:-self.npix_phase] = col_idx[-self.npix_phase-2:-self.npix_phase].flip(0)
 
-                    points = np.array([(yi, xi) for yi in y_new for xi in x_new])
+        # Apply advanced indexing
+        phase_reshaped = phase_rescaled[row_idx][:, col_idx].view(self.nSubap, self.npix_phase+1, 
+                                                                  self.nSubap, self.npix_phase+1).permute(0, 2, 1, 3).reshape(self.nSubap * self.nSubap, 
+                                                                                                                              self.npix_phase+1, self.npix_phase+1)
 
-                    f_interp = sp.interpolate.RegularGridInterpolator((y_orig, x_orig), window, bounds_error=False, fill_value=None)
-                    phase_reshaped[i*self.nSubap+j, :, :] = f_interp(points).reshape(phase_reshaped.shape[1], phase_reshaped.shape[2])
 
         t2 = time.time()        
-        # phase_reshaped = phase_rescaled.reshape(self.nSubap, self.npix_phase, self.nSubap, self.npix_phase).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
-        #                                                                                                                          self.npix_phase, self.npix_phase)
-        
-        phase_rescaled_valids = torch.nn.functional.interpolate(torch.from_numpy(phase_reshaped[self.valid_subapertures_1D]).unsqueeze(1), 
+        phase_rescaled_valids = torch.nn.functional.interpolate(phase_reshaped.unsqueeze(1), 
                                                                 size=(self.npix_lenslet, self.npix_lenslet), 
-                                                                mode='bilinear', align_corners=True).squeeze(1).numpy()
+                                                                mode='bilinear', align_corners=True).squeeze(1).contiguous().float()
         t3 = time.time()
-        # Generate an array of phase, filling the valid subapertures    
-        rows = np.where(square_pupil.any(axis=1))[0]
-        cols = np.where(square_pupil.any(axis=0))[0]
+        # Generate an array of phase, filling the valid subapertures  
+        rows = torch.where(square_pupil_torch.any(dim=1))[0]
+        cols = torch.where(square_pupil_torch.any(dim=0))[0]
 
-        phase_rescaled = np.zeros((self.nSubap**2, nFFT, nFFT), dtype=float)
-        phase_rescaled[np.ix_(self.valid_subapertures_1D,rows,cols)] = phase_rescaled_valids
-        
-        # Apply the exponential to full matrix
-        cube_em = square_pupil * np.exp(1j * phase_rescaled)
-        t4 = time.time()
+        row_start, row_end = rows[0].item(), rows[-1].item() + 1
+        col_start, col_end = cols[0].item(), cols[-1].item() + 1
+        # Allocate full tensor
+        cube_em = torch.zeros((self.nSubap**2, nFFT, nFFT), dtype=torch.complex64)
+        sub_mask = square_pupil_torch[row_start:row_end, col_start:col_end].float()
+        # Exponential
+        real = torch.cos(phase_rescaled_valids)
+        imag = torch.sin(phase_rescaled_valids)
+        exp_block = sub_mask * (real + 1j * imag)
+
+        cube_em[:, row_start:row_end, col_start:col_end] = exp_block
         # Apply light scaling
-        # cube_em *= np.sqrt(self.cube_flux) * self.phasor_tiled
-
+        # cube_em *= np.sqrt(cube_flux) * phasor_tiled
+        t4 = time.time()
         # Get the PSF
-        sp.fft.set_workers(self.nSubap)  # Use 1 thread per row of subapertures
+        psf = torch.fft.fft2(cube_em, dim=(-2, -1), norm='forward')  # same as dividing by nFFT²
 
-        psf = np.abs(sp.fft.fftshift(sp.fft.fft2(cube_em, axes=[1,2]), axes=[1,2]) / nFFT**2) ** 2
-        psf = psf[:, start:end, start:end]
+        # Shift zero frequency to center
+        psf = torch.fft.fftshift(psf, dim=(-2, -1))
+
+        # Compute normalized intensity
+        psf = torch.abs(psf) ** 2
+        # Crop to desired region
+        psf = psf[:, start:end, start:end].numpy()
         t5 = time.time()
+        
         self.logger.info(f'ShackHartmann::get_psf - Time taken for each step: '
-                         f'phase rescale: {t1-t0:.4f}s, phase reshape: {t2-t1:.4f}s, phase interpolation: {t3-t2:.4f}s, '
-                         f'phase apply: {t4-t3:.4f}s, PSF computation: {t5-t4:.4f}s')
+                         f'Rescale input phase: {t1-t0} [s], Reshape into subaps: {t2-t1} [s], Interpolate to npix_lenslet: {t3-t2} [s], '
+                         f'Compute exponential: {t4-t3} [s], PSF: {t5-t4} [s], Total processing time: {t5-t0}')
         return psf
   
     def create_full_frame(self, subaps):
