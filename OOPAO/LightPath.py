@@ -62,6 +62,7 @@ class LightPath:
         
         # Science variables
         self.sci_frame = None
+        self.decimation_counter = 0
 
     # An optical path is defiend, at least, by the source object emitting the light, the atmosphere and the telescope.
     # Optionally, the telescope can have deformable mirror(s), a wavefront sensor, ncpa and a science camera
@@ -202,7 +203,9 @@ class LightPath:
 
         # Generate the Science frame, if defined
         if self.sci is not None:
-            self.sci_frame = self.sci.get_frame(self.src, self.sci_phase)
+            self.decimation_counter += 1
+            if (self.decimation_counter % self.sci.decimation) == 0:
+                self.sci_frame = self.sci.get_frame(self.src, self.sci_phase)
         
         return True
     

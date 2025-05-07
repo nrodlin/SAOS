@@ -31,6 +31,7 @@ class ScienceCam:
                  telescope,
                  fft_zero_padding:int=2,
                  integrationTime:float=None,
+                 decimation:int=50,
                  logger=None):
         
         if logger is None:
@@ -45,6 +46,7 @@ class ScienceCam:
         self.plate_scale      = plate_scale
         self.fft_zero_padding = fft_zero_padding
         self.samplingTime     = samplingTime
+        self.decimation       = decimation
 
         if integrationTime is None:
             self.integrationTime = self.samplingTime
