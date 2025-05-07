@@ -38,10 +38,8 @@ class ShackHartmann:
                  lightRatio:float,
                  plate_scale:float,
                  fieldOfView:float,
-                 px_size_pupil:float,
                  guardPx:int,
                  fft_fieldOfView_oversampling:float=0,
-                 zeroPadding:int=2,
                  use_brightest:int = 50,
                  threshold_convolution:float = 0.05,
                  unit_in_rad = False,
@@ -64,14 +62,10 @@ class ShackHartmann:
             Plate scale of the WFS in [arcsec/px].
         fieldOfView : float
             Field of view of the WFS in [arcsec].
-        px_size_pupil : float
-            Pixel size t the entrance pupil in [m].
         guardPx : int
             Number of pixels between subapertures.
         fft_fieldOfView_oversampling : float, optional
             Extra FoV in [arcsec] that is taken for the FFT computation, in order to reduce wrapping effects.
-        zeroPadding : int, optional
-            Zero-padding factor while computing the FFT of the phase. By default is 2.
         use_brightest : int, optional
             Picks the n brightest pixels as threshold for center-of-gravity spot detection.
         is_geometric : bool, optional
@@ -104,7 +98,6 @@ class ShackHartmann:
         self.guardPx                        = guardPx
 
         self.fft_fieldOfView_oversampling   = fft_fieldOfView_oversampling
-        self.zero_padding                   = zeroPadding
 
         self.nSubap                         = nSubap
         self.lightRatio                     = lightRatio
@@ -113,7 +106,6 @@ class ShackHartmann:
         self.unit_in_rad                    = unit_in_rad
        
         # Subapeture definition
-        self.pixel_size_pupil           = px_size_pupil
         self.subaperture_size           = telescope.D / self.nSubap
         self.npix_lenslet               = int(np.round((self.fieldOfView + self.fft_fieldOfView_oversampling) / self.plate_scale))
         self.npix_subap                 = int(np.round(self.fieldOfView / self.plate_scale))
@@ -372,6 +364,8 @@ class ShackHartmann:
 
         self.logger.debug('ShackHartmann::get_psf')
         # Get dimensions to keep the FWHM stable during the computation
+        if fwhm < 1:
+            raise ValueError('FWHM must be greater than 2 to guarantee enough spatial sampling.')
         nFFT = np.round(fwhm * self.npix_lenslet).astype(int)
         # Define pupil
         start = (nFFT - self.npix_lenslet) // 2
@@ -448,7 +442,7 @@ class ShackHartmann:
         psf = psf[:, start:end, start:end].numpy()
         t5 = time.time()
         
-        self.logger.info(f'ShackHartmann::get_psf - Time taken for each step: '
+        self.logger.debug(f'ShackHartmann::get_psf - Time taken for each step: '
                          f'Rescale input phase: {t1-t0} [s], Reshape into subaps: {t2-t1} [s], Interpolate to npix_lenslet: {t3-t2} [s], '
                          f'Compute exponential: {t4-t3} [s], PSF: {t5-t4} [s], Total processing time: {t5-t0}')
         return psf
