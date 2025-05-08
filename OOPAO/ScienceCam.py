@@ -10,7 +10,6 @@ from queue import Queue
 
 import numpy as np
 import torch
-import cv2
 
 from joblib import delayed, Parallel
 
@@ -33,7 +32,28 @@ class ScienceCam:
                  integrationTime:float=None,
                  decimation:int=50,
                  logger=None):
-        
+        """
+        Initialize a ScienceCam object to simulate a science camera in adaptive optics simulations.
+
+        Parameters
+        ----------
+        fieldOfView : float
+            Field of view in arcseconds.
+        plate_scale : float
+            Plate scale in arcseconds per pixel.
+        samplingTime : float
+            Time interval between frames [s].
+        telescope : Telescope
+            Associated telescope object.
+        fft_zero_padding : int, optional
+            Zero-padding factor for FFT operations. Default is 2.
+        integrationTime : float, optional
+            Integration time in seconds. Defaults to samplingTime.
+        decimation : int, optional
+            Decimation factor for storing results. Default is 50.
+        logger : logging.Logger, optional
+            Logger instance for diagnostics.
+        """        
         if logger is None:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
@@ -56,7 +76,7 @@ class ScienceCam:
                 self.logger.warning('ScienceCam::init - Currently, integration a period longer than the sampling time is not supported due to parallelization conflicts.')
         
         self.nPix = int(np.round(self.fieldOfView / self.plate_scale))
-
+        self.telescope_diameter = telescope.D
         self.pupil = telescope.pupil.copy().astype(float)
 
         # TODO: Add noise during the initialization
@@ -65,31 +85,46 @@ class ScienceCam:
                              self.samplingTime, logger=self.logger)
 
     def get_frame(self, src, phase):
+        """
+        Generate a science camera frame based on the input phase and source object.
+
+        Parameters
+        ----------
+        src : Source
+            Input source object, either a point source or extended source (e.g., Sun).
+        phase : np.ndarray
+            Optical phase at the science detector.
+
+        Returns
+        -------
+        np.ndarray
+            Final science frame with detector effects.
+        """
+        fwhm = (src.wavelength / self.telescope_diameter) * (206265 / self.plate_scale)
+
         if src.tag == 'source':
-            coherence = self.compute_psf(phase, self.nPix)
+            psf = self.compute_psf(phase, fwhm)
             
-            frame = self.cam.integrate(coherence.detach().numpy()) # The coherence is the PSF because the object is a point-source
+            frame = self.cam.integrate(psf.detach().numpy()) # The coherence is the PSF because the object is a point-source
         
         elif src.tag == 'sun':
             list_phase = [phase[i, :, :] for i in range(phase.shape[0])]
             
-            npix = src.subDirs_sun.shape[0]
+            # Compute in parallel the PSF for each subdir --> shape matches that of the source, using the camera plate scale
+            psf = Parallel(n_jobs=1, prefer='threads')(delayed(self.compute_psf)(list_phase[i], fwhm, src.subDirs_sun.shape[0]) for i in range(len(list_phase)))
 
-            # Compute in parallel the PSF for each subdir
-            coherence = Parallel(n_jobs=1, prefer='threads')(delayed(self.compute_psf)(list_phase[i], npix) for i in range(len(list_phase)))
+            # Convolute in parallel the PSF of each subDir with the sun patch of that subdir
+            # This is faster than compute the FFT2 over 3D tensors and avoid looping, at least on CPU
+            sun_patches = Parallel(n_jobs=1, prefer='threads')(delayed(self.compute_image)(src.subDirs_sun[:,:,i//src.nSubDirs, i%src.nSubDirs], psf[i]) 
+                                                           for i in range(len(list_phase))) 
 
-            # Convolute in prallel the PSF of each subDir with the sun patch of that subdir
-
-            sun_patches = Parallel(n_jobs=1, prefer='threads')(delayed(self.compute_image)(src.subDirs_sun[:,:,i//src.nSubDirs, i%src.nSubDirs], coherence[i], npix) 
-                                                           for i in range(len(list_phase)))
-            
             # Combine the sun patches into a unique PSF
 
             sun_PSF_combined = torch.zeros(np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), 
-                                           np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int))
+                                           np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), dtype=torch.float32).contiguous()
             
             sun_psf_tmp_3D = torch.zeros((np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), 
-                                          np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), src.nSubDirs*src.nSubDirs))
+                                          np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), src.nSubDirs*src.nSubDirs), dtype=torch.float32).contiguous()
 
             for i in range(len(sun_patches)):
                 dirX = i//src.nSubDirs
@@ -101,7 +136,7 @@ class ScienceCam:
                 gcorner_x_end = gcorner_x + np.round((src.subDirs_coordinates[2,0,0])/(self.plate_scale)).astype(int)
                 gcorner_y_end = gcorner_y + np.round((src.subDirs_coordinates[2,0,0])/(self.plate_scale)).astype(int)
 
-                start = npix//2 - src.filter_2D.shape[0]//2
+                start = self.nPix//2 - src.filter_2D.shape[0]//2
                 
                 sun_psf_tmp_3D[gcorner_x:gcorner_x_end, gcorner_y:gcorner_y_end, i] = sun_patches[i][start:start+src.filter_2D.shape[0], 
                                                                                                      start:start+src.filter_2D.shape[0]] * src.filter_2D[:,:,i//src.nSubDirs, i%src.nSubDirs]
@@ -124,40 +159,93 @@ class ScienceCam:
         
         return frame
     
-    def compute_psf(self, phase, npix):
+    def compute_psf(self, phase, fwhm, nPix=None):
+        """
+        Compute the PSF from a given phase map using FFT.
 
-        phase_torch = torch.from_numpy(cv2.resize(phase, (npix, npix), interpolation=cv2.INTER_LINEAR))
+        Parameters
+        ----------
+        phase : np.ndarray
+            Phase input in radians.
+        fwhm : float
+            Full width at half maximum in arcsec.
+        nPix : int, optional
+            Image size in pixels. If None, uses camera's resolution.
 
-        pupil_torch = torch.from_numpy(cv2.resize(self.pupil, (npix, npix), interpolation=cv2.INTER_LINEAR))
+        Returns
+        -------
+        torch.Tensor
+            Normalized PSF.
+        """
+        if nPix is None:
+            nPix = self.nPix
+        # Compute FFT image size
+        if fwhm < 1:
+            raise ValueError('FWHM must be greater than 2 to guarantee enough spatial sampling.')
+        nFFT = np.round(fwhm * nPix).astype(int)
 
-        psf_zeropadded = torch.abs(torch.fft.fftshift(torch.fft.fft2(pupil_torch * torch.exp(1j * phase_torch), 
-                                                 s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='forward')))
+        # Rescaled phase and pupil
+        phase_torch = torch.from_numpy(phase).contiguous()
+        pupil_torch = torch.from_numpy(self.pupil).contiguous()
+
+        phase_rescaled = torch.nn.functional.interpolate(phase_torch.unsqueeze(0).unsqueeze(0), size=(nPix, nPix), 
+                                                         mode='bilinear', align_corners=True).squeeze().contiguous()
+        pupil_rescaled = torch.nn.functional.interpolate(pupil_torch.unsqueeze(0).unsqueeze(0), size=(nPix, nPix), 
+                                                         mode='bilinear', align_corners=True).squeeze().contiguous()
+        # Fill Phase image, zeropadded to get to the dimensions of nFFT
+        # Define pupil
+        start = (nFFT - nPix) // 2
+        end = start + nPix
+        square_pupil = np.zeros((nFFT, nFFT), dtype=float)
+        square_pupil[start:end, start:end] = pupil_rescaled
+
+        # Phase torch
+        exp_phase = torch.zeros((nFFT, nFFT), dtype=torch.complex64).contiguous()
+
+        real = torch.cos(phase_rescaled)
+        imag = torch.sin(phase_rescaled)
         
-        start = psf_zeropadded.shape[0]//2 - npix//2
-        psf_nopad = psf_zeropadded[start:start+npix, start:start+npix]
-        return psf_nopad / torch.max(psf_nopad)
+        exp_phase[start:end, start:end] = pupil_rescaled * (real + 1j * imag)
+
+        # Compute PSF
+        psf = torch.fft.fft2(exp_phase, dim=(0, 1), norm='forward').contiguous()  # same as dividing by nFFT²
+
+        # Shift zero frequency to center
+        psf = torch.fft.fftshift(psf, dim=(0, 1))
+
+        # Compute normalized intensity
+        psf = torch.abs(psf) ** 2
+
+        return psf[start:end, start:end].contiguous()  # Crop the PSF to the original size
     
-    def compute_image(self, object, coherence, npix):
-        
-        object_torch = torch.from_numpy(object.copy())
+    def compute_image(self, sci_object, coherence):
+        """
+        Compute the convolved image from an object and a PSF.
+
+        Parameters
+        ----------
+        sci_object : np.ndarray
+            Intensity map of the object.
+        coherence : torch.Tensor
+            PSF to convolve with the object.
+
+        Returns
+        -------
+        torch.Tensor
+            Final image after convolution.
+        """        
+        object_torch = torch.from_numpy(sci_object).contiguous()        
 
         # Compute FFT2
 
-        object_fft    = torch.fft.fft2(object_torch, s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='backward')
-        coherence_fft = torch.fft.fft2(coherence, s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='backward')
+        object_fft    = torch.fft.fft2(object_torch, norm='forward', dim=(0,1))
+        coherence_fft = torch.fft.fft2(coherence, norm='forward', dim=(0,1))
 
         # Convolute
 
-        image_zeropadded = torch.abs(torch.fft.ifft2(object_fft*coherence_fft, s=(npix*self.fft_zero_padding, npix*self.fft_zero_padding), norm='backward'))
+        image = torch.abs(torch.fft.fftshift(torch.fft.ifft2(object_fft*coherence_fft, norm='forward', dim=(0,1)), dim=(0,1)))
 
-        start = image_zeropadded.shape[0]//2 - npix//2
-
-        image_nopad = image_zeropadded[start:start+npix, start:start+npix]
-
-
-        return image_nopad / torch.max(image_nopad)
-        
-        
+        return image
 
     def setup_logging(self, logging_level=logging.WARNING):
         #  Setup of logging at the main process using QueueHandler
