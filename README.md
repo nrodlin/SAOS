@@ -1,6 +1,3 @@
-                                            ![ChatGPT Image 8 may 2025, 13_04_52](https://github.com/user-attachments/assets/eaaa1d55-5204-489e-977d-ffdb4aa11d7d)
-
-
 # SAOS: Solar Adaptive Optics Simulator 🌞🔭
 
 **SAOS** is a new simulator designed to support Solar Adaptive Optics simulations. Its core structure and modular philosophy are based on **OOPAO** (Object Oriented Python Adaptive Optics), created by Cédric Taïssir Héritier. You can find the original project here: [OOPAO GitHub Repository](https://github.com/cheritier/OOPAO/tree/master).
