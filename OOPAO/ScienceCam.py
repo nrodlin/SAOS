@@ -147,8 +147,8 @@ class ScienceCam:
             
             offset = np.round(src.patch_padding/(2*self.plate_scale)).astype(int)
 
-            frame = sun_PSF_combined[offset:np.round(offset+(src.fov/src.img_PS)).astype(int), 
-                                                    offset:np.round(offset+(src.fov/self.plate_scale)).astype(int)].detach().numpy()
+            frame = sun_PSF_combined[offset:np.round(offset+(src.fov/self.plate_scale)).astype(int), 
+                                     offset:np.round(offset+(src.fov/self.plate_scale)).astype(int)].detach().numpy()
             
             # Add detector noise
 
