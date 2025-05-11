@@ -100,6 +100,7 @@ class ScienceCam:
         np.ndarray
             Final science frame with detector effects.
         """
+        
         fwhm = (src.wavelength / self.telescope_diameter) * (206265 / self.plate_scale)
 
         if src.tag == 'source':
@@ -108,16 +109,32 @@ class ScienceCam:
             frame = self.cam.integrate(psf.detach().numpy()) # The coherence is the PSF because the object is a point-source
         
         elif src.tag == 'sun':
+            if src.fov < self.fieldOfView:
+                raise ValueError('ScienceCam::get_frame - The source FoV is smaller than the camera FoV.')
+            
             list_phase = [phase[i, :, :] for i in range(phase.shape[0])]
             
+            # Interpolate sun subDirs to the adequate size given the camera PS
+            subDirs_torch = torch.from_numpy(src.subDirs_sun).contiguous()
+            subDirs_torch = subDirs_torch.view(subDirs_torch.shape[0], subDirs_torch.shape[1], -1).permute(2, 0, 1)
+            new_size = np.round((src.subDirs_coordinates[2,0,0]+src.subDir_margin)/self.plate_scale).astype(int)
+            subDirs_torch = torch.nn.functional.interpolate(subDirs_torch.unsqueeze(0), size=(new_size, new_size), 
+                                                            mode='bilinear', align_corners=True).squeeze(0).contiguous()  
+                      
             # Compute in parallel the PSF for each subdir --> shape matches that of the source, using the camera plate scale
-            psf = Parallel(n_jobs=1, prefer='threads')(delayed(self.compute_psf)(list_phase[i], fwhm, src.subDirs_sun.shape[0]) for i in range(len(list_phase)))
-
+            psf = Parallel(n_jobs=1, prefer='threads')(delayed(self.compute_psf)(list_phase[i], fwhm, subDirs_torch.shape[2]) for i in range(len(list_phase)))
+            
             # Convolute in parallel the PSF of each subDir with the sun patch of that subdir
             # This is faster than compute the FFT2 over 3D tensors and avoid looping, at least on CPU
-            sun_patches = Parallel(n_jobs=1, prefer='threads')(delayed(self.compute_image)(src.subDirs_sun[:,:,i//src.nSubDirs, i%src.nSubDirs], psf[i]) 
+            sun_patches = Parallel(n_jobs=1, prefer='threads')(delayed(self.compute_image)(subDirs_torch[i,:,:], psf[i]) 
                                                            for i in range(len(list_phase))) 
-
+            
+            # Resize the 2D filter
+            filter_2D_torch = torch.from_numpy(src.filter_2D).contiguous()
+            filter_2D_torch = filter_2D_torch.view(filter_2D_torch.shape[0], filter_2D_torch.shape[1], -1).permute(2, 0, 1)
+            new_size = np.round(src.subDirs_coordinates[2,0,0]/self.plate_scale).astype(int)
+            filter_2D_torch = torch.nn.functional.interpolate(filter_2D_torch.unsqueeze(0), size=(new_size, new_size), 
+                                                            mode='bilinear', align_corners=True).squeeze(0).contiguous()
             # Combine the sun patches into a unique PSF
 
             sun_PSF_combined = torch.zeros(np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), 
@@ -126,6 +143,11 @@ class ScienceCam:
             sun_psf_tmp_3D = torch.zeros((np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), 
                                           np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), src.nSubDirs*src.nSubDirs), dtype=torch.float32).contiguous()
 
+            # The small gain corrector is used to normalize the filter after it was interpolated so that differences below 1-2% can be compensated
+            small_gain_corrector = torch.zeros((np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), 
+                                                np.round((src.fov+src.patch_padding)/self.plate_scale).astype(int), 
+                                                src.nSubDirs*src.nSubDirs), dtype=torch.float32).contiguous()
+            
             for i in range(len(sun_patches)):
                 dirX = i//src.nSubDirs
                 dirY = i%src.nSubDirs
@@ -136,19 +158,19 @@ class ScienceCam:
                 gcorner_x_end = gcorner_x + np.round((src.subDirs_coordinates[2,0,0])/(self.plate_scale)).astype(int)
                 gcorner_y_end = gcorner_y + np.round((src.subDirs_coordinates[2,0,0])/(self.plate_scale)).astype(int)
 
-                start = self.nPix//2 - src.filter_2D.shape[0]//2
+                start = sun_patches[i].shape[0]//2 - filter_2D_torch.shape[1]//2
                 
-                sun_psf_tmp_3D[gcorner_x:gcorner_x_end, gcorner_y:gcorner_y_end, i] = sun_patches[i][start:start+src.filter_2D.shape[0], 
-                                                                                                     start:start+src.filter_2D.shape[0]] * src.filter_2D[:,:,i//src.nSubDirs, i%src.nSubDirs]
+                sun_psf_tmp_3D[gcorner_x:gcorner_x_end, gcorner_y:gcorner_y_end, i] = filter_2D_torch[i,:,:] * sun_patches[i][start:start+filter_2D_torch.shape[1], 
+                                                                                                                              start:start+filter_2D_torch.shape[1]]
+                
+                small_gain_corrector[gcorner_x:gcorner_x_end, gcorner_y:gcorner_y_end, i] = filter_2D_torch[i,:,:]
             
-            # Crop the external region, which might be affected by the windowing effect.
-            # The patch is larger so that the final crop matches the FoV of the object.
-            sun_PSF_combined = torch.sum(sun_psf_tmp_3D,axis=2)
+            # Crop the region of interest
+            sun_PSF_combined = torch.sum(sun_psf_tmp_3D,axis=2) / torch.sum(small_gain_corrector,axis=2)
             
-            offset = np.round(src.patch_padding/(2*self.plate_scale)).astype(int)
+            offset = sun_patches[0].shape[0]//2 - self.nPix//2
 
-            frame = sun_PSF_combined[offset:np.round(offset+(src.fov/self.plate_scale)).astype(int), 
-                                     offset:np.round(offset+(src.fov/self.plate_scale)).astype(int)].detach().numpy()
+            frame = sun_PSF_combined[offset:offset+self.nPix, offset:offset+self.nPix].detach().numpy()
             
             # Add detector noise
 
@@ -234,7 +256,7 @@ class ScienceCam:
         torch.Tensor
             Final image after convolution.
         """        
-        object_torch = torch.from_numpy(sci_object).contiguous()        
+        object_torch = sci_object.contiguous()
 
         # Compute FFT2
 
