@@ -11,7 +11,6 @@ Major update on March 24 2025
 
 import numpy as np
 import torch
-import cv2
 import scipy as sp
 from joblib import Parallel, delayed
 
@@ -379,6 +378,9 @@ class DeformableMirror:
         
         else: # NGS and Sun types can be handled equally. The sun is simplified, only considering the projection of the centrar subdir
             output_OPD = OPD * self.dm_layer.pupil
+
+        if source.tag == 'sun':
+            output_OPD = np.repeat(output_OPD[:,:,np.newaxis], source.nSubDirs**2, axis=2)
 
         output_phase = output_OPD * (2*np.pi / source.wavelength)       
 
