@@ -223,7 +223,7 @@ class CorrelatingShackHartmann:
         self.slopes_units           = 1
 
         self.logger.info('CorrelatingShackHartmann::initialize_wfs - Acquiring reference slopes..')
-        null_phase = np.zeros((telescope.resolution, telescope.resolution, src.nSubDirs**2))       
+        null_phase = np.zeros((src.nSubDirs**2, telescope.resolution, telescope.resolution))       
         self.pseudoref = None 
         _, self.reference_slopes_maps,_ = self.wfs_measure(null_phase, src)        
         self.isInitialized = True
@@ -243,11 +243,11 @@ class CorrelatingShackHartmann:
 
             for i in range(len(amp_list)):
                 calibration_phase_tip = amp_list[i]*Tip*telescope.pupil
-                calibration_phase_tip = np.repeat(calibration_phase_tip[:,:,np.newaxis], src.nSubDirs**2, axis=2)
+                calibration_phase_tip = np.repeat(calibration_phase_tip[np.newaxis,:,:], src.nSubDirs**2, axis=0)
                 signalTip,_,_ = self.wfs_measure(calibration_phase_tip, src)
 
                 calibration_phase_tilt = amp_list[i]*Tilt*telescope.pupil
-                calibration_phase_tilt = np.repeat(calibration_phase_tip[:,:,np.newaxis], src.nSubDirs**2, axis=2)
+                calibration_phase_tilt = np.repeat(calibration_phase_tilt[np.newaxis,:,:], src.nSubDirs**2, axis=0)
                 signalTilt,_,_ = self.wfs_measure(calibration_phase_tilt, src)
 
                 mean_slope[i] = np.mean(signalTip[:self.nValidSubaperture] + signalTilt[:self.nValidSubaperture])
@@ -396,7 +396,7 @@ class CorrelatingShackHartmann:
 
         t0 = time.time()
         # Rescale the phase
-        input_phase_torch = torch.from_numpy(phase).contiguous().permute(2,0,1)
+        input_phase_torch = torch.from_numpy(phase).contiguous()
         square_pupil_torch = torch.from_numpy(square_pupil).contiguous()
 
         phase_rescaled = torch.nn.functional.interpolate(input_phase_torch.unsqueeze(0), 
@@ -750,9 +750,10 @@ class CorrelatingShackHartmann:
         fwhm = src.wavelength * 206265 / (self.subaperture_size * self.plate_scale)
         # Compute the new number of pixels for the sun patches to match the WFS plate scale
         new_px = np.round((src.subDirs_coordinates[2,0,0] + src.subDir_margin)/ self.plate_scale).astype(int) # Coordinate 2 has the width of the subDir
-        # Check the dimensions of the phase
-        if np.ndim(phase_in) != 3:
-            raise ValueError('CorrelatingShackHartmann::wfs_measure - Phase must be a 3D array, one phase per subDir.')
+        # If the phase is not 3D, we need to repeat it for each subDir --> typically when the phase uses the DM only
+        if np.ndim(phase_in) < 3:
+            phase_in = np.repeat(phase_in[np.newaxis,:,:], src.nSubDirs**2, axis=0)
+
         # compute the PSF intensity
         psf = self.get_psf(phase_in, fwhm, new_px)
     
