@@ -112,6 +112,10 @@ class ScienceCam:
             if src.fov < self.fieldOfView:
                 raise ValueError('ScienceCam::get_frame - The source FoV is smaller than the camera FoV.')
             
+            # If the phase is not 3D, we need to repeat it for each subDir --> typically when the phase uses the DM only
+            if np.ndim(phase) < 3:
+                phase = np.repeat(phase[np.newaxis,:,:], src.nSubDirs**2, axis=0)
+            
             list_phase = [phase[i, :, :] for i in range(phase.shape[0])]
             
             # Interpolate sun subDirs to the adequate size given the camera PS
