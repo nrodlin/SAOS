@@ -28,7 +28,6 @@ class ScienceCam:
                  plate_scale:float,
                  samplingTime:float,
                  telescope,
-                 fft_zero_padding:int=2,
                  integrationTime:float=None,
                  decimation:int=50,
                  logger=None):
@@ -45,8 +44,6 @@ class ScienceCam:
             Time interval between frames [s].
         telescope : Telescope
             Associated telescope object.
-        fft_zero_padding : int, optional
-            Zero-padding factor for FFT operations. Default is 2.
         integrationTime : float, optional
             Integration time in seconds. Defaults to samplingTime.
         decimation : int, optional
@@ -64,7 +61,6 @@ class ScienceCam:
 
         self.fieldOfView      = fieldOfView
         self.plate_scale      = plate_scale
-        self.fft_zero_padding = fft_zero_padding
         self.samplingTime     = samplingTime
         self.decimation       = decimation
 
