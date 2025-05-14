@@ -3,7 +3,7 @@ import torch
 
 from scipy.special import gamma
 
-from OOPAO.modalBasis.zernikeModes import ZernikeNaive, get_zernikes
+from SAOS.modalBasis.zernikeModes import ZernikeNaive, get_zernikes
 
 # Code reused from the Phase Diversity repository of the EST project.
 # An important point regarding this implementation is that the modes amplitude is not corrected by the atmosphere r0 nor the telescope diameter D. 

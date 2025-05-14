@@ -3,8 +3,8 @@ Created + major update on March 24 2025
 @author: nrodlin
 """
 
-from OOPAO.Source import Source
-from OOPAO.Asterism import Asterism
+from SAOS.Source import Source
+from SAOS.Asterism import Asterism
 
 import numpy as np
 from astropy.io import fits

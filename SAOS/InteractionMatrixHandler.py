@@ -5,11 +5,11 @@ from joblib import Parallel, delayed
 
 from astropy.io import fits
 
-from OOPAO.modalBasis.zonalModes import generate_zonal_modes
-from OOPAO.modalBasis.zernikeModes import generate_zernike_modes
-from OOPAO.modalBasis.karhunenLoeveModes import generate_kl_modes
-from OOPAO.modalBasis.discHarmonicModes import generate_dh_modes
-from OOPAO.modalBasis.hadamardModes import generate_hadamard_modes
+from SAOS.modalBasis.zonalModes import generate_zonal_modes
+from SAOS.modalBasis.zernikeModes import generate_zernike_modes
+from SAOS.modalBasis.karhunenLoeveModes import generate_kl_modes
+from SAOS.modalBasis.discHarmonicModes import generate_dh_modes
+from SAOS.modalBasis.hadamardModes import generate_hadamard_modes
 
 import logging
 import logging.handlers

@@ -10,7 +10,7 @@ Update on March 26 2025
 
 import numpy as np
 import time
-from OOPAO.tools.tools import set_binning
+from SAOS.tools.tools import set_binning
 
 import logging
 import logging.handlers

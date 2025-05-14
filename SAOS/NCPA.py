@@ -114,7 +114,7 @@ class NCPA:
             raise TypeError('f2 should be a list containing [amplitude, start_mode, end_mode, cutoff]')
         
     def KL_basis(self):
-        from OOPAO.calibration.compute_KL_modal_basis import compute_KL_basis
+        from SAOS.calibration.compute_KL_modal_basis import compute_KL_basis
         M2C_KL = compute_KL_basis(self.tel, self.atm, self.dm,lim=1e-2)
         self.dm.coefs = M2C_KL
         self.tel*self.dm
@@ -122,7 +122,7 @@ class NCPA:
         return B
     
     def Zernike_basis(self,n_max):
-        from OOPAO.Zernike import Zernike
+        from SAOS.Zernike import Zernike
         self.Z = Zernike(self.tel,J=n_max)
         self.Z.computeZernike(self.tel)
         B = self.Z.modesFullRes
