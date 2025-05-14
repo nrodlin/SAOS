@@ -25,7 +25,7 @@ class ExtendedSource(Source):
                  coordinates:list = [0,0],
                  fov=10,
                  altitude:float = np.inf,
-                 img_path="OOPAO/OOPAO/images/imsol.fits",
+                 img_path="SAOS/SAOS/images/imsol.fits",
                  img_PS=1/60,
                  nSubDirs=1,
                  maxnSubDirs=7,
