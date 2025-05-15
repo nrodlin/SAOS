@@ -4,6 +4,7 @@ import numpy as np
 from joblib import Parallel, delayed
 
 from astropy.io import fits
+import os
 
 from SAOS.modalBasis.zonalModes import generate_zonal_modes
 from SAOS.modalBasis.zernikeModes import generate_zernike_modes
@@ -335,6 +336,7 @@ class InteractionMatrixHandler:
        
         self.logger.info('InteractionMatrixHandler::save_IM - Writting...')
         hdul = fits.HDUList(hdu_list)
+        os.makedirs(os.path.dirname(filename+'.fits'), exist_ok=True)
         hdul.writeto(filename + '.fits', overwrite=True)
         self.logger.info('InteractionMatrixHandler::save_IM - Saved.')
     
@@ -378,6 +380,7 @@ class InteractionMatrixHandler:
        
         self.logger.info('InteractionMatrixHandler::save_IM - Writting...')
         hdul = fits.HDUList(hdu_list)
+        os.makedirs(os.path.dirname(filename+'.fits'), exist_ok=True)
         hdul.writeto(filename + '.fits', overwrite=True)
         self.logger.info('InteractionMatrixHandler::save_IM - Saved.')        
 

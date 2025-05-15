@@ -14,6 +14,7 @@ import logging.handlers
 from queue import Queue
 
 from astropy.io import fits
+import os
 
 from joblib import Parallel, delayed
 
@@ -354,6 +355,7 @@ class Atmosphere:
         
         self.logger.info('Atmosphere::save - Writting...')
         hdul = fits.HDUList(ps_hdu_list)
+        os.makedirs(os.path.dirname(filename+'.fits'), exist_ok=True)
         hdul.writeto(filename + '.fits', overwrite=True)
         self.logger.info('Atmosphere::save - Saved.')
     
