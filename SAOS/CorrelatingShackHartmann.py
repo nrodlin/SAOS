@@ -518,8 +518,8 @@ class CorrelatingShackHartmann:
             dirX = i//src.nSubDirs
             dirY = i%src.nSubDirs
             
-            gcorner_x = np.round(dirX*((src.subDirs_coordinates[2,0,0])/(2*self.plate_scale))).astype(int)
-            gcorner_y = np.round(dirY*((src.subDirs_coordinates[2,0,0])/(2*self.plate_scale))).astype(int)
+            gcorner_x = dirX*np.round((src.subDirs_coordinates[2,0,0])/(2*self.plate_scale)).astype(int)
+            gcorner_y = dirY*np.round((src.subDirs_coordinates[2,0,0])/(2*self.plate_scale)).astype(int)
 
             gcorner_x_end = gcorner_x + np.round((src.subDirs_coordinates[2,0,0])/(self.plate_scale)).astype(int)
             gcorner_y_end = gcorner_y + np.round((src.subDirs_coordinates[2,0,0])/(self.plate_scale)).astype(int)
@@ -536,7 +536,7 @@ class CorrelatingShackHartmann:
         # The patch is larger so that the final crop matches the FoV of the object.
         sun_PSF_combined = torch.sum(sun_psf_tmp_3D,axis=1) / torch.sum(small_gain_corrector,axis=1)
         
-        offset = sun_patches.shape[-1]//2 - self.npix_lenslet//2
+        offset = sun_PSF_combined.shape[-1]//2 - self.npix_lenslet//2
 
         merged_image = sun_PSF_combined[:,offset:offset+self.npix_lenslet, offset:offset+self.npix_lenslet].detach().numpy()
         

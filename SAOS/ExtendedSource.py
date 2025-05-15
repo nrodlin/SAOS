@@ -219,9 +219,11 @@ class ExtendedSource(Source):
         except:
             self.logger.error('ExtendedSource::load_sun_img - Error loading the FITS file')
             raise FileExistsError('Error loading the FITS file')
-        
-        cnt_x = (self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[0]//2
-        cnt_y = (self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1])) / self.img_PS) + tmp_sun.shape[1]//2
+        cnt_x_arc = self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1]))
+        cnt_y_arc = self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1]))
+
+        cnt_x = (cnt_x_arc / self.img_PS) + tmp_sun.shape[0]//2
+        cnt_y = (cnt_y_arc / self.img_PS) + tmp_sun.shape[1]//2
 
         width_subap_nopad = np.round(self.fov / self.img_PS).astype(int)
         width_subap_pad = np.round((self.fov+self.patch_padding+self.subDir_margin) / self.img_PS).astype(int)
@@ -231,6 +233,10 @@ class ExtendedSource(Source):
 
         cx_pad = np.round(cnt_x - width_subap_pad/2).astype(int)
         cy_pad = np.round(cnt_y - width_subap_pad/2).astype(int)
+
+        if cx_pad < 0 or cy_pad < 0 or (cx_pad+width_subap_nopad) > tmp_sun.shape[0] or (cy_pad+width_subap_pad) > tmp_sun.shape[1]:
+            raise ValueError(f'The selected patch is out of the image bounds. Image size= {tmp_sun.shape[0]*self.img_PS} arcsec. \
+                             Required = {2*np.maximum(np.abs(cnt_x_arc),np.abs(cnt_y_arc)) + (self.fov+self.patch_padding+self.subDir_margin)} arcsec.')
 
         sun_nopad = tmp_sun[cx_nopad:cx_nopad+width_subap_nopad,cy_nopad:cy_nopad+width_subap_nopad]
 
@@ -257,31 +263,47 @@ class ExtendedSource(Source):
         subDir_width = np.round((subDir_size+self.subDir_margin)/self.img_PS).astype(int)
         subDir_imgs = np.zeros((subDir_width, subDir_width, self.nSubDirs, self.nSubDirs))
         
+        # Coordinates of the star w.r.t the telescope axis (optical axis)
         tel_x = self.coordinates[0] * np.cos(np.deg2rad(self.coordinates[1]))
         tel_y = self.coordinates[0] * np.sin(np.deg2rad(self.coordinates[1]))
         
+        # Patch width 
+        patch_width = self.fov+self.patch_padding # in arcsec
+
         for dirX in range(self.nSubDirs):
             for dirY in range(self.nSubDirs):
+                # Crop the subDirs regions
+                # Centroid of the subDir w.r.t the top-left corner of the square of size: fov + patch_padding
+                cx = ((dirX +1)*(patch_width))/(self.nSubDirs + 1)
+                cy = ((dirY +1)*(patch_width))/(self.nSubDirs + 1)
+
+                # Centroid of the subDir w.r.t the top-left corner of the sun_padded image 
+                cx = cx - subDir_size/2
+                cy = cy - subDir_size/2
+                # Change the origin to the sun_padded image of size: fov+patch_padding+subDir_margin
+                corner_x = cx + self.subDir_margin/2
+                corner_y = cy + self.subDir_margin/2
+                # Then, we want to select the cropping region with the margin, so (corner-margin/2):(corner-margin/2 + width)
+                # This seems stupid, because the offset in the origin was added and now is removed, but it is a consequence of 
+                # the patches selections, so it would be difficult to trace later if we don't keep the full maths in here
+                corner_x = corner_x - self.subDir_margin/2
+                corner_y = corner_y - self.subDir_margin/2
+                # Convert to pixel coordinates
+                corner_x = np.round(corner_x/self.img_PS).astype(int)
+                corner_y = np.round(corner_y/self.img_PS).astype(int)
+
+                subDir_imgs[:,:,dirX,dirY] = self.sun_padded[corner_x : corner_x+subDir_width, corner_y : corner_y+subDir_width]
+                # Store the coordinates on-sky of the subDirs w.r.t optical axis
                 # Define subDir origin in the mid of the subDir + displace to iterate through the subDirs + 
-                # (-Translation) to define the global axis in the centre of the subaperture
-                dirx_c = (subDir_size/2) + dirX * (subDir_size/2) +  - (self.fov+self.patch_padding)/2
-                diry_c = (subDir_size/2) + dirY * (subDir_size/2) +  - (self.fov+self.patch_padding)/2
+                # (-Translation) to define the global axis in the centre of the subaperture (in arcsecs)
+                dirx_c = (subDir_size/2) + dirX * (subDir_size/2) - (self.fov+self.patch_padding)/2
+                diry_c = (subDir_size/2) + dirY * (subDir_size/2) - (self.fov+self.patch_padding)/2
 
                 # Now, change to polar, moving the origin towards the telescope axis
 
                 subDir_loc[0, dirX, dirY] = np.sqrt((dirx_c+tel_x)**2 + (diry_c+tel_y)**2)
                 subDir_loc[1, dirX, dirY] = np.rad2deg(np.arctan2((diry_c+tel_y), (dirx_c+tel_x)))
                 subDir_loc[2, dirX, dirY] = subDir_size
-
-                # Finally, crop the region
-
-                cx = (dirx_c / self.img_PS) + self.sun_padded.shape[0]//2
-                cy = (diry_c / self.img_PS) + self.sun_padded.shape[1]//2
-
-                corner_x = np.round(cx - (subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int)
-                corner_y = np.round(cy - (subDir_size+self.subDir_margin)/(2*self.img_PS)).astype(int)
-
-                subDir_imgs[:,:,dirX,dirY] = self.sun_padded[corner_x : corner_x+subDir_width, corner_y : corner_y+subDir_width]
         
         return subDir_loc, subDir_imgs
 
