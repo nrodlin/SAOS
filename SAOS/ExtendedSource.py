@@ -7,6 +7,7 @@ from SAOS.Source import Source
 from SAOS.Asterism import Asterism
 
 import numpy as np
+from importlib.resources import files
 from astropy.io import fits
 
 import logging
@@ -25,7 +26,7 @@ class ExtendedSource(Source):
                  coordinates:list = [0,0],
                  fov=10,
                  altitude:float = np.inf,
-                 img_path="SAOS/SAOS/images/imsol.fits",
+                 img_path="",
                  img_PS=1/60,
                  nSubDirs=1,
                  maxnSubDirs=7,
@@ -89,6 +90,10 @@ class ExtendedSource(Source):
         self.subDir_margin = subDir_margin                                # Extra margin to the subDirs size to avoid border effects [arcsec]
 
         self.type     = 'SUN'
+
+        if self.img_path == "":
+            images_dir = files('SAOS.images')
+            self.img_path = images_dir / 'imsol.fits'
            
         self.sun_nopad, self.sun_padded = self.load_sun_img()   # Take sun patch, pad + no pad
 
