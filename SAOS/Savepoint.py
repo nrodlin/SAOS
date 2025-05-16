@@ -88,112 +88,199 @@ class Savepoint:
             Opened HDF5 file object.
         lp : LightPath
             LightPath object containing simulation results.
+        index : int
+            Index of the light path in the list of light paths.
+        iteration : int
+            Current iteration number.
         """
         group = f.create_group(f'LightPath_{index}')
 
         if self.atm:
-            atm_opd_grp = group.create_group('atmosphere_opd')
-            atm_opd_grp.create_dataset('data', data=lp.atmosphere_opd[None, ...], maxshape=(None,) + lp.atmosphere_opd.shape, chunks=True)
-            atm_opd_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
-            atm_opd_grp.create_dataset('min', data=np.array([np.min(lp.atmosphere_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            atm_opd_grp.create_dataset('max', data=np.array([np.max(lp.atmosphere_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            atm_opd_grp.create_dataset('mean', data=np.array([np.mean(lp.atmosphere_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            atm_opd_grp.create_dataset('std', data=np.array([np.std(lp.atmosphere_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            atm_opd_grp.create_dataset('rms', data=np.array([np.sqrt(np.mean(lp.atmosphere_opd**2, axis=(-2,-1)))]), maxshape=(None,), chunks=True)
-
-            atm_phase_grp = group.create_group('atmosphere_phase')
-            atm_phase_grp.create_dataset('data', data=lp.atmosphere_phase[None, ...], maxshape=(None,) + lp.atmosphere_phase.shape, chunks=True)
-            atm_phase_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
-            atm_phase_grp.create_dataset('min', data=np.array([np.min(lp.atmosphere_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            atm_phase_grp.create_dataset('max', data=np.array([np.max(lp.atmosphere_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            atm_phase_grp.create_dataset('mean', data=np.array([np.mean(lp.atmosphere_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            atm_phase_grp.create_dataset('std', data=np.array([np.std(lp.atmosphere_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            atm_phase_grp.create_dataset('rms', data=np.array([np.sqrt(np.mean(lp.atmosphere_phase**2, axis=(-2,-1)))]), maxshape=(None,), chunks=True)
-
+            # Pupil mask to compute statistics
+            mask = lp.tel.pupil[None, ...]
+            # Create group and add the datasets with the statistics
+            atm_opd_grp = group.create_group('atm_opd')
+            self.custom_create_dataset('opd', atm_opd_grp, iteration, lp.atmosphere_opd, mask)
+            atm_phase_grp = group.create_group('atm_phase')
+            self.custom_create_dataset('phase', atm_phase_grp, iteration, lp.atmosphere_opd, mask)
+        
         if self.dm:
             for i in range(len(lp.dm)):
+                # Pupil mask to compute statistics --> we force the data to be 3D to stadarize night and solar cases
+                mask = lp.tel.pupil[None, ...]
+                # Create group and add the datasets with the statistics
                 dm_opd_grp = group.create_group('dm_opd_' + str(i))
-                dm_opd_grp.create_dataset('data', data=lp.dm_opd[i][None, ...], maxshape=(None,) + lp.dm_opd[i].shape, chunks=True)
-                dm_opd_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
-                dm_opd_grp.create_dataset('min', data=np.array([np.min(lp.dm_opd[i], axis=(-2,-1))]), maxshape=(None,), chunks=True)
-                dm_opd_grp.create_dataset('max', data=np.array([np.max(lp.dm_opd[i], axis=(-2,-1))]), maxshape=(None,), chunks=True)
-                dm_opd_grp.create_dataset('mean', data=np.array([np.mean(lp.dm_opd[i], axis=(-2,-1))]), maxshape=(None,), chunks=True)
-                dm_opd_grp.create_dataset('std', data=np.array([np.std(lp.dm_opd[i], axis=(-2,-1))]), maxshape=(None,), chunks=True)
-                dm_opd_grp.create_dataset('rms', data=np.array([np.sqrt(np.mean(lp.dm_opd[i]**2, axis=(-2,-1)))]), maxshape=(None,), chunks=True)
-
+                self.custom_create_dataset('opd', dm_opd_grp, iteration, lp.dm_opd[i], mask)
                 dm_phase_grp = group.create_group('dm_phase_' + str(i))
-                dm_phase_grp.create_dataset('data', data=lp.dm_phase[i][None, ...], maxshape=(None,) + lp.dm_phase[i].shape, chunks=True)
-                dm_phase_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
-                dm_phase_grp.create_dataset('min', data=np.array([np.min(lp.dm_phase[i], axis=(-2,-1))]), maxshape=(None,), chunks=True)
-                dm_phase_grp.create_dataset('max', data=np.array([np.max(lp.dm_phase[i], axis=(-2,-1))]), maxshape=(None,), chunks=True)
-                dm_phase_grp.create_dataset('mean', data=np.array([np.mean(lp.dm_phase[i], axis=(-2,-1))]), maxshape=(None,), chunks=True)
-                dm_phase_grp.create_dataset('std', data=np.array([np.std(lp.dm_phase[i], axis=(-2,-1))]), maxshape=(None,), chunks=True)
-                dm_phase_grp.create_dataset('rms', data=np.array([np.sqrt(np.mean(lp.dm_phase[i]**2, axis=(-2,-1)))]), maxshape=(None,), chunks=True)
+                self.custom_create_dataset('phase', dm_phase_grp, iteration, lp.dm_phase[i], mask)
 
         if self.slopes:
+            # Create group and add the datasets with the statistics ( mask is not needed)
             slopes1d_grp = group.create_group('slopes_1D')
-            slopes1d_grp.create_dataset('data', data=lp.slopes_1D[None, ...], maxshape=(None,) + lp.slopes_1D.shape, chunks=True)
-            slopes1d_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
-            slopes1d_grp.create_dataset('min', data=np.array([[np.min(lp.slopes_1D[0:lp.slopes_1D.shape[0]//2]), np.min(lp.slopes_1D[lp.slopes_1D.shape[0]//2:])]]), maxshape=(None, 2), chunks=True)
-            slopes1d_grp.create_dataset('max', data=np.array([[np.max(lp.slopes_1D[0:lp.slopes_1D.shape[0]//2]), np.max(lp.slopes_1D[lp.slopes_1D.shape[0]//2:])]]), maxshape=(None, 2), chunks=True)
-            slopes1d_grp.create_dataset('mean', data=np.array([[np.mean(lp.slopes_1D[0:lp.slopes_1D.shape[0]//2]), np.mean(lp.slopes_1D[lp.slopes_1D.shape[0]//2:])]]), maxshape=(None, 2), chunks=True)
-            slopes1d_grp.create_dataset('std', data=np.array([[np.std(lp.slopes_1D[0:lp.slopes_1D.shape[0]//2]), np.std(lp.slopes_1D[lp.slopes_1D.shape[0]//2:])]]), maxshape=(None, 2), chunks=True)
-            slopes1d_grp.create_dataset('rms', data=np.array([[np.sqrt(np.mean(lp.slopes_1D[0:lp.slopes_1D.shape[0]//2]**2)), np.sqrt(np.mean(lp.slopes_1D[lp.slopes_1D.shape[0]//2:]**2))]]), maxshape=(None, 2), chunks=True)
-
+            self.custom_create_dataset('slopes_1D', slopes1d_grp, iteration, lp.slopes_1D, mask=None)
             slopes2d_grp = group.create_group('slopes_2D')
-            slopes2d_grp.create_dataset('data', data=lp.slopes_2D[None, ...], maxshape=(None,) + lp.slopes_2D.shape, chunks=True)
-            slopes2d_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
-            slopes2d_grp.create_dataset('min', data=np.array([[np.min(lp.slopes_2D[0:lp.slopes_2D.shape[0]//2,:]), np.min(lp.slopes_2D[lp.slopes_2D.shape[0]//2:,:])]]), maxshape=(None, 2), chunks=True)
-            slopes2d_grp.create_dataset('max', data=np.array([[np.max(lp.slopes_2D[0:lp.slopes_2D.shape[0]//2,:]), np.max(lp.slopes_2D[lp.slopes_2D.shape[0]//2:,:])]]), maxshape=(None, 2), chunks=True)
+            self.custom_create_dataset('slopes_2D', slopes2d_grp, iteration, lp.slopes_2D, mask=None)
 
         if self.wfs:
+            # Pupil mask to compute statistics
+            mask = lp.tel.pupil[None, ...]
+            # Create group and add the datasets with the statistics
             wfs_opd_grp = group.create_group('wfs_opd')
-            wfs_opd_grp.create_dataset('data', data=lp.wfs_opd[None, ...], maxshape=(None,) + lp.wfs_opd.shape, chunks=True)
-            wfs_opd_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
-            wfs_opd_grp.create_dataset('min', data=np.array([np.min(lp.wfs_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            wfs_opd_grp.create_dataset('max', data=np.array([np.max(lp.wfs_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            wfs_opd_grp.create_dataset('mean', data=np.array([np.mean(lp.wfs_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            wfs_opd_grp.create_dataset('std', data=np.array([np.std(lp.wfs_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            wfs_opd_grp.create_dataset('rms', data=np.array([np.sqrt(np.mean(lp.wfs_opd**2, axis=(-2,-1)))]), maxshape=(None,), chunks=True)
-
+            self.custom_create_dataset('opd', wfs_opd_grp, iteration, lp.wfs_opd, mask)
             wfs_phase_grp = group.create_group('wfs_phase')
-            wfs_phase_grp.create_dataset('data', data=lp.wfs_phase[None, ...], maxshape=(None,) + lp.wfs_phase.shape, chunks=True)
-            wfs_phase_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
-            wfs_phase_grp.create_dataset('min', data=np.array([np.min(lp.wfs_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            wfs_phase_grp.create_dataset('max', data=np.array([np.max(lp.wfs_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            wfs_phase_grp.create_dataset('mean', data=np.array([np.mean(lp.wfs_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            wfs_phase_grp.create_dataset('std', data=np.array([np.std(lp.wfs_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            wfs_phase_grp.create_dataset('rms', data=np.array([np.sqrt(np.mean(lp.wfs_phase**2, axis=(-2,-1)))]), maxshape=(None,), chunks=True)
+            self.custom_create_dataset('phase', wfs_phase_grp, iteration, lp.wfs_opd, mask)
 
         if self.sci:
+            # Pupil mask to compute statistics
+            mask = lp.tel.pupil[None, ...]
+            # Create group and add the datasets with the statistics
             sci_opd_grp = group.create_group('sci_opd')
-            sci_opd_grp.create_dataset('data', data=lp.sci_opd[None, ...], maxshape=(None,) + lp.sci_opd.shape, chunks=True)
-            sci_opd_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
-            sci_opd_grp.create_dataset('min', data=np.array([np.min(lp.sci_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            sci_opd_grp.create_dataset('max', data=np.array([np.max(lp.sci_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            sci_opd_grp.create_dataset('mean', data=np.array([np.mean(lp.sci_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            sci_opd_grp.create_dataset('std', data=np.array([np.std(lp.sci_opd, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            sci_opd_grp.create_dataset('rms', data=np.array([np.sqrt(np.mean(lp.sci_opd**2, axis=(-2,-1)))]), maxshape=(None,), chunks=True)
-
+            self.custom_create_dataset('opd', sci_opd_grp, iteration, lp.sci_opd, mask)
             sci_phase_grp = group.create_group('sci_phase')
-            sci_phase_grp.create_dataset('data', data=lp.sci_phase[None, ...], maxshape=(None,) + lp.sci_phase.shape, chunks=True)
-            sci_phase_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
-            sci_phase_grp.create_dataset('min', data=np.array([np.min(lp.sci_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            sci_phase_grp.create_dataset('max', data=np.array([np.max(lp.sci_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            sci_phase_grp.create_dataset('mean', data=np.array([np.mean(lp.sci_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            sci_phase_grp.create_dataset('std', data=np.array([np.std(lp.sci_phase, axis=(-2,-1))]), maxshape=(None,), chunks=True)
-            sci_phase_grp.create_dataset('rms', data=np.array([np.sqrt(np.mean(lp.sci_phase**2, axis=(-2,-1)))]), maxshape=(None,), chunks=True)
+            self.custom_create_dataset('phase', sci_phase_grp, iteration, lp.sci_opd, mask)
 
         if self.wfs_frame:
+            # Create group and add the datasets with the statistics ( mask is not needed)
             wfs_frame_grp = group.create_group('wfs_frame')
-            wfs_frame_grp.create_dataset('data', data=lp.wfs_frame[None, ...], maxshape=(None,) + lp.wfs_frame.shape, chunks=True)
-            wfs_frame_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
+            self.custom_create_dataset('wfs_frame', wfs_frame_grp, iteration, lp.wfs_frame, mask=None)
 
         if self.sci_frame:
+            # Create group and add the datasets with the statistics ( mask is not needed)
             sci_frame_grp = group.create_group('sci_frame')
-            sci_frame_grp.create_dataset('data', data=lp.sci_frame[None, ...], maxshape=(None,) + lp.sci_frame.shape, chunks=True)
-            sci_frame_grp.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
+            self.custom_create_dataset('sci_frame', sci_frame_grp, iteration, lp.sci_frame, None, lp)
 
+    def custom_create_dataset(self, data_type, group, iteration, data, mask, lp=None):
+        """
+        Create a dataset in the HDF5 file.
+
+        Parameters
+        ----------
+        data_type : str
+            Type of data ('phase', 'opd', 'slopes_1D', 'slopes_2D', 'sci_frame').
+        group : h5py.Group
+            The group in which to create the dataset.
+        iteration : int
+            Current iteration number.
+        data : numpy.ndarray
+            Data to be saved in the dataset.
+        mask : numpy.ndarray
+            Mask to apply to the data.
+        lp : LightPath
+            LightPath object containing simulation modules, required to get the ideal PSF
+            and compute the Strehl ratio.
+        """
+        if np.ndim(data) == 2:
+            data = data[None, ...]
+                
+        group.create_dataset('data', data=data[None, ...], maxshape=(None,) + data.shape, chunks=True)        
+        group.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
+
+        stats = self.compute_stats(data, mask, data_type, lp)
+        
+        for stat_name, value in stats.items():
+            if value is not None:
+                group.create_dataset(stat_name, data=value, maxshape=(None,) + value.shape[1:], chunks=True)
+
+    def compute_stats(self, data, mask, data_type, lp=None):
+        """
+        Compute statistics for the given data.
+
+        Parameters
+        ----------
+        data : numpy.ndarray
+            Data to compute statistics on.
+        mask : numpy.ndarray
+            Mask to apply to the data.
+        data_type : str
+            Type of data ('phase', 'opd', 'slopes_1D', 'slopes_2D', 'sci_frame').
+        lp : LightPath
+            LightPath object containing simulation modules, required to get the ideal PSF
+            and compute the Strehl ratio.
+        
+        Returns
+        -------
+        dict
+            Dictionary containing the computed statistics.
+        """
+
+        dict_stats = {
+            'min': None,
+            'max': None,
+            'mean': None,
+            'std': None,
+            'rms': None,
+            'contrast': None,
+            'strehl': None,
+        }
+
+        if data_type == 'phase' or data_type == 'opd':
+            dict_stats['min'] = np.array([np.min(data.reshape(data.shape[0], -1)[:, mask.ravel()], axis=1)])
+            dict_stats['max'] = np.array([np.max(data.reshape(data.shape[0], -1)[:, mask.ravel()], axis=1)])
+            dict_stats['mean'] = np.array([np.mean(data.reshape(data.shape[0], -1)[:, mask.ravel()], axis=1)])
+            dict_stats['std'] = np.array([np.std(data.reshape(data.shape[0], -1)[:, mask.ravel()], axis=1)])
+            dict_stats['rms'] = np.array([np.sqrt(np.mean(data.reshape(data.shape[0], -1)[:, mask.ravel()]**2, axis=1))])
+        elif data_type == 'slopes_1D':
+            dict_stats['min'] = np.array([[np.min(data[0:data.shape[0]//2]), np.min(data[data.shape[0]//2:])]])
+            dict_stats['max'] = np.array([[np.max(data[0:data.shape[0]//2]), np.max(data[data.shape[0]//2:])]])
+            dict_stats['mean'] = np.array([[np.mean(data[0:data.shape[0]//2]), np.mean(data[data.shape[0]//2:])]])
+            dict_stats['std'] = np.array([[np.std(data[0:data.shape[0]//2]), np.std(data[data.shape[0]//2:])]])
+            dict_stats['rms'] = np.array([[np.sqrt(np.mean(data[0:data.shape[0]//2]**2)), np.sqrt(np.mean(data[data.shape[0]//2:]**2))]])
+
+        elif data_type == 'slopes_2D':
+            dict_stats['min'] = np.array([[np.min(data[0:data.shape[1]//2,:]), np.min(data[0,data.shape[1]//2:,:])]])
+            dict_stats['max'] = np.array([[np.max(data[0:data.shape[1]//2,:]), np.max(data[0,data.shape[1]//2:,:])]])
+        
+        elif data_type == 'sci_frame' and (lp is not None):
+            if lp.src.tag == 'sun':
+                mean_intensity = np.mean(data)
+                std_intensity = np.std(data)
+                if mean_intensity != 0:
+                    dict_stats['contrast'] = np.array([std_intensity / mean_intensity])
+                else:
+                    dict_stats['contrast'] = np.array([0.0])
+            else:
+                 i_peak_norm = np.max(data) / np.sum(data)
+                 i_peak_ideal_norm = np.max(lp.sci.ideal_psf) / np.sum(lp.sci.ideal_psf)
+
+                 dict_stats['strehl'] = np.array([i_peak_norm / i_peak_ideal_norm ])
+
+        return dict_stats
+    
+    def append_to_dataset(self, data_type, group, iteration, data, lp):
+        """
+        Append data to an existing dataset in the HDF5 file.
+
+        Parameters
+        ----------
+        data_type : str
+            Type of data ('phase', 'opd', 'slopes_1D', 'slopes_2D', 'sci_frame').
+        group : h5py.Group
+            The group in which to append the dataset.
+        iteration : int
+            Current iteration number.
+        data : numpy.ndarray
+            Data to be appended to the dataset.
+        lp : LightPath
+            LightPath object containing simulation modules, required to get the ideal PSF
+            and compute the Strehl ratio.
+        """
+        if np.ndim(data) == 2:
+            data = data[None, ...]
+
+        # Pupil mask to compute statistics --> we force the data to be 3D to stadarize night and solar cases
+        mask = lp.tel.pupil[None, ...]
+        
+        new_data = self.compute_stats(data, mask, data_type, lp=lp)
+        # Add the keys for the data and the iteration, aprt from the stadistics
+        new_data['data'] = data
+        new_data['iteration'] = np.array([iteration])
+
+        for stat_name, value in new_data.items():
+            if value is not None:
+                dset = group[stat_name]
+                current_size = dset.shape[0]
+                dset.resize((current_size + 1,) + dset.shape[1:])
+                dset[current_size] = value
     
     def save(self, light_path, iteration):
         """
@@ -216,110 +303,49 @@ class Savepoint:
 
                     # Atmosphere OPD
                     if self.atm and ((iteration+1)%self.atm) == 0:
-                        grp = group['atmosphere_opd']
-                        self.append_to_dataset(grp, 'data', lp.atmosphere_opd)
-                        self.append_stat(grp, 'iteration', iteration)
-                        stats = self.compute_stats(lp.atmosphere_opd)
-                        for stat_name, value in stats.items():
-                            self.append_stat(grp, stat_name, value)
-
-                        # Atmosphere Phase
-                        grp = group['atmosphere_phase']
-                        self.append_to_dataset(grp, 'data', lp.atmosphere_phase)
-                        self.append_stat(grp, 'iteration', iteration)
-                        stats = self.compute_stats(lp.atmosphere_phase)
-                        for stat_name, value in stats.items():
-                            self.append_stat(grp, stat_name, value)
+                        grp = group['atm_opd']
+                        self.append_to_dataset('opd', grp, iteration, lp.atmosphere_opd, lp)
+                        grp = group['atm_phase']
+                        self.append_to_dataset('phase', grp, iteration, lp.atmosphere_phase, lp)
 
                     # DM
                     if self.dm and ((iteration+1)%self.dm) == 0:
                         for i in range(len(lp.dm)):
-                            for suffix, array in [('dm_opd_' + str(i), lp.dm_opd), ('dm_phase_' + str(i), lp.dm_phase)]:
-                                grp = group[suffix]
-                                self.append_to_dataset(grp, 'data', array[i])
-                                self.append_stat(grp, 'iteration', iteration)
-                                stats = self.compute_stats(array[i])
-                                for stat_name, value in stats.items():
-                                    self.append_stat(grp, stat_name, value)
+                            grp = group['dm_opd_' + str(i)]
+                            self.append_to_dataset('opd', grp, iteration, lp.dm_opd[i], lp)
+                            grp = group['dm_phase_' + str(i)]
+                            self.append_to_dataset('phase', grp, iteration, lp.dm_phase[i], lp)
 
                     # Slopes
                     if self.slopes and ((iteration+1)%self.slopes) == 0:
-                        for slopes_type, array in [('slopes_1D', lp.slopes_1D), ('slopes_2D', lp.slopes_2D)]:
-                            grp = group[slopes_type]
-                            self.append_to_dataset(grp, 'data', array)
-                            self.append_stat(grp, 'iteration', iteration)
-                            if slopes_type == 'slopes_1D':
-                                min_val = np.array([np.min(array[:array.shape[0]//2]), np.min(array[array.shape[0]//2:])])
-                                max_val = np.array([np.max(array[:array.shape[0]//2]), np.max(array[array.shape[0]//2:])])
-                                mean_val = np.array([np.mean(array[:array.shape[0]//2]), np.mean(array[array.shape[0]//2:])])
-                                std_val = np.array([np.std(array[:array.shape[0]//2]), np.std(array[array.shape[0]//2:])])
-                                rms_val = np.array([np.sqrt(np.mean(array[:array.shape[0]//2]**2)),
-                                                    np.sqrt(np.mean(array[array.shape[0]//2:]**2))])
-
-                                self.append_stat(grp, 'min', min_val)
-                                self.append_stat(grp, 'max', max_val)
-                                self.append_stat(grp, 'mean', mean_val)
-                                self.append_stat(grp, 'std', std_val)
-                                self.append_stat(grp, 'rms', rms_val)
-                            else:  # slopes_2D
-                                min_val = np.array([np.min(array[:array.shape[0]//2, :]), np.min(array[array.shape[0]//2:, :])])
-                                max_val = np.array([np.max(array[:array.shape[0]//2, :]), np.max(array[array.shape[0]//2:, :])])
-
-                                self.append_stat(grp, 'min', min_val)
-                                self.append_stat(grp, 'max', max_val)
+                        grp = group['slopes_1D']
+                        self.append_to_dataset('slopes_1D', grp, iteration, lp.slopes_1D, lp)
+                        grp = group['slopes_2D']
+                        self.append_to_dataset('slopes_2D', grp, iteration, lp.slopes_2D, lp)
 
                     # WFS
                     if self.wfs and ((iteration+1)%self.wfs) == 0:
-                        for suffix, array in [('wfs_opd', lp.wfs_opd), ('wfs_phase', lp.wfs_phase)]:
-                            grp = group[suffix]
-                            self.append_to_dataset(grp, 'data', array)
-                            self.append_stat(grp, 'iteration', iteration)
-                            stats = self.compute_stats(array)
-                            for stat_name, value in stats.items():
-                                self.append_stat(grp, stat_name, value)
+                        grp = group['wfs_opd']
+                        self.append_to_dataset('opd', grp, iteration, lp.wfs_opd, lp)
+                        grp = group['wfs_phase']
+                        self.append_to_dataset('phase', grp, iteration, lp.wfs_phase, lp)
 
                     # Science
                     if self.sci and ((iteration+1)%self.sci) == 0:
-                        for suffix, array in [('sci_opd', lp.sci_opd), ('atmosphere_phase', lp.sci_phase)]:
-                            grp = group[suffix]
-                            self.append_to_dataset(grp, 'data', array)
-                            self.append_stat(grp, 'iteration', iteration)
-                            stats = self.compute_stats(array)
-                            for stat_name, value in stats.items():
-                                self.append_stat(grp, stat_name, value)
+                        grp = group['sci_opd']
+                        self.append_to_dataset('opd', grp, iteration, lp.sci_opd, lp)
+                        grp = group['sci_phase']
+                        self.append_to_dataset('phase', grp, iteration, lp.sci_phase, lp)
 
                     # WFS Frame
                     if self.wfs_frame and ((iteration+1)%self.wfs_frame) == 0:
                         grp = group['wfs_frame']
-                        self.append_to_dataset(grp, 'data', lp.wfs_frame)
-                        self.append_stat(grp, 'iteration', iteration)
+                        self.append_to_dataset('wfs_frame', grp, iteration, lp.wfs_frame, lp)
 
                     # Science Frame
                     if self.sci_frame and ((iteration+1)%self.sci_frame) == 0:
                         grp = group['sci_frame']
-                        self.append_to_dataset(grp, 'data', lp.sci_frame)
-                        self.append_stat(grp, 'iteration', iteration)
-    
-    def append_to_dataset(self, group, name, data):
-        dset = group['data']
-        current_size = dset.shape[0]
-        dset.resize((current_size + 1,) + dset.shape[1:])
-        dset[current_size] = data
-
-    def append_stat(self, group, stat_name, value):
-        dset = group[stat_name]
-        current_size = dset.shape[0]
-        dset.resize((current_size + 1,) + dset.shape[1:])
-        dset[current_size] = value
-
-    def compute_stats(self, data):
-        return {
-            'min': np.min(data, axis=(-2, -1)),
-            'max': np.max(data, axis=(-2, -1)),
-            'mean': np.mean(data, axis=(-2, -1)),
-            'std': np.std(data, axis=(-2, -1)),
-            'rms': np.sqrt(np.mean(data**2, axis=(-2, -1)))
-        }
+                        self.append_to_dataset('sci_frame', grp, iteration, lp.sci_frame, lp)
 
     def setup_logging(self, logging_level=logging.WARNING):
         #
