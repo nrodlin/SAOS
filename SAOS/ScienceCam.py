@@ -12,6 +12,7 @@ import numpy as np
 import torch
 
 from joblib import delayed, Parallel
+from types import SimpleNamespace
 
 from .Detector import Detector
 
@@ -79,6 +80,9 @@ class ScienceCam:
         
         self.cam  = Detector(self.nPix, self.integrationTime, 
                              self.samplingTime, logger=self.logger)
+        
+        fake_src = SimpleNamespace(tag='source',wavelength=500e-9)
+        self.ideal_psf = self.get_frame(fake_src, phase=self.pupil*0)
 
     def get_frame(self, src, phase):
         """
@@ -87,7 +91,8 @@ class ScienceCam:
         Parameters
         ----------
         src : Source
-            Input source object, either a point source or extended source (e.g., Sun).
+            Input source object, either a point source or extended source (e.g., Sun). 
+            During the init, computes the ideal telescope PSF at 500nm.
         phase : np.ndarray
             Optical phase at the science detector.
 
