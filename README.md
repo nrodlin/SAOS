@@ -4,9 +4,9 @@
 
 SAOS modifies the internal architecture of OOPAO, which was heavily managed through the telescope class, to offer a framework centered on lines of sight, implemented via the **LightPath** class. This architectural shift enables easier and more powerful parallelization, essential for solar AO simulations where the Field of View (FoV) is divided into multiple sub-directions to physically introduce extended field effects into the simulation.
 
-SAOS is currently in the testing phase before its first release. All development is ongoing in the **tech-development** branch. We recommend waiting a little longer before using SAOS in your work!
+SAOS is currently in the testing phase of the first release. All development is ongoing in the **tech-development** branch. We recommend waiting a little longer before using SAOS in your work!
 
-A key feature of SAOS is that it is a **Python-only** repository. All parallelization is managed via **joblib** and threads, leveraging the new **free-threaded Python 3.13** to enable extensive and straightforward parallelization.
+A key feature of SAOS is that it is a **Python-only** repository. All parallelization is managed via **joblib** and threads, leveraging the new **free-threaded Python 3.13** to enable extensive and straightforward parallelization. Pytorch is extensively used in the code for costly operations, being ready to an upgrade to a GPU version.
 
 # Guidelines
 
