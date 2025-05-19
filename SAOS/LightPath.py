@@ -203,7 +203,6 @@ class LightPath:
 
         # Generate the Science frame, if defined
         if self.sci is not None:
-            self.decimation_counter += 1
             if (self.decimation_counter % self.sci.decimation) == 0:
                 self.sci_frame = self.sci.get_frame(self.src, self.sci_phase)
         
