@@ -34,6 +34,8 @@ class LightPath:
         else:
             self.external_logger_flag = True
             self.logger = logger
+
+        self.tag = 'lightpath'
         # Process variables: updated per iteration
         # Optical Path Difference: is the difference in optical path length (OPL) between two rays of light [m]
         # IMPORTANT: DM is considered transmissive, instead of reflective, so there is no need to multiply by 2
