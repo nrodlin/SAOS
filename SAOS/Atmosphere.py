@@ -759,9 +759,9 @@ class Atmosphere:
             pixel_size_in   = layer.D/layer.resolution
             pixel_size_out  = pixel_size_in/ratio
             resolution_out  = self.resolution
-            return np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out)).T* np.sqrt(layer.fractionalR0)
+            return np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out)).T* np.sqrt(layer.fractionalR0) * (self.wavelength / src.wavelength)
         else:
-            return np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])* np.sqrt(layer.fractionalR0)
+            return np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])* np.sqrt(layer.fractionalR0) * (self.wavelength / src.wavelength)
     
     def get_opd_per_src(self, src, phase):
         """
