@@ -269,7 +269,7 @@ class InteractionMatrixHandler:
                 cmd = stroke_per_DM[i] * modes[:,:, j]
                 self.dm_scanned_list[i].updateDMShape(cmd)
                 # Propagate
-                Parallel(n_jobs=len(self.light_path_list), prefer="threads")(tasks)
+                Parallel(n_jobs=2, prefer="threads")(tasks)
                 # Measure the WFS slopes at the Light Path affected
                 for k in range(len(self.light_path_list)):
                     if self.im_boolean_matrix[k, i]:
