@@ -36,6 +36,7 @@ class dmLayerClass():
         self.metapupil              = None # 2D telescope pupil at the DM altitude [circular mask], at 0km equals the pupil without spider nor central obs
         self.pupil                  = None # 2D telescope pupil [binary mask]
         self.OPD                    = None # stores the layer OPD without projection to any source (full pupil/metapupil)
+        self.cmd_2D                 = None # stores the 2D DM command.
         
 """
 Deformable Mirror Module
@@ -148,7 +149,9 @@ class DeformableMirror:
         if coordinates is None: 
             self.logger.info('DeformableMirror::__init__ - No coordinates loaded.. taking the cartesian geometry as a default') 
 
-            self.nAct                               = nSubap+1 # In that case corresponds to the number of actuator along the diameter            
+            self.nAct                               = nSubap+1 # In that case corresponds to the number of actuator along the diameter      
+
+            self.dm_layer.cmd_2D                    = np.zeros([self.nAct,self.nAct]) # stores the 2D DM command      
             
             # set the coordinates of the DM object to produce a cartesian geometry
             x = np.linspace(-(self.dm_layer.D_fov)/2,(self.dm_layer.D_fov)/2,self.nAct)
@@ -279,6 +282,7 @@ class DeformableMirror:
         layer.center            = layer.D_px//2
 
         layer.OPD               = np.zeros([layer.D_px,layer.D_px]) # stores the layer OPD without projection to any source (full pupil/metapupil)
+        layer.cmd_2D            = None # stores the 2D DM command
 
         layer.telescope_D          = telescope.D # Telescope diameter in [m]
         layer.telescope_resolution = telescope.resolution # Telescope diameter in [px] using the original telescope resolution
@@ -417,6 +421,8 @@ class DeformableMirror:
 
             temp = np.zeros_like(self.validAct_2D).astype(float)
             temp[self.validAct_2D] = self._coefs
+
+            self.dm_layer.cmd_2D = temp.copy()
 
             # temp = torch.matmul(self.modes_torch, torch.tensor(self._coefs)) # matrix product between the IF and the stroke for each mode
                         
