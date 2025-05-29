@@ -181,6 +181,10 @@ class LightPath:
                     self.dm_opd.append(opd_results[i][0])
                     self.dm_phase.append(opd_results[i][1])
         else:
+            # Compute the Atmosphere OPD and Phase
+            opd_results = Parallel(n_jobs=len(tasks), prefer="threads")(tasks)
+            self.atmosphere_opd = opd_results[0]
+            self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
             self.dm_opd = np.zeros_like(self.atmosphere_opd)
             self.dm_phase = np.copy(self.dm_opd)
 
