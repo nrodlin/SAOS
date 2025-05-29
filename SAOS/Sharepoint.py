@@ -177,7 +177,7 @@ class Sharepoint:
         
         self.socket.send_multipart([b"topics", ",".join(topics).encode()])
         
-        self.logger.info(f'Sharepoint::shareData - Sending took {time.time()-t0} [s]')                
+        self.logger.debug(f'Sharepoint::shareData - Sending took {time.time()-t0} [s]')                
 
         return True
 
