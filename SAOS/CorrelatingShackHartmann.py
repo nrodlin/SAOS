@@ -37,7 +37,7 @@ class CorrelatingShackHartmann:
                  fieldOfView:float,
                  guardPx:int,
                  fft_fieldOfView_oversampling:float=0,
-                 use_brightest:int = 50,
+                 use_brightest:int = 9,
                  threshold_convolution:float = 0.05,
                  unit_in_rad = False,
                  logger=None):
@@ -292,7 +292,7 @@ class CorrelatingShackHartmann:
 
         return cross_correlation
 
-    def centroid(self, image, use_brightest=16):
+    def centroid(self, image, use_brightest=9):
         """
         Compute center of gravity for subaperture spots.
 
