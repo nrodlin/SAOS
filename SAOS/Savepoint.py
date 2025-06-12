@@ -119,7 +119,7 @@ class Savepoint:
             atm_opd_grp = group.create_group('atm_opd')
             self.custom_create_dataset('opd', atm_opd_grp, iteration, data_group.atmosphere_opd, mask)
             atm_phase_grp = group.create_group('atm_phase')
-            self.custom_create_dataset('phase', atm_phase_grp, iteration, data_group.atmosphere_opd, mask)
+            self.custom_create_dataset('phase', atm_phase_grp, iteration, data_group.atmosphere_phase, mask)
         
         if self.dm_per_dir and group_name.find('LightPath')>=0:
             for i in range(len(data_group.dm)):
@@ -145,7 +145,7 @@ class Savepoint:
             wfs_opd_grp = group.create_group('wfs_opd')
             self.custom_create_dataset('opd', wfs_opd_grp, iteration, data_group.wfs_opd, mask)
             wfs_phase_grp = group.create_group('wfs_phase')
-            self.custom_create_dataset('phase', wfs_phase_grp, iteration, data_group.wfs_opd, mask)
+            self.custom_create_dataset('phase', wfs_phase_grp, iteration, data_group.wfs_phase, mask)
 
         if self.sci and group_name.find('LightPath')>=0:
             # Pupil mask to compute statistics
@@ -154,7 +154,7 @@ class Savepoint:
             sci_opd_grp = group.create_group('sci_opd')
             self.custom_create_dataset('opd', sci_opd_grp, iteration, data_group.sci_opd, mask)
             sci_phase_grp = group.create_group('sci_phase')
-            self.custom_create_dataset('phase', sci_phase_grp, iteration, data_group.sci_opd, mask)
+            self.custom_create_dataset('phase', sci_phase_grp, iteration, data_group.sci_phase, mask)
 
         if self.wfs_frame and group_name.find('LightPath')>=0:
             # Create group and add the datasets with the statistics ( mask is not needed)
