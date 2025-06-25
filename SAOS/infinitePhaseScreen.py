@@ -298,10 +298,10 @@ class PhaseScreenVonKarman():
     def get_new_row(self, sign=1): # Vertical movement
         random_data = self._R.normal(0, 1, size=self.nx_size)
 
-        if sign > 0: # add row at the top --> coincides with the coordinates vector
+        if sign < 0: # add row at the top --> coincides with the coordinates vector
             temp_scrn = self.scrn
-        else: # add row at the bottom --> we need top flip the data
-            temp_scrn = self.scrn
+        else: # add row at the bottom --> we need to flip the data
+            temp_scrn = self.scrn[::-1]
 
         stencil_data = temp_scrn[(self.stencil_coords_vert[:, 0], self.stencil_coords_vert[:, 1])]
 
