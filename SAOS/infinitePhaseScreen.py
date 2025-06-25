@@ -318,7 +318,7 @@ class PhaseScreenVonKarman():
         if sign < 0: # add row at the top --> coincides with the coordinates vector
             temp_scrn = self.scrn
         else: # add row at the bottom --> we need to flip the data
-            temp_scrn = self.scrn[::-1]
+            temp_scrn = self.scrn[:, ::-1]
 
         stencil_data = temp_scrn[(self.stencil_coords_horz[:, 0], self.stencil_coords_horz[:, 1])]
 
@@ -354,11 +354,11 @@ class PhaseScreenVonKarman():
         new_col = self.get_new_col(sign)
 
         if sign < 0: # add col to the right
-            tmp_scrn = np.append(new_col, self._scrn, axis=1)
+            tmp_scrn = np.append(self._scrn, new_col, axis=1)
             self._scrn = tmp_scrn[:self.nx_size, -self.stencil_length:]
 
         else: # add col to the left
-            tmp_scrn = np.append(self._scrn, new_col, axis=1)
+            tmp_scrn = np.append(new_col, self._scrn, axis=1)
             self._scrn = tmp_scrn[:self.nx_size, :self.stencil_length]
 
         return self.scrn    
