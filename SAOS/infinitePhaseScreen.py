@@ -91,11 +91,11 @@ class PhaseScreenVonKarman():
         self.B_vert = self.makeBMatrix(self.cov_mat_xx_vert, self.cov_mat_zx_vert, self.A_vert)
 
         # Horizontal movement case
-        # separations = self.calc_separations(self.stencil_coords_horz, self.horz_coords)
-        # self.cov_mat_xx_horz, self.cov_mat_zz_horz, self.cov_mat_xz_horz, self.cov_mat_zx_horz = self.make_covmats(separations, self.n_stencils)
+        separations = self.calc_separations(self.stencil_coords_horz, self.horz_coords)
+        self.cov_mat_xx_horz, self.cov_mat_zz_horz, self.cov_mat_xz_horz, self.cov_mat_zx_horz = self.make_covmats(separations, self.n_stencils)
 
-        # self.A_horz = self.makeAMatrix(self.cov_mat_zz_horz, self.cov_mat_xz_horz)
-        # self.B_horz = self.makeBMatrix(self.cov_mat_xx_horz, self.cov_mat_zx_horz, self.A_horz)
+        self.A_horz = self.makeAMatrix(self.cov_mat_zz_horz, self.cov_mat_xz_horz)
+        self.B_horz = self.makeBMatrix(self.cov_mat_xx_horz, self.cov_mat_zx_horz, self.A_horz)
 
         self.make_initial_screen()
 
@@ -110,10 +110,10 @@ class PhaseScreenVonKarman():
         self.vert_positions = self.vert_coords * self.pixel_scale
 
         # Coordinates for horizontal movement
-        # self.horz_coords = np.zeros((self.nx_size, 2))
-        # self.horz_coords[:, 0] = np.arange(self.nx_size)
-        # self.horz_coords[:, 1] = -1
-        # self.horz_positions = self.horz_coords * self.pixel_scale
+        self.horz_coords = np.zeros((self.nx_size, 2))
+        self.horz_coords[:, 0] = np.arange(self.nx_size)
+        self.horz_coords[:, 1] = -1
+        self.horz_positions = self.horz_coords * self.pixel_scale
 
     def set_stencil_coords(self):
         # Vertical --> Top
@@ -125,11 +125,11 @@ class PhaseScreenVonKarman():
 
         # Horizontal --> Left
 
-        # self.stencil_horz = np.zeros((self.stencil_length, self.nx_size))
-        # self.stencil_horz[:, :self.n_columns] = 1
+        self.stencil_horz = np.zeros((self.stencil_length, self.nx_size))
+        self.stencil_horz[:, :self.n_columns] = 1
 
-        # self.stencil_coords_horz = np.array(np.where(self.stencil_horz==1)).T
-        # self.stencil_positions_horz = self.stencil_coords_horz * self.pixel_scale
+        self.stencil_coords_horz = np.array(np.where(self.stencil_horz==1)).T
+        self.stencil_positions_horz = self.stencil_coords_horz * self.pixel_scale
 
     def calc_separations(self, stencil_positions, new_positions):
         """
@@ -311,6 +311,23 @@ class PhaseScreenVonKarman():
         new_row.shape = (1, self.nx_size)
 
         return new_row
+    
+    def get_new_col(self, sign=1): # Horizontal movement
+        random_data = self._R.normal(0, 1, size=self.nx_size)
+
+        if sign < 0: # add row at the top --> coincides with the coordinates vector
+            temp_scrn = self.scrn
+        else: # add row at the bottom --> we need to flip the data
+            temp_scrn = self.scrn[::-1]
+
+        stencil_data = temp_scrn[(self.stencil_coords_horz[:, 0], self.stencil_coords_horz[:, 1])]
+
+
+        new_col = self.A_horz.dot(stencil_data) + self.B_horz.dot(random_data)
+
+        new_col.shape = (self.nx_size, 1)
+
+        return new_col    
 
     def add_row(self, sign=1): # Vertical movement
         """
@@ -328,6 +345,23 @@ class PhaseScreenVonKarman():
             self._scrn = tmp_scrn[-self.stencil_length:, :self.nx_size]
 
         return self.scrn
+
+    def add_col(self, sign=1): # Horizontal movement
+        """
+        Adds a new col to the phase screen and removes old ones.
+        """
+
+        new_col = self.get_new_col(sign)
+
+        if sign < 0: # add col to the right
+            tmp_scrn = np.append(new_col, self._scrn, axis=1)
+            self._scrn = tmp_scrn[:self.nx_size, -self.stencil_length:]
+
+        else: # add col to the left
+            tmp_scrn = np.append(self._scrn, new_col, axis=1)
+            self._scrn = tmp_scrn[:self.nx_size, :self.stencil_length]
+
+        return self.scrn    
 
     @property
     def scrn(self):
