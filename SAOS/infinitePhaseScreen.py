@@ -66,7 +66,7 @@ class PhaseScreenVonKarman():
         random_seed (int, optional): seed for the random number generator
         n_columns (int, optional): Number of columns to use to continue screen, default is 2
     """
-    def __init__(self, nx_size, pixel_scale, r0, L0, random_seed=None, n_columns=2):
+    def __init__(self, nx_size, pixel_scale, r0, L0, random_seed=None, n_columns=2, from_file=False, screen_file=None):
 
         self.n_columns = n_columns
         self.nx_size = nx_size
@@ -83,21 +83,35 @@ class PhaseScreenVonKarman():
         self.set_coords()
         self.set_stencil_coords()
 
-        # Vertical movement case
-        separations = self.calc_separations(self.stencil_positions_vert, self.vert_positions)
-        self.cov_mat_xx_vert, self.cov_mat_zz_vert, self.cov_mat_xz_vert, self.cov_mat_zx_vert, self.cov_mat_vert = self.make_covmats(separations, self.n_stencils)
+        if from_file:
+            self.load_from_file(scrn=screen_file)
+        else:
 
-        self.A_vert = self.makeAMatrix(self.cov_mat_zz_vert, self.cov_mat_xz_vert)
-        self.B_vert = self.makeBMatrix(self.cov_mat_xx_vert, self.cov_mat_zx_vert, self.A_vert)
+            # Vertical movement case
+            separations = self.calc_separations(self.stencil_positions_vert, self.vert_positions)
+            self.cov_mat_xx_vert, self.cov_mat_zz_vert, self.cov_mat_xz_vert, self.cov_mat_zx_vert, self.cov_mat_vert = self.make_covmats(separations, self.n_stencils)
 
-        # Horizontal movement case
-        separations = self.calc_separations(self.stencil_positions_horz, self.horz_positions)
-        self.cov_mat_xx_horz, self.cov_mat_zz_horz, self.cov_mat_xz_horz, self.cov_mat_zx_horz, self.cov_mat_horz = self.make_covmats(separations, self.n_stencils)
+            self.A_vert = self.makeAMatrix(self.cov_mat_zz_vert, self.cov_mat_xz_vert)
+            self.B_vert = self.makeBMatrix(self.cov_mat_xx_vert, self.cov_mat_zx_vert, self.A_vert)
 
-        self.A_horz = self.makeAMatrix(self.cov_mat_zz_horz, self.cov_mat_xz_horz)
-        self.B_horz = self.makeBMatrix(self.cov_mat_xx_horz, self.cov_mat_zx_horz, self.A_horz)
+            # Horizontal movement case
+            separations = self.calc_separations(self.stencil_positions_horz, self.horz_positions)
+            self.cov_mat_xx_horz, self.cov_mat_zz_horz, self.cov_mat_xz_horz, self.cov_mat_zx_horz, self.cov_mat_horz = self.make_covmats(separations, self.n_stencils)
 
-        self.make_initial_screen()
+            self.A_horz = self.makeAMatrix(self.cov_mat_zz_horz, self.cov_mat_xz_horz)
+            self.B_horz = self.makeBMatrix(self.cov_mat_xx_horz, self.cov_mat_zx_horz, self.A_horz)
+
+            self.make_initial_screen()
+
+    def load_from_file(self, scrn):
+        self._scrn = scrn['phase'].copy()
+        self._R = np.random.default_rng(self.random_seed)  
+        # Vertical
+        self.A_vert = scrn['A_vert'].copy()
+        self.B_vert = scrn['B_vert'].copy()
+        # Horizontal
+        self.A_horz = scrn['A_horz'].copy()
+        self.B_horz = scrn['B_horz'].copy()  
 
     def set_coords(self):
         """
