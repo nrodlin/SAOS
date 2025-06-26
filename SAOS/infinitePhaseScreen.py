@@ -85,14 +85,14 @@ class PhaseScreenVonKarman():
 
         # Vertical movement case
         separations = self.calc_separations(self.stencil_positions_vert, self.vert_positions)
-        self.cov_mat_xx_vert, self.cov_mat_zz_vert, self.cov_mat_xz_vert, self.cov_mat_zx_vert = self.make_covmats(separations, self.n_stencils)
+        self.cov_mat_xx_vert, self.cov_mat_zz_vert, self.cov_mat_xz_vert, self.cov_mat_zx_vert, self.cov_mat_vert = self.make_covmats(separations, self.n_stencils)
 
         self.A_vert = self.makeAMatrix(self.cov_mat_zz_vert, self.cov_mat_xz_vert)
         self.B_vert = self.makeBMatrix(self.cov_mat_xx_vert, self.cov_mat_zx_vert, self.A_vert)
 
         # Horizontal movement case
-        separations = self.calc_separations(self.stencil_coords_horz, self.horz_coords)
-        self.cov_mat_xx_horz, self.cov_mat_zz_horz, self.cov_mat_xz_horz, self.cov_mat_zx_horz = self.make_covmats(separations, self.n_stencils)
+        separations = self.calc_separations(self.stencil_positions_horz, self.horz_positions)
+        self.cov_mat_xx_horz, self.cov_mat_zz_horz, self.cov_mat_xz_horz, self.cov_mat_zx_horz, self.cov_mat_horz = self.make_covmats(separations, self.n_stencils)
 
         self.A_horz = self.makeAMatrix(self.cov_mat_zz_horz, self.cov_mat_xz_horz)
         self.B_horz = self.makeBMatrix(self.cov_mat_xx_horz, self.cov_mat_zx_horz, self.A_horz)
@@ -129,6 +129,7 @@ class PhaseScreenVonKarman():
         self.stencil_horz[:, :self.n_columns] = 1
 
         self.stencil_coords_horz = np.array(np.where(self.stencil_horz==1)).T
+        self.stencil_coords_horz =  self.stencil_coords_horz[np.lexsort((self.stencil_coords_horz[:, 0], self.stencil_coords_horz[:, 1]))]
         self.stencil_positions_horz = self.stencil_coords_horz * self.pixel_scale
 
     def calc_separations(self, stencil_positions, new_positions):
@@ -153,14 +154,14 @@ class PhaseScreenVonKarman():
         """
         Makes the covariance matrices required for adding new phase
         """
-        self.cov_mat = self.phase_covariance(separations, self.r0, self.L0)
+        cov_mat = self.phase_covariance(separations, self.r0, self.L0)
 
-        cov_mat_zz = self.cov_mat[:n_stencils, :n_stencils]
-        cov_mat_xx = self.cov_mat[n_stencils:, n_stencils:]
-        cov_mat_zx = self.cov_mat[:n_stencils, n_stencils:]
-        cov_mat_xz = self.cov_mat[n_stencils:, :n_stencils]
+        cov_mat_zz = cov_mat[:n_stencils, :n_stencils]
+        cov_mat_xx = cov_mat[n_stencils:, n_stencils:]
+        cov_mat_zx = cov_mat[:n_stencils, n_stencils:]
+        cov_mat_xz = cov_mat[n_stencils:, :n_stencils]
 
-        return cov_mat_xx, cov_mat_zz, cov_mat_xz, cov_mat_zx
+        return cov_mat_xx, cov_mat_zz, cov_mat_xz, cov_mat_zx, cov_mat
 
     def phase_covariance(self, r, r0, L0):
         """
@@ -320,7 +321,7 @@ class PhaseScreenVonKarman():
         else: # add row at the bottom --> we need to flip the data
             temp_scrn = self.scrn[:, ::-1]
 
-        stencil_data = temp_scrn[(self.stencil_coords_horz[:, 0], self.stencil_coords_horz[:, 1])]
+        stencil_data = temp_scrn[(self.stencil_coords_vert[:, 0], self.stencil_coords_vert[:, 1])]
 
 
         new_col = self.A_horz.dot(stencil_data) + self.B_horz.dot(random_data)
