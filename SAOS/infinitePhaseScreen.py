@@ -296,7 +296,7 @@ class PhaseScreenVonKarman():
         return phs
 
 
-    def get_new_row(self, sign=1): # Vertical movement
+    def get_new_row(self, sign=1): # Vertical movement --> + adds row to the bottom, - adds row to the top
         random_data = self._R.normal(0, 1, size=self.nx_size)
 
         if sign < 0: # add row at the top --> coincides with the coordinates vector
@@ -313,15 +313,15 @@ class PhaseScreenVonKarman():
 
         return new_row
     
-    def get_new_col(self, sign=1): # Horizontal movement
+    def get_new_col(self, sign=1): # Horizontal movement --> + adds col to the left, - adds col to the right
         random_data = self._R.normal(0, 1, size=self.nx_size)
 
-        if sign < 0: # add row at the top --> coincides with the coordinates vector
-            temp_scrn = self.scrn
-        else: # add row at the bottom --> we need to flip the data
+        if sign < 0: # add col to the right --> we need to flip the data
             temp_scrn = self.scrn[:, ::-1]
+        else: # add col to the left --> coincides with the coordinates vector
+            temp_scrn = self.scrn
 
-        stencil_data = temp_scrn[(self.stencil_coords_vert[:, 0], self.stencil_coords_vert[:, 1])]
+        stencil_data = temp_scrn[(self.stencil_coords_horz[:, 0], self.stencil_coords_horz[:, 1])]
 
 
         new_col = self.A_horz.dot(stencil_data) + self.B_horz.dot(random_data)
