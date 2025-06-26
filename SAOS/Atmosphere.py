@@ -228,9 +228,14 @@ class Atmosphere:
                 group.attrs['windSpeed'] = getattr(self,'layer_'+str(i_layer+1)).windSpeed
                 group.attrs['windDirection'] = getattr(self,'layer_'+str(i_layer+1)).windDirection
                 group.attrs['altitude'] = getattr(self,'layer_'+str(i_layer+1)).altitude
-                # Von Karman infinite layer params
-                group.create_dataset('A', data=getattr(self,'layer_'+str(i_layer+1)).screen.A_mat)
-                group.create_dataset('B', data=getattr(self,'layer_'+str(i_layer+1)).screen.B_mat)
+                # Von Karman infinite layer params:
+                # Vertical movement matrices
+                group.create_dataset('A_vert', data=getattr(self,'layer_'+str(i_layer+1)).screen.A_vert)
+                group.create_dataset('B_vert', data=getattr(self,'layer_'+str(i_layer+1)).screen.B_vert)
+                # Horizontal movement matrices
+                group.create_dataset('A_horz', data=getattr(self,'layer_'+str(i_layer+1)).screen.A_horz)
+                group.create_dataset('B_horz', data=getattr(self,'layer_'+str(i_layer+1)).screen.B_horz)
+                # Common variables
                 group.create_dataset('phase', data=getattr(self,'layer_'+str(i_layer+1)).screen.scrn)
                 group.attrs['n_columns'] = getattr(self,'layer_'+str(i_layer+1)).screen.n_columns
         
@@ -307,6 +312,10 @@ class Atmosphere:
     def updateLayer(self,updatedLayer):
         """
         Update a single atmospheric layer, shifting the phase screen.
+        ^ +Vy (adds row --> + to the bottom, - to the top)
+        |
+        |
+        |----> +Vx (adds col --> + to the left, - to the right)
 
         Parameters
         ----------
@@ -322,8 +331,8 @@ class Atmosphere:
 
         # Compute speed per axis
 
-        vx = updatedLayer.windSpeed * np.sin(np.deg2rad(updatedLayer.windDirection))
-        vy = updatedLayer.windSpeed * np.cos(np.deg2rad(updatedLayer.windDirection))
+        vx = updatedLayer.windSpeed * np.cos(np.deg2rad(updatedLayer.windDirection))
+        vy = updatedLayer.windSpeed * np.sin(np.deg2rad(updatedLayer.windDirection))
 
         # Compute displacement in px
         updatedLayer.displ_buffer_x += (vx*self.samplingTime) / updatedLayer.spatial_res
@@ -331,13 +340,13 @@ class Atmosphere:
 
         # Check if there is a full pixel displacement and update the screen:
 
-        while (updatedLayer.displ_buffer_x > 1):
-            updatedLayer.displ_buffer_x -= 1
-            updatedLayer.screen.add_row()
+        while (np.abs(updatedLayer.displ_buffer_y) > 1):
+            updatedLayer.screen.add_row(np.sign(updatedLayer.displ_buffer_y))
+            updatedLayer.displ_buffer_y = updatedLayer.displ_buffer_y - np.sign(updatedLayer.displ_buffer_y) * 1
         
-        while (updatedLayer.displ_buffer_y > 1):
-            updatedLayer.displ_buffer_y -= 1
-            updatedLayer.screen.add_col()
+        while (np.abs(updatedLayer.displ_buffer_x) > 1):
+            updatedLayer.screen.add_col(np.sign(updatedLayer.displ_buffer_x))
+            updatedLayer.displ_buffer_x = updatedLayer.displ_buffer_x - np.sign(updatedLayer.displ_buffer_x) * 1
 
         return updatedLayer
 
