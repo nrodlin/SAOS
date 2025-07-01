@@ -262,7 +262,7 @@ class PhaseScreenVonKarman():
                                 r0: float,
                                 n_points: int,
                                 diameter: float,
-                                n_subharmonics: int = 8,
+                                n_subharmonics: int = 4,
                                 seed=None) -> np.ndarray:
         """
         Generates an atmospheric phase screen using the Von Karman spectrum,

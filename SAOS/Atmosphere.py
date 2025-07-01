@@ -340,13 +340,13 @@ class Atmosphere:
 
         # Check if there is a full pixel displacement and update the screen:
 
-        while (np.abs(updatedLayer.displ_buffer_y) > 1):
+        if (np.abs(updatedLayer.displ_buffer_y) > 0):
             updatedLayer.screen.add_row(np.sign(updatedLayer.displ_buffer_y))
-            updatedLayer.displ_buffer_y = updatedLayer.displ_buffer_y - np.sign(updatedLayer.displ_buffer_y) * 1
+            # updatedLayer.displ_buffer_y = updatedLayer.displ_buffer_y - np.sign(updatedLayer.displ_buffer_y) * 1
         
-        while (np.abs(updatedLayer.displ_buffer_x) > 1):
+        if (np.abs(updatedLayer.displ_buffer_x) > 0):
             updatedLayer.screen.add_col(np.sign(updatedLayer.displ_buffer_x))
-            updatedLayer.displ_buffer_x = updatedLayer.displ_buffer_x - np.sign(updatedLayer.displ_buffer_x) * 1
+            # updatedLayer.displ_buffer_x = updatedLayer.displ_buffer_x - np.sign(updatedLayer.displ_buffer_x) * 1
 
         return updatedLayer
 
