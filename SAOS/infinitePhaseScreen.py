@@ -252,63 +252,145 @@ class PhaseScreenVonKarman():
         # If a seed is here, screen must be repeatable wiht same seed
         self._R = np.random.default_rng(self.random_seed)
 
-        self._scrn = self.ft_phase_screen(
-            self.r0, self.stencil_length, self.pixel_scale, self.L0, 1e-10, seed=self._R
-        )
+        self._scrn = self.von_karman_phase_screen(self.L0, 1e-2, self.r0, self.stencil_length, self.pixel_scale*self.stencil_length, seed=self._R)
 
         self._scrn = self._scrn[:, :self.nx_size]
-    
-    def ft_phase_screen(self, r0, N, delta, L0, l0, FFT=None, seed=None):
+
+    def von_karman_phase_screen(self, 
+                                L0: float,
+                                l0: float,
+                                r0: float,
+                                n_points: int,
+                                diameter: float,
+                                n_subharmonics: int = 8,
+                                seed=None) -> np.ndarray:
         """
-        Creates a random phase screen with Von Karmen statistics.
-        (Schmidt 2010)
+        Generates an atmospheric phase screen using the Von Karman spectrum,
+        based on the PWD + subharmonics method described in:
         
-        Parameters:
-            r0 (float): r0 parameter of scrn in metres
-            N (int): Size of phase scrn in pxls
-            delta (float): size in Metres of each pxl
-            L0 (float): Size of outer-scale in metres
-            l0 (float): inner scale in metres
-            seed (int, optional): seed for random number generator. If provided, 
-                allows for deterministic screens  
-
-        .. note::
-            The phase screen is returned as a 2d array, with each element representing the phase 
-            change in **radians**. This means that to obtain the physical phase distortion in nanometres, 
-            it must be multiplied by (wavelength / (2*pi)), (where `wavellength` here is the same wavelength
-            in which r0 is given in the function arguments)
-
-        Returns:
-            ndarray: np array representing phase screen in radians
+        - M. Charnotskii, "Four methods for generation of turbulent phase screens: comparison,"
+        Proc. SPIE 11534, 2020.
+        - D. A. Paulson, C. Wu, and C. C. Davis, "Randomized spectral sampling for efficient
+        simulation of laser propagation through optical turbulence," J. Opt. Soc. Am. B 36,
+        3249-3262 (2019).
+        
+        Parameters
+        ----------
+        L0 : float
+            Outer scale (m).
+        l0 : float
+            Inner scale (m).
+        r0 : float
+            Fried parameter at working wavelength (m).
+        n_points : int
+            Number of grid points (NxN).
+        diameter : float
+            Physical side of the square domain (m).
+        n_subharmonics : int, optional
+            Number of subharmonic layers (default 4).
+        seed : int, optional
+            Random seed, None by default
+        
+        Returns
+        -------
+        phase : (N, N) np.ndarray
+            Real-valued phase screen [rad].
         """
-        delta = float(delta)
-        r0 = float(r0)
-        L0 = float(L0)
-        l0 = float(l0)
+        # --- RNG ---------------------------------------------------------------
+        if seed is None:
+            rng = np.random.default_rng()
+        else:
+            rng = np.random.default_rng(seed)
 
-        R = np.random.default_rng(seed)
+        # --- Spectrum constans ------------------------------------------
+        alpha = 5 / 3
+        K0    = 2 * np.pi / L0          # lower cut
+        kap_m = 2 * np.pi / l0          # higher cut
+        B_al  = (r0 ** -alpha *
+                alpha * gamma(1 + alpha / 2) *
+                2 ** (alpha - 2) /
+                (np.pi * gamma(1 - alpha / 2)))
 
-        del_f = 1./(N*delta)
+        def von_karman_spectrum(K: np.ndarray) -> np.ndarray:
+            return B_al * np.exp(-(K / kap_m) ** 2) * (K ** 2 + K0 ** 2) ** (-(2 + alpha) / 2)
 
-        fx = np.arange(-N/2., N/2.) * del_f
+        # --- spatial and spectral grid --------------------------------------
+        dx = diameter / n_points
+        dk = 2 * np.pi / diameter       # = 2π/(N dx)
 
-        (fx, fy) = np.meshgrid(fx,fx)
-        f = np.sqrt(fx**2. + fy**2.)
+        x = (np.arange(n_points) - n_points / 2) * dx
+        k = (np.arange(n_points) - n_points / 2) * dk
+        y = x[:, None]                  # columna (N,1)
 
-        fm = 5.92/l0/(2*np.pi)
-        f0 = 1./L0
+        # --- random displacement to avoid aliasing ----------------
+        kx_r = dk * (rng.random() - 0.5)
+        ky_r = dk * (rng.random() - 0.5)
+        kx   = k + kx_r
+        ky   = k[:, None] + ky_r        # (N,1)
 
-        PSD_phi = (0.023*r0**(-5./3.) * np.exp(-1*((f/fm)**2)) / (((f**2) + (f0**2))**(11./6)))
+        # Correcting factor
+        E_pwd = np.exp(-1j * ky_r * y) @ np.exp(-1j * kx_r * x[None, :])
 
-        PSD_phi[int(N/2), int(N/2)] = 0
+        # --- PWD spectrum ------------------------------------------------------
+        Kx2, Ky2 = np.meshgrid(kx ** 2, ky ** 2)
+        K2       = Kx2 + Ky2
+        sigma_pwd = dk * np.sqrt(von_karman_spectrum(np.sqrt(K2)))
 
-        cn = ((R.normal(size=(N, N))+1j * R.normal(size=(N, N))) * np.sqrt(PSD_phi)*del_f)
+        # avoid doubling counting of mode (0,0) when there are subharmonics
+        if n_subharmonics > 0:
+            sigma_pwd[n_points // 2, n_points // 2] = 0.0
 
-        phs =np.fft.ifftshift(np.fft.ifft2(np.fft.fftshift(cn))) * (N) ** 2
-        phs = phs.real
+        ampl_pwd = sigma_pwd * (rng.standard_normal((n_points, n_points)) +
+                                1j * rng.standard_normal((n_points, n_points)))
 
-        return phs
+        psi_pwd = E_pwd * np.fft.fftshift(np.fft.fft2(np.fft.fftshift(ampl_pwd)))
 
+        # --- subhamonics ------------------------------------------
+        if n_subharmonics > 0:
+            # spectral resolution of the subharmonics (dk/3^j)
+            dk_sh = dk / 3 ** np.arange(1, n_subharmonics + 1)
+
+            base = np.array([-1, 0, 1])
+            sh_x, sh_y = np.meshgrid(base, base, indexing='ij')   # (3,3)
+
+            k_sh_x = []
+            k_sh_y = []
+            sigma_sh = []
+            for j, dk_j in enumerate(dk_sh, 1):
+                kx_layer = dk_j * (sh_x + rng.random((3, 3)) - 0.5)
+                ky_layer = dk_j * (sh_y + rng.random((3, 3)) - 0.5)
+
+                kx_flat = kx_layer.ravel()
+                ky_flat = ky_layer.ravel()
+                K2_flat = kx_flat ** 2 + ky_flat ** 2
+
+                sig = dk_j * np.sqrt(von_karman_spectrum(np.sqrt(K2_flat)))
+                if j < n_subharmonics:
+                    sig[4] = 0.0
+
+                k_sh_x.append(kx_flat)
+                k_sh_y.append(ky_flat)
+                sigma_sh.append(sig)
+
+            k_sh_x = np.concatenate(k_sh_x)
+            k_sh_y = np.concatenate(k_sh_y)
+            sigma_sh = np.concatenate(sigma_sh)
+
+            amp_sh = sigma_sh * (rng.standard_normal(sigma_sh.size) +
+                                1j * rng.standard_normal(sigma_sh.size))
+
+            # Build phase components
+            e_yky = np.exp(1j * y @ k_sh_y[None, :])        # (N, M)
+            e_kxx = np.exp(1j * k_sh_x[:, None] @ x[None, :])  # (M, N)
+            psi_sh = (e_yky * amp_sh) @ e_kxx               # (N, N)
+        else:
+            psi_sh = 0.0
+
+        # --- final screen ----------------------------------------------------
+        phase_complex = psi_pwd + psi_sh
+        phase = phase_complex.real         # discard imaginary component
+
+        return phase        
 
     def get_new_row(self, sign=1): # Vertical movement --> + adds row to the bottom, - adds row to the top
         random_data = self._R.normal(0, 1, size=self.nx_size)
