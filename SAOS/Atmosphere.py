@@ -269,10 +269,11 @@ class Atmosphere:
                 layer.windSpeed = f[grp_name].attrs['windSpeed']
                 layer.windDirection = f[grp_name].attrs['windDirection']
                 layer.altitude = f[grp_name].attrs['altitude']
-
-                # Init von Karman from file
-                screen_dict = {'A': np.array(f[grp_name]['A']),
-                               'B': np.array(f[grp_name]['B']),
+              
+                screen_dict = {'A_vert': np.array(f[grp_name]['A_vert']),
+                               'B_vert': np.array(f[grp_name]['B_vert']),
+                               'A_horz': np.array(f[grp_name]['A_horz']),
+                               'B_horz': np.array(f[grp_name]['B_horz']),
                                'phase': np.array(f[grp_name]['phase'])}
                 layer.screen = PhaseScreenVonKarman(nx_size=layer.npix, pixel_scale=layer.spatial_res, r0=layer.fractionalR0, L0=self.L0, 
                                                     random_seed=layer.seed, n_columns=f[grp_name].attrs['n_columns'], from_file=True, screen_file=screen_dict)
