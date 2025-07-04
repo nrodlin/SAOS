@@ -4,6 +4,11 @@ Infinite Phase Screens
 
 An implementation of the "infinite phase screen", as deduced by Francois Assemat and Richard W. Wilson, 2006.
 """
+import time
+
+import logging
+import logging.handlers
+from queue import Queue
 
 import numpy as np
 from scipy import linalg
@@ -66,7 +71,7 @@ class PhaseScreenVonKarman():
         random_seed (int, optional): seed for the random number generator
         n_columns (int, optional): Number of columns to use to continue screen, default is 2
     """
-    def __init__(self, nx_size, pixel_scale, r0, L0, random_seed=None, n_columns=2, from_file=False, screen_file=None):
+    def __init__(self, nx_size, pixel_scale, r0, L0, random_seed=None, n_columns=2, from_file=False, screen_file=None, logger=None):
 
         self.n_columns = n_columns
         self.nx_size = nx_size
@@ -79,6 +84,15 @@ class PhaseScreenVonKarman():
         self.n_stencils = self.n_columns * self.nx_size
 
         self.random_seed = random_seed
+        
+        # Setup logger
+        if logger is None:
+            self.queue_listerner = self.setup_logging()
+            self.logger = logging.getLogger()
+            self.external_logger_flag = False
+        else:
+            self.external_logger_flag = True
+            self.logger = logger
 
         self.set_coords()
         self.set_stencil_coords()
@@ -218,7 +232,7 @@ class PhaseScreenVonKarman():
             inv_cov_zz = linalg.cho_solve(cf, np.identity(cov_mat_zz.shape[0]))
             A_mat = cov_mat_xz.dot(inv_cov_zz)
         except linalg.LinAlgError:
-            print("Cholesky solve failed. Performing least squares inversion...")
+            self.logger.warning("PhaseScreenVonKarman::makeAMatrix - Cholesky solve failed. Performing least squares inversion...")
             inv_cov_zz = np.linalg.lstsq(cov_mat_zz, np.identity(cov_mat_zz.shape[0]), rcond=1e-8)
             A_mat = cov_mat_xz.dot(inv_cov_zz[0])
 
@@ -466,3 +480,34 @@ class PhaseScreenVonKarman():
         The current phase map held in the PhaseScreen object in radians.
         """
         return self._scrn[:self.nx_size, :self.nx_size]
+    
+    def setup_logging(self, logging_level=logging.WARNING):
+        #
+        #  Setup of logging at the main process using QueueHandler
+        log_queue = Queue()
+        queue_handler = logging.handlers.QueueHandler(log_queue)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging_level)  # Minimum log level
+
+        # Setup of the formatting
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
+        )
+
+        # Output to terminal
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+
+        # Qeue handler captures the messages from the different logs and serialize them
+        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
+        root_logger.addHandler(queue_handler)
+        queue_listener.start()
+
+        return queue_listener
+    
+    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
+    # If the logger is external, then the queue is stop outside of the class scope and we shall
+    # avoid to attempt its destruction
+    def __del__(self):
+        if not self.external_logger_flag:
+            self.queue_listerner.stop()
