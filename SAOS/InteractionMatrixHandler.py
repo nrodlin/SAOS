@@ -153,7 +153,7 @@ class InteractionMatrixHandler:
         self.logger.info(f'InteractionMatrixHandler::generate_modal_basis - Modal basis generated, took {time.time()-t0} [s]')
         
         self.modal_basis = []
-        self.modal_list = ['zonal', 'zernike', 'kl', 'hadamard', 'dh']
+        self.modal_list = ['zonal', 'zernike', 'kl', 'hadamard', 'DH']
         modal_basis_dict = dict.fromkeys(self.modal_list, None)
 
         for i in range(len(self.dm_scanned_list)):
@@ -498,7 +498,7 @@ class InteractionMatrixHandler:
                 
             # Verification passed, so we can use the class properties from now on
             self.modal_basis = []
-            self.modal_list = ['zonal', 'zernike', 'kl', 'hadamard', 'dh']
+            self.modal_list = ['zonal', 'zernike', 'kl', 'hadamard', 'DH']
             modal_basis_dict = dict.fromkeys(self.modal_list, None)
 
             # Create an empy list
