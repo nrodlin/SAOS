@@ -107,7 +107,7 @@ class Savepoint:
             for i in range(data_group.nLayer):
                 layer_name = 'layer_' + str(i+1)
                 atm_layer_grp = group.create_group(layer_name)
-                self.custom_create_dataset('atmosphere_layered', atm_layer_grp, iteration, getattr(data_group, layer_name).phase , mask=None)
+                self.custom_create_dataset('atmosphere_layered', atm_layer_grp, iteration, getattr(data_group, layer_name).screen.scrn, mask=None)
         
         if self.dm and group_name.find('DeformableMirror')>=0:
             self.custom_create_dataset('dm_layer', group, iteration, data_group.dm_layer.cmd_2D, mask=data_group.validAct_2D[None, ...])
@@ -345,7 +345,7 @@ class Savepoint:
                         for j in range(data_object[i].nLayer):
                             layer_name = 'layer_' + str(j+1)
                             grp = group[layer_name]
-                            self.append_to_dataset('atmosphere_layered', grp, iteration, getattr(data_object[i], layer_name).phase, None)                        
+                            self.append_to_dataset('atmosphere_layered', grp, iteration, getattr(data_object[i], layer_name).screen.scrn, None)                        
             if tag == 'deformableMirror' and self.dm:
                 for i in range(len(data_object)):
                     group_name = 'DeformableMirror_' + str(i)

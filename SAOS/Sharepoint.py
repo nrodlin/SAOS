@@ -118,7 +118,7 @@ class Sharepoint:
                     layer_name = 'layer_' + str(j+1)
                     topics.append(atm_name + '/' + layer_name)
                     if ((iteration+1)%self.atm) == 0:
-                        self.socket.send_multipart([topics[-1].encode(), pickle.dumps(getattr(atm_list[i], layer_name).phase)])
+                        self.socket.send_multipart([topics[-1].encode(), pickle.dumps(getattr(atm_list[i], layer_name).screen.scrn)])
         if self.dm > 0 and len(dm_list) > 0:
             for i in range(len(dm_list)):
                 dm_name = 'dm_' + str(i+1)
