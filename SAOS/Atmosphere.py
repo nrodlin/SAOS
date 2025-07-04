@@ -184,7 +184,7 @@ class Atmosphere:
         layer.fractionalR0 = self.r0*self.fractionalR0[i_layer]**(-3/5)
 
         layer.screen = PhaseScreenVonKarman(nx_size=layer.npix, pixel_scale=layer.spatial_res, r0 = layer.fractionalR0, 
-                                            L0 = self.L0, random_seed = layer.seed, n_columns=2)
+                                            L0 = self.L0, random_seed = layer.seed, n_columns=2, logger=self.logger)
 
         self.logger.debug('Atmosphere::buildLayer - Layer '+str(i_layer+1)+' created.')      
     
@@ -276,7 +276,7 @@ class Atmosphere:
                                'B_horz': np.array(f[grp_name]['B_horz']),
                                'phase': np.array(f[grp_name]['phase'])}
                 layer.screen = PhaseScreenVonKarman(nx_size=layer.npix, pixel_scale=layer.spatial_res, r0=layer.fractionalR0, L0=self.L0, 
-                                                    random_seed=layer.seed, n_columns=f[grp_name].attrs['n_columns'], from_file=True, screen_file=screen_dict)
+                                                    random_seed=layer.seed, n_columns=f[grp_name].attrs['n_columns'], from_file=True, screen_file=screen_dict, logger=self.logger)
                 
                 setattr(self, 'layer_'+str(i_layer+1), layer)
 
@@ -340,14 +340,12 @@ class Atmosphere:
         updatedLayer.displ_buffer_y += (vy*self.samplingTime) / updatedLayer.spatial_res
 
         # Check if there is a full pixel displacement and update the screen:
-
         if (np.abs(updatedLayer.displ_buffer_y) > 0):
             updatedLayer.screen.add_row(np.sign(updatedLayer.displ_buffer_y))
-            # updatedLayer.displ_buffer_y = updatedLayer.displ_buffer_y - np.sign(updatedLayer.displ_buffer_y) * 1
-        
+            updatedLayer.displ_buffer_y = updatedLayer.displ_buffer_y - np.sign(updatedLayer.displ_buffer_y) * 1
         if (np.abs(updatedLayer.displ_buffer_x) > 0):
             updatedLayer.screen.add_col(np.sign(updatedLayer.displ_buffer_x))
-            # updatedLayer.displ_buffer_x = updatedLayer.displ_buffer_x - np.sign(updatedLayer.displ_buffer_x) * 1
+            updatedLayer.displ_buffer_x = updatedLayer.displ_buffer_x - np.sign(updatedLayer.displ_buffer_x) * 1
 
         return updatedLayer
 
