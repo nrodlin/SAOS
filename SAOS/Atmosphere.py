@@ -132,6 +132,7 @@ class Atmosphere:
         if self.hasNotBeenInitialized:
             self.initial_r0 = self.r0
             self.logger.debug('Atmosphere::initializeAtmosphere - Creating layers...')
+            # results_layers = Parallel(n_jobs=1, prefer="threads")(delayed(self.buildLayer)(i_layer, randomState) for i_layer in range(self.nLayer))
             results_layers = Parallel(n_jobs=self.nLayer, prefer="threads")(delayed(self.buildLayer)(i_layer, randomState) for i_layer in range(self.nLayer))
             for i_layer in range(self.nLayer):
                 setattr(self,'layer_'+str(i_layer+1),results_layers[i_layer])

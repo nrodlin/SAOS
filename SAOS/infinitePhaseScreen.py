@@ -81,8 +81,6 @@ class PhaseScreenVonKarman():
         self.stencil_length_factor = 1
         self.stencil_length = self.nx_size
 
-        self.n_stencils = (self.n_columns + 1) * self.nx_size # 2 last rows/cols + random selection uniformly distributed
-
         self.random_seed = random_seed
         
         # Setup logger
@@ -95,7 +93,7 @@ class PhaseScreenVonKarman():
             self.logger = logger
 
         self.set_coords()
-        self.set_stencil_coords()
+        self.n_stencils = self.set_stencil_coords()
 
         if from_file:
             self.load_from_file(scrn=screen_file)
@@ -146,45 +144,44 @@ class PhaseScreenVonKarman():
     def set_stencil_coords(self):
         # Vertical --> Top
         self.stencil_vert = np.zeros((self.stencil_length, self.nx_size))
-        self.stencil_vert[:self.n_columns, :] = 1
 
-        # Add random selection
-        total_allowed = (self.stencil_length - self.n_columns) * self.nx_size
-        rng = np.random.default_rng()
-        lin = rng.choice(total_allowed, size=self.nx_size, replace=False)
-        rows = self.n_columns + (lin // self.nx_size)
-        cols = lin % self.nx_size
+        nCols = int(np.floor(np.log2(self.nx_size)))
 
-        self.stencil_vert[rows, cols] = 1
+        for i in range(nCols):
+            nPoints  = self.nx_size // (2**i)
+            interval = int(np.floor(self.nx_size / nPoints))
+            center   = self.nx_size//2
+
+            order = list(range(center, self.nx_size, interval)) + list(range(center-interval, -1, -interval)) + [center]
+
+            self.stencil_vert[i,order] = 1
+
         self.stencil_coords_vert = np.array(np.where(self.stencil_vert==1)).T
         self.stencil_positions_vert = self.stencil_coords_vert * self.pixel_scale
 
-        # Select random pixel for the reference near the leading edge (D. Fried and T. Clark, 2008)
+        # Select pixel for the reference near the leading edge (D. Fried and T. Clark, 2008)
 
-        if self.stencil_vert.shape[0] < 2*self.n_columns: # The number of stencils selected is 3*nx_size --> 2 col + 1 col randomly distirbuted, 
-                                                          # with 4 we will have free points for the reference
-            self.logger.error("PhaseScreenVonKarman::set_stencil_coords - Not enough points in the phase screen to perform the extrusion")
-            raise ValueError("PhaseScreenVonKarman::set_stencil_coords - Not enough points in the phase screen to perform the extrusion")
-        
-        ref_subregion = self.stencil_vert[:2*self.n_columns,:]
+        ref_subregion = self.stencil_vert[:2*nCols,:]
         false_coords = np.argwhere(ref_subregion==0)
 
-        self.ref_coords_vert    = rng.choice(false_coords, size=1).T
+        self.ref_coords_vert    = false_coords[0,:].T
         self.ref_positions_vert = self.ref_coords_vert * self.pixel_scale
 
         # Horizontal --> Left
 
         self.stencil_horz = np.zeros((self.stencil_length, self.nx_size))
-        self.stencil_horz[:, :self.n_columns] = 1
+        
+        nRows = int(np.floor(np.log2(self.nx_size)))
 
-        # Add random selection
-        rng = np.random.default_rng()
-        total_allowed = self.stencil_length * (self.nx_size - self.n_columns)
-        lin = rng.choice(total_allowed, size=self.nx_size, replace=False)
-        rows = lin // (self.nx_size - self.n_columns)
-        cols = self.n_columns + (lin % (self.nx_size - self.n_columns))
+        for i in range(nRows):
+            nPoints  = self.nx_size // (2**i)
+            interval = int(np.floor(self.nx_size / nPoints))
+            center   = self.nx_size//2
 
-        self.stencil_horz[rows, cols] = 1        
+            order = list(range(center, self.nx_size, interval)) + list(range(center-interval, -1, -interval)) + [center]
+
+            self.stencil_horz[order,i] = 1      
+        
         self.stencil_coords_horz = np.array(np.where(self.stencil_horz==1)).T
         self.stencil_coords_horz =  self.stencil_coords_horz[np.lexsort((self.stencil_coords_horz[:, 0], self.stencil_coords_horz[:, 1]))]
         self.stencil_positions_horz = self.stencil_coords_horz * self.pixel_scale
@@ -193,8 +190,10 @@ class PhaseScreenVonKarman():
         ref_subregion = self.stencil_vert[:,:2*self.n_columns]
         false_coords = np.argwhere(ref_subregion==0)
 
-        self.ref_coords_horz    = rng.choice(false_coords, size=1).T
+        self.ref_coords_horz    = false_coords[0,:].T
         self.ref_positions_horz = self.ref_coords_horz * self.pixel_scale
+
+        return int(np.sum(self.stencil_horz))
 
     def calc_separations(self, stencil_positions, new_positions):
         """
