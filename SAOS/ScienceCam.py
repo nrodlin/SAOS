@@ -79,7 +79,7 @@ class ScienceCam:
             gain : float, optional
                 Detector parameter. Gain of the detector. Default is 1.
             quantization_conversion : float, optional.
-                Detector parameter. Conversion gain to discretize the measurement [e-/px]. Default 70.5e-/DN.
+                Detector parameter. Conversion gain to discretize the measurement [e-/px]. Default 0, assumed linear.
             sensorType : str, optional
                 Detector parameter. Sensor type ('CCD', 'CMOS', 'EMCCD'). Default is 'CCD'.
             darkCalibration : int, optional
