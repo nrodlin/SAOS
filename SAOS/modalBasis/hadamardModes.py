@@ -27,6 +27,13 @@ def generate_hadamard_modes(dm, nModes=None, useTorch=False, include_piston=Fals
             H_modes[dm.validAct, i] = H[i,:dm.nValidAct]
         else:
             H_modes[dm.validAct, i] = H[i+1,:dm.nValidAct]
+            # Remove residual piston
+            H_modes[dm.validAct, i] -= np.mean(H_modes[dm.validAct, i])
+
+    # Normalize between -1 and 1
+    max_values = np.max(np.abs(H_modes), axis=0, keepdims=True)
+    max_values[max_values == 0] = 1
+    H_modes = H_modes / max_values
 
     if useTorch:
         return torch.tensor(H_modes, dtype=torch.float32)
