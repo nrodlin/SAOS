@@ -68,6 +68,7 @@ class Savepoint:
         if logger is None:
             self.queue_listerner = self.setup_logging()
             self.logger = logging.getLogger()
+            self.external_logger_flag = False
         else:
             self.external_logger_flag = True
             self.logger = logger
@@ -466,12 +467,12 @@ class Savepoint:
                                     grp = group['sci_frame_shortExp']
                                     self.append_to_dataset('sci_frame', grp, iteration, lp.sci_frame, lp)
                                 else:
-                                    sci_frame_grp = group.create_group('sci_frame_longExp')
-                                    self.custom_create_dataset('sci_frame', sci_frame_grp, iteration, lp.long_exposure_frame, None, lp)
+                                    sci_frame_grp = group.create_group('sci_frame_shortExp')
+                                    self.custom_create_dataset('sci_frame', sci_frame_grp, iteration, lp.sci_frame, None, lp)
                             if lp.long_exposure_frame is not None:
                                 if 'sci_frame_longExp' in group.keys():
                                     grp = group['sci_frame_longExp']
-                                    self.append_to_dataset('sci_frame', grp, iteration, lp.sci_frame, lp)
+                                    self.append_to_dataset('sci_frame', grp, iteration, lp.long_exposure_frame, lp)
                                 else:
                                     sci_frame_grp = group.create_group('sci_frame_longExp')
                                     self.custom_create_dataset('sci_frame', sci_frame_grp, iteration, lp.long_exposure_frame, None, lp)                                
