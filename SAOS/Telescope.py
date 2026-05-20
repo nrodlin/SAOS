@@ -166,6 +166,9 @@ class Telescope:
                 pup*= map_dist>thickness_spider/2
 
             self.pupil = pup.copy()
+            self.pupilReflectivity = self.pupil.astype(float) * self.pupilReflectivity
+            self.pixelArea = np.sum(self.pupil)
+            self.pupilLogical = np.where(np.reshape(self.pupil, self.resolution*self.resolution) > 0)
             
         else:
             self.logger.warning('Telescope::apply_spider - Thickness is <=0, returning default pupil.')
