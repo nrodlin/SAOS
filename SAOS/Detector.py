@@ -155,7 +155,6 @@ class Detector:
         self.peak_signal        = 0
         self.photon_noise_sigma = 0
         self.dark_noise_sigma   = 0
-        self.readoutNoise       = 0
         self.quantizationNoise  = 0
 
         # Calibrate dark if specified

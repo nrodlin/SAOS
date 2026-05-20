@@ -288,7 +288,9 @@ class LightPath:
                 # Append current short exp frame to the cumulative list
                 self.long_exp_cumulative.append(self.sci_frame)
                 # Now, manage the long exposure frame --> The number of frames accumulated let us know the time exposed
-                exposured_time = len(self.long_exp_cumulative) * self.tel.samplingTime
+                # Incorporate the decimation factor since we only acquire a frame every decimation steps
+                decimation_factor = max(1, self.sci.decimation) if self.sci.decimation > 0 else 1
+                exposured_time = len(self.long_exp_cumulative) * decimation_factor * self.tel.samplingTime
                 # Check if we have exposed the required time
                 if exposured_time >= self.sci.integrationTime:
                     # Add the frames accumulated
@@ -315,6 +317,7 @@ class LightPath:
         # Advance the simulation time, if required
         if temporal_tick:
             self.iteration += 1
+            self.decimation_counter += 1
         
         return True
     
