@@ -259,7 +259,7 @@ class InteractionMatrixHandler:
             modes = self.modal_basis[i][modal_basis_per_DM[i]][:, :nModes_per_DM[i]]
             # Check if the DM is at ground layer or altitude to discard TT
             discarded_modes = 0
-            if self.dm_scanned_list[i].altitude > 0 and modal_basis_per_DM[i] in ['zernike', 'dh']:
+            if self.dm_scanned_list[i].altitude > 0 and modal_basis_per_DM[i] in ['zernike', 'dh', 'kl']:
                 self.logger.warning(f'InteractionMatrixHandler::measure - Be advised that TT is discarded in altitude DMs for basis {modal_basis_per_DM[i]}, the number of modes specified is reduced by 2.')
                 modes = modes[:,2:]
                 discarded_modes = 2
