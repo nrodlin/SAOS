@@ -317,7 +317,8 @@ class LightPath:
         # Advance the simulation time, if required
         if temporal_tick:
             self.iteration += 1
-            self.decimation_counter += 1
+            if self.sci:
+                self.decimation_counter += 1
         
         return True
     
