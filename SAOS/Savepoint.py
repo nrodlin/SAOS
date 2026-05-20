@@ -290,9 +290,8 @@ class Savepoint:
                     dict_stats['contrast'] = np.array([0.0])
                 
                 # Get median filtered image
-                kernel = np.ones((3,3))
-                kernel /= np.prod(kernel.shape)
-                med = signal.convolve2d(np.squeeze(data), kernel, mode='same', boundary='symm')
+                squeezed_data = np.squeeze(data)
+                med = signal.medfilt(squeezed_data, kernel_size=3)
                 # Create Gradient filters
                 kx = np.array(([-3, 0, 3], [-10, 0, 10], [-3, 0, 3]))
                 ky = np.rot90(kx)
@@ -300,16 +299,16 @@ class Savepoint:
                 kx_med = signal.convolve2d(med, kx, mode='same', boundary='symm')
                 ky_med = signal.convolve2d(med, ky, mode='same', boundary='symm')
                 # Compute gradient of the original image
-                kx_img = signal.convolve2d(np.squeeze(data), kx, mode='same', boundary='symm')
-                ky_img = signal.convolve2d(np.squeeze(data), ky, mode='same', boundary='symm')
-                # combine gradients
-                g_img = np.sum(np.hypot(kx_img, ky_img))
-                g_med = np.sum(np.hypot(kx_med, ky_med))
-                # compute metric
-                numerator = 2.0 * g_img * g_med
-                denominator = g_img**2 + g_med**2
-
-                dict_stats['MFGS'] = np.array([0.0 if denominator < 1e-9 else numerator / denominator])                                                 
+                kx_img = signal.convolve2d(squeezed_data, kx, mode='same', boundary='symm')
+                ky_img = signal.convolve2d(squeezed_data, ky, mode='same', boundary='symm')
+                # compute gradient magnitudes pixel-by-pixel
+                g_img = np.hypot(kx_img, ky_img)
+                g_med = np.hypot(kx_med, ky_med)
+                # compute similarity map
+                C = 1e-10
+                gs_map = (2.0 * g_img * g_med + C) / (g_img**2 + g_med**2 + C)
+                # compute average MFGS
+                dict_stats['MFGS'] = np.array([np.mean(gs_map)])                                                 
             else:
                  ideal_psf = lp.sci.fake_src_dict[str(int(lp.src.wavelength*1e9))]
                  
