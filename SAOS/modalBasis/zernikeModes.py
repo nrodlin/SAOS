@@ -41,6 +41,9 @@ def get_zernikes(coordinates, validActs, nModes, Noffset):
     Z_machine = ZernikeNaive(mask=[])
 
     rho = np.sqrt(coordinates[:,0]**2 + coordinates[:,1]**2)
+    # Normalize to unitary circle
+    if np.any(validActs):
+        rho /= np.max(rho[validActs])
     theta = np.arctan2(coordinates[:,1], coordinates[:,0])
 
     for j in range(nModes):
