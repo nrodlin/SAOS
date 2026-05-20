@@ -13,7 +13,12 @@ def generate_dh_modes(dm, nModes=None, useTorch=False, include_piston=False):
 
     # Compute radius and theta arrays for all points
     r = np.sqrt(dm.coordinates[:,0]**2 + dm.coordinates[:,1]**2)
-    r /= np.max(r, axis=0)
+    if np.any(dm.validAct):
+        r /= np.max(r[dm.validAct])
+    else:
+        r /= np.max(r)
+    # Clip to 1.0 to avoid ValueErrors outside the pupil
+    r = np.clip(r, 0, 1.0)
     theta = np.arctan2(dm.coordinates[:,1], dm.coordinates[:,0])
 
     # Allocate output array
