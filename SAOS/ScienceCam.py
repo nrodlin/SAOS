@@ -55,7 +55,7 @@ class ScienceCam:
         integrationTime : float, optional
             Integration time in seconds. Defaults to samplingTime.
         decimation : int, optional
-            Decimation factor for storing results. Default is 50.            
+            Decimation factor for storing results. Default is 1, no decimation.            
 
         noiseFlag : bool, optional
             If True, the detector includes noise using the kwargs params/default config. By default, False.                 
