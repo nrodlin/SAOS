@@ -1,0 +1,102 @@
+/* ── SAOS custom styles ── */
+
+/* Hero section on homepage */
+.saos-hero {
+  background: linear-gradient(135deg, #e65100 0%, #bf360c 50%, #1a237e 100%);
+  border-radius: 12px;
+  padding: 3rem 2rem;
+  margin: 1.5rem 0 2.5rem;
+  color: white;
+  text-align: center;
+}
+
+.saos-hero h1 {
+  font-size: 2.8rem;
+  font-weight: 800;
+  margin-bottom: 0.5rem;
+  color: white !important;
+}
+
+.saos-hero p {
+  font-size: 1.15rem;
+  opacity: 0.9;
+  max-width: 640px;
+  margin: 0 auto 1.5rem;
+}
+
+.saos-hero-badge {
+  display: inline-flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.saos-hero-badge a {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: white !important;
+  padding: 0.3rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  text-decoration: none;
+  transition: background 0.2s;
+}
+
+.saos-hero-badge a:hover {
+  background: rgba(255,255,255,0.28);
+}
+
+/* Feature cards grid */
+.saos-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1.2rem;
+  margin: 1.5rem 0;
+}
+
+.saos-card {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 10px;
+  padding: 1.4rem 1.2rem;
+  transition: box-shadow 0.2s, transform 0.2s;
+  background: var(--md-default-bg-color);
+}
+
+.saos-card:hover {
+  box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+  transform: translateY(-2px);
+}
+
+.saos-card-icon {
+  font-size: 2rem;
+  margin-bottom: 0.6rem;
+}
+
+.saos-card h3 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin: 0 0 0.4rem;
+}
+
+.saos-card p {
+  font-size: 0.88rem;
+  color: var(--md-default-fg-color--light);
+  margin: 0;
+}
+
+/* Admonition tweak */
+.md-typeset .admonition {
+  border-radius: 8px;
+}
+
+/* API signature styling */
+.doc-signature {
+  background: var(--md-code-bg-color);
+  border-radius: 6px;
+  padding: 0.6rem 1rem;
+}
+
+/* Navigation sidebar tweaks */
+.md-nav__title {
+  font-weight: 700;
+}
