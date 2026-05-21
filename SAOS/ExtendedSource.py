@@ -8,6 +8,8 @@ from SAOS.Source import Source
 import numpy as np
 from importlib.resources import files
 import h5py
+import pvlib
+import scipy as sp
 
 import logging
 import logging.handlers
@@ -76,7 +78,6 @@ class ExtendedSource(Source):
         self.optBand       = optBand                               # optical band
         self.wavelength    = tmp[0]                                # wavelength in m
         self.bandwidth     = tmp[1]                                # optical bandwidth
-        self.nPhoton       =  tmp[2]                               # photon per m2 per s
         self.fluxMap       = []                                    # 2D flux map of the source
         self.tag           = 'sun'                                 # tag of the object
         self.altitude      = altitude                              # altitude of the source object in m    
@@ -87,6 +88,11 @@ class ExtendedSource(Source):
         self.nSubDirs      = nSubDirs                              # Number of sub-directions taken from the sun image to build the inner aberration of the pupil in the image
         self.patch_padding = patch_padding                         # Padding outside the subaperture FoV in arcsec.
         self.subDir_margin = subDir_margin                         # Extra margin to the subDirs size to avoid border effects [arcsec]
+
+        self.flux          = self.computeFlux(self.wavelength, 
+                                              self.bandwidth, 
+                                              self.fov) # flux [photons/m²/s]
+
 
         self.type     = 'SUN'
 
@@ -166,14 +172,11 @@ class ExtendedSource(Source):
                        
         self.is_initialized = True
         
-    # Source: Serpone, Nick & Horikoshi, Satoshi & Emeline, Alexei. (2010). 
-    # Microwaves in advanced oxidation processes for environmental applications. A brief review. 
-    # Journal of Photochemistry and Photobiology C-photochemistry Reviews - J PHOTOCHEM PHOTOBIOL C-PHOTO. 11. 114-131. 10.1016/j.jphotochemrev.2010.07.003. 
     PHOTOMETRY_BANDS = {
-        'V':  [0.500e-6, 0.0, 1.14e11],
-        'V1': [0.525e-6, 0.0, 1.14e11],
-        'R':  [0.680e-6, 0.0, 1.14e11],
-        'IR': [1.300e-6, 0.0, 1.14e11],
+        'V':  [0.500e-6, 10e-9],
+        'V1': [0.525e-6, 10e-9],
+        'R':  [0.680e-6, 10e-9],
+        'IR': [1.300e-6, 10e-9],
     }
         
     def photometry(self, arg):
@@ -188,7 +191,7 @@ class ExtendedSource(Source):
         Returns
         -------
         list
-            [wavelength, bandwidth, zero point flux]
+            [wavelength, bandwidth, flux]
         """
         self.logger.debug('ExtendedSource::photometry')
         
@@ -197,10 +200,42 @@ class ExtendedSource(Source):
             raise ValueError('The photometry object takes a string as an input.')
             
         if arg in self.PHOTOMETRY_BANDS:
-            return self.PHOTOMETRY_BANDS[arg]
+            band_info = self.PHOTOMETRY_BANDS[arg]
+            return band_info + [self.flux]
         else:
             self.logger.error(f"ExtendedSource::photometry - Wrong name for the photometry object. Available bands: {', '.join(self.PHOTOMETRY_BANDS.keys())}")
             raise ValueError(f"Wrong name for the photometry object. Available bands: {', '.join(self.PHOTOMETRY_BANDS.keys())}")
+    
+    def computeFlux(self, fov, area, wavelength, bandwidth):
+        """
+        Return photons.
+
+        Parameters
+        ----------
+        fov : float
+            Field of View observed in arcsec
+        wavelength : float
+            Wavelength observed at the sun in [m]
+        bandwidth : float
+            Wavelength filter bandwidth [m]
+
+        Returns
+        -------
+        flux [photons/m²/s]
+        """        
+
+        am15 = pvlib.spectrum.get_reference_spectra(standard="ASTM G173-03")
+
+        wavelengths = am15.index.values / 1e9  # in meters
+
+        E_lambda = np.interp(wavelength, wavelengths, am15['direct'].values)  # W m^-2 nm^-1
+
+        omega_fov = (fov / 206265.0)**2
+        omega_sun = np.pi * (960.0 / 206265.0)**2
+
+        flux = area * bandwidth * E_lambda * (omega_fov / omega_sun) * wavelength / (sp.constants.h * sp.constants.c)
+
+        return flux
 
     def print_properties(self):
         """
