@@ -797,6 +797,7 @@ class CorrelatingShackHartmann:
         # Compute the number of photons considering the flux of the sun, collecting area of the telescope, sampling time and FoV of the WFS 
         # that may be smaller in the simulation than the FoV of the source
         nPhotons = np.round(src.flux * self.area_eff * self.integration_time * self.lightRatio * (self.fieldOfView / src.fov)).astype(int)
+        # Compute the frame and the slopes        
         signal, signal_2D, noisy_frame, pseudoref = self.wfs_integrate(ideal_frame, I, nPhotons, pseudoref, reference_slopes)                
         t5 = time.time()
         self.logger.debug(f'PSF: {t1-t0}, Compute images: {t2-t1}, Merge images: {t3-t2}, Create full frame: {t4-t3}, Integrate:{t5-t4}')

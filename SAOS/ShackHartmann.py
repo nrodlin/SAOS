@@ -186,62 +186,12 @@ class ShackHartmann:
                             noiseFlag=noiseFlag,
                             logger=self.logger,
                             **camera_kwargs)
-        
-        # Flux definition
 
-        # The flux is divided into the pixels to which the lenslets focuses the image. 
-        X_map, Y_map     = np.meshgrid(np.arange(self.npix_lenslet),np.arange(self.npix_lenslet))
-        self.X_coord_map = np.atleast_3d(X_map).T
-        self.Y_coord_map = np.atleast_3d(Y_map).T
-        
-        if src.type == 'LGS':
-            self.is_LGS                 = True
-        else:
-            self.is_LGS                 = False
+        # Photon count
+        self.area_eff         = telescope.area_eff
+        self.integration_time = telescope.samplingTime
                 
-        # cube of lenslet zero padded
-        self.cube                   = np.zeros([self.nSubap**2,self.npix_lenslet,self.npix_lenslet])
-        self.cube_flux              = np.zeros([self.nSubap**2,self.npix_lenslet,self.npix_lenslet],dtype=(complex))
-        self.index_x                = []
-        self.index_y                = []
-
-        # phasor to center spots in the center of the lenslets
-        [xx,yy]                    = np.meshgrid(np.linspace(0,self.npix_lenslet-1,self.npix_lenslet),
-                                                 np.linspace(0,self.npix_lenslet-1,self.npix_lenslet))
-        
-        self.phasor                = np.exp(-(1j*np.pi*(self.npix_lenslet+1)/self.npix_lenslet)*(xx+yy))
-
-        self.phasor_tiled          = np.moveaxis(np.tile(self.phasor[:,:,None],self.nSubap**2),2,0)
-        
-        # Get subapertures index and flux per subaperture        
-        
-        self.phasor_expanded                = np.exp(-(1j*np.pi*(self.npix_lenslet+1)/self.npix_lenslet)*(xx+yy))
-
-        self.phasor_expanded_tiled          = np.moveaxis(np.tile(self.phasor_expanded[:,:,None],self.nSubap**2), 2, 0)
-
-        # The normalized flux maps considers the efficiency in the reflectance of the light in the pupil, integration time and area and light ratio derived to the WFS
-        # The flux is computed as norm_flux * nPhoton
-        
-        # change the resolution of the pupil to the number of points for the WFS
-        pupil_reflectivity_resized = cv2.resize(telescope.pupilReflectivity, (self.npix_lenslet * self.nSubap, self.npix_lenslet* self.nSubap), interpolation=cv2.INTER_LINEAR)
-
-        self.norm_flux_map = self.lightRatio* pupil_reflectivity_resized * telescope.samplingTime*(telescope.D/(self.nSubap*self.npix_lenslet))**2
-
-        self.initialize_flux(src, self.norm_flux_map)
-        for i in range(self.nSubap):
-            for j in range(self.nSubap):
-                self.index_x.append(i)
-                self.index_y.append(j)
-
-        self.current_nPhoton = src.nPhoton
-
-        self.index_x = np.asarray(self.index_x)
-        self.index_y = np.asarray(self.index_y)
-
-        # index of valid slopes X and Y
         self.logger.info('ShackHartmann::__init__ - Selecting valid subapertures based on flux considerations..')
-
-        self.photon_per_subaperture_2D = np.reshape(self.photon_per_subaperture, [self.nSubap,self.nSubap])
 
         self.valid_subapertures = np.zeros((self.nSubap, self.nSubap)).astype(bool)
 
@@ -264,6 +214,11 @@ class ShackHartmann:
         self.nSignal = 2*self.nValidSubaperture     
 
         # LGS spot   
+        if src.type == 'LGS':
+            self.is_LGS                 = True
+        else:
+            self.is_LGS                 = False
+        
         if self.is_LGS:
             self.get_convolution_spot(src) 
 
@@ -389,39 +344,6 @@ class ShackHartmann:
         return centroids.cpu().numpy()
 #%% DIFFRACTIVE
 
-    def initialize_flux(self, src, norm_flux_map):
-        """
-        Initialize per-subaperture flux distribution.
-
-        Parameters
-        ----------
-        src : Source
-            Light source object.
-        norm_flux_map : np.ndarray
-            Normalized flux across telescope pupil.
-
-        Returns
-        -------
-        None
-        """
-        # Create the flux cube storing the flux at each subaperture
-        self.cube_flux = np.zeros([self.nSubap**2,self.npix_lenslet,self.npix_lenslet],dtype=float)
-
-        # Build the flux map
-        input_flux_map = src.nPhoton * norm_flux_map
-
-        input_flux_map = input_flux_map.reshape(self.nSubap, self.npix_lenslet, 
-                         self.nSubap, self.npix_lenslet).transpose(0, 2, 1, 3).reshape(self.nSubap*self.nSubap, 
-                                                                                       self.npix_lenslet, self.npix_lenslet) 
-        # Assign the illumination to the region, considering zeropadding
-        corner = self.npix_lenslet // 2 - self.npix_lenslet//2
-        self.cube_flux[:,corner:corner+self.npix_lenslet,
-                         corner:corner+self.npix_lenslet] = input_flux_map
-      
-        # Get general properties of the illumination
-        self.photon_per_subaperture = np.apply_over_axes(np.sum, self.cube_flux, [1,2])
-        self.current_nPhoton = src.nPhoton
-        return
     # This function takes the phase at the pupil as input. Then, the flux at each subaperture (pupil function) is multiplied 
     # by the complex phase to obtain the PSF per subaperture, as an array of dimensions (nSubap**2, n_pix_lenslet_init, n_pix_lenslet_init)
     # The subapertures are sorted from left to right, top to bottom.
@@ -792,12 +714,7 @@ class ShackHartmann:
         if (phase_in is None) or (src is None):
             self.logger.error("ShackHartmann::wfs_measure - Phase or Source are none.")
             raise ValueError('ShackHartmann::wfs_measure - Phase or Source are none.')
-        # Check if it is necessary to recompute the flux per subaperture, this is important as it will take longer
-        # time during the execution and the number of subaps may vary!! --> Be careful, the IM shall vary accondingly
-        if self.current_nPhoton != src.nPhoton:
-            self.logger.info('ShackHartmann::wfs_measure - Number of photons changed, updating flux on subaps')
-            self.initialize_flux(src, self.norm_flux_map)   
-        
+       
         # compute fwhm
         fwhm = src.wavelength * 206265 / (self.subaperture_size * self.plate_scale)
         # compute the PSF intensity
@@ -815,7 +732,11 @@ class ShackHartmann:
 
         ideal_frame = self.create_full_frame(I)
         t2 = time.time()
-        signal, signal_2D, noisy_frame = self.wfs_integrate(ideal_frame, I, src.nPhoton*self.lightRatio)                
+        # Compute the number of photons considering the flux of the sun, collecting area of the telescope, sampling time and FoV of the WFS 
+        # that may be smaller in the simulation than the FoV of the source
+        nPhotons = np.round(src.flux * self.area_eff * self.integration_time * self.lightRatio * (self.fieldOfView / src.fov)).astype(int)
+        # Compute the frame and the slopes
+        signal, signal_2D, noisy_frame = self.wfs_integrate(ideal_frame, I, nPhotons)                
         t3 = time.time()
         self.logger.debug(f'Get PSF: {(t1-t0)*1000}')
         self.logger.debug(f'Create full frame: {(t2-t1)*1000}')
