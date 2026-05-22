@@ -89,9 +89,7 @@ class ExtendedSource(Source):
         self.patch_padding = patch_padding                         # Padding outside the subaperture FoV in arcsec.
         self.subDir_margin = subDir_margin                         # Extra margin to the subDirs size to avoid border effects [arcsec]
 
-        self.flux          = self.computeFlux(self.wavelength, 
-                                              self.bandwidth, 
-                                              self.fov) # flux [photons/m²/s]
+        self.flux          = self.computeFlux(self.fov, self.wavelength, self.bandwidth) # flux [photons/m²/s]
 
 
         self.type     = 'SUN'
@@ -129,7 +127,7 @@ class ExtendedSource(Source):
                                             magnitude=1, 
                                             coordinates=[self.subDirs_coordinates[0,dirX,dirY], self.subDirs_coordinates[1,dirX,dirY]],
                                             logger=self.logger))
-                self.subDirs_stars[-1].nPhoton = np.round(self.nPhoton/(self.nSubDirs*self.nSubDirs))
+                self.subDirs_stars[-1].flux = np.round(self.flux/(self.nSubDirs*self.nSubDirs))
         
         # Last step, define the 2D filter that will be used to combine the subDirs. 
         # Taken from the WideField module of DASP (Durham Adaptive Optics Simulator, Alaister Basedn et al.)
@@ -191,7 +189,7 @@ class ExtendedSource(Source):
         Returns
         -------
         list
-            [wavelength, bandwidth, flux]
+            [wavelength, bandwidth]
         """
         self.logger.debug('ExtendedSource::photometry')
         
@@ -201,12 +199,12 @@ class ExtendedSource(Source):
             
         if arg in self.PHOTOMETRY_BANDS:
             band_info = self.PHOTOMETRY_BANDS[arg]
-            return band_info + [self.flux]
+            return band_info
         else:
             self.logger.error(f"ExtendedSource::photometry - Wrong name for the photometry object. Available bands: {', '.join(self.PHOTOMETRY_BANDS.keys())}")
             raise ValueError(f"Wrong name for the photometry object. Available bands: {', '.join(self.PHOTOMETRY_BANDS.keys())}")
     
-    def computeFlux(self, fov, area, wavelength, bandwidth):
+    def computeFlux(self, fov, wavelength, bandwidth):
         """
         Return photons.
 
@@ -226,14 +224,17 @@ class ExtendedSource(Source):
 
         am15 = pvlib.spectrum.get_reference_spectra(standard="ASTM G173-03")
 
-        wavelengths = am15.index.values / 1e9  # in meters
+        wavelengths_nm = am15.index.values
 
-        E_lambda = np.interp(wavelength, wavelengths, am15['direct'].values)  # W m^-2 nm^-1
+        wavelength_nm = wavelength * 1e9
+        bandwidth_nm = bandwidth * 1e9
+
+        E_lambda = np.interp(wavelength_nm, wavelengths_nm, am15["direct"].values)  # W m^-2 nm^-1
 
         omega_fov = (fov / 206265.0)**2
         omega_sun = np.pi * (960.0 / 206265.0)**2
 
-        flux = area * bandwidth * E_lambda * (omega_fov / omega_sun) * wavelength / (sp.constants.h * sp.constants.c)
+        flux = (bandwidth_nm * E_lambda * (omega_fov / omega_sun) * wavelength / (sp.constants.h * sp.constants.c))
 
         return flux
 
@@ -250,7 +251,7 @@ class ExtendedSource(Source):
         self.logger.info('{: ^8s}'.format('') +'{: ^10s}'.format('[m]')+ '{: ^8s}'.format('[arcsec]')+ '{: ^10s}'.format('[deg]')+ '{: ^10s}'.format('[m]')+ '{: ^10s}'.format('[phot/m2/s]') )
 
         self.logger.info('-------------------------------------------------------------------')        
-        self.logger.info('{: ^8s}'.format(self.type) +'{: ^10s}'.format(str(self.wavelength))+ '{: ^8s}'.format(str(self.coordinates[0]))+ '{: ^10s}'.format(str(self.coordinates[1]))+'{: ^10s}'.format(str(np.round(self.altitude,2)))+'{: ^10s}'.format(str(np.round(self.nPhoton,1))) )
+        self.logger.info('{: ^8s}'.format(self.type) +'{: ^10s}'.format(str(self.wavelength))+ '{: ^8s}'.format(str(self.coordinates[0]))+ '{: ^10s}'.format(str(self.coordinates[1]))+'{: ^10s}'.format(str(np.round(self.altitude,2)))+'{: ^10s}'.format(str(np.round(self.flux,1))) )
 
     def load_sun_img(self):
         """
