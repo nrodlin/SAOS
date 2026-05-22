@@ -189,10 +189,7 @@ class CorrelatingShackHartmann:
         self.area_eff         = telescope.area_eff
         self.integration_time = telescope.samplingTime
 
-        # index of valid slopes X and Y
         self.logger.info('CorrelatingShackHartmann::__init__ - Selecting valid subapertures based on flux considerations..')
-
-        self.photon_per_subaperture_2D = np.reshape(self.photon_per_subaperture, [self.nSubap,self.nSubap])
 
         self.valid_subapertures = np.zeros((self.nSubap, self.nSubap)).astype(bool)
 
@@ -476,7 +473,7 @@ class CorrelatingShackHartmann:
         fft_res = torch.sqrt(fft_res.real**2 + fft_res.imag **2)**2
 
         # Normalize energy
-        norma = torch.sum(fft_res[:, :, row_start:row_end, col_start:col_end], dim=(-2, -1), kePhoto=True)
+        norma = torch.sum(fft_res[:, :, row_start:row_end, col_start:col_end], dim=(-2, -1), keepdim=True)
 
         fft_res = fft_res / norma
            
