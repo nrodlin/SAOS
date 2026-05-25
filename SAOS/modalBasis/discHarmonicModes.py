@@ -29,8 +29,9 @@ def generate_dh_modes(dm, nModes=None, useTorch=False, include_piston=False):
         n, m = get_index(i+1) if include_piston else get_index(i+2)
         dh_modes[:, i] = disk_harmonic_mode(m, n, r, theta)  # Apply mask
 
-        # Remove piston
-        dh_modes[dm.validAct,i] -= np.mean(dh_modes[dm.validAct,i])
+        # Remove piston from modes other than the piston mode itself
+        if not include_piston or i > 0:
+            dh_modes[dm.validAct,i] -= np.mean(dh_modes[dm.validAct,i])
 
         # Normalize energy to 1 --> Necessary before Gram-Schmidt
         energy = np.sqrt(np.mean(dh_modes[dm.validAct, i]**2))
