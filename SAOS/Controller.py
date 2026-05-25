@@ -26,7 +26,7 @@ class Controller:
         interactionMatrix : InteractionMatrixHandler instance
             Contains the interaction matrices and modal basis for the simulation configuration.
         controllerType : String
-            The type of controller that will be used, supported types are: {leaky, forwardPI, backwardPI}. 
+            The type of controller that will be used, supported types are: {leaky, forwardPI, backwardPI, stateSpace}. 
         reconstructionMethod : String
             Type of reconstructor used, supported types are: {inversion, tikhonov}.        
         **kwargs
@@ -40,6 +40,14 @@ class Controller:
                 Decay rate for the Leaky integrator
             ki : list of length equal to nDMs or float
                 Integral gain for the PI controllers            
+            A : list of 2D arrays or single 2D array
+                State-transition matrix/matrices for the stateSpace controller. Shape (N_states, N_states).
+            B : list of 2D arrays or single 2D array
+                Input-to-state matrix/matrices for the stateSpace controller. Shape (N_states, N_inputs).
+            C : list of 2D arrays or single 2D array
+                State-to-output matrix/matrices for the stateSpace controller. Shape (N_outputs, N_states).
+            D : list of 2D arrays or single 2D array, optional
+                Feedforward matrix/matrices for the stateSpace controller. Shape (N_outputs, N_inputs).
         """        
         # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
         if logger is None:
@@ -75,32 +83,55 @@ class Controller:
 
         # Setup the controller
 
-        if controllerType in {'leaky', 'forwardPI', 'backwardPI'}:
+        if controllerType in {'leaky', 'forwardPI', 'backwardPI', 'stateSpace'}:
             self.controllerType = controllerType
         else:
             self.logger.error('Controller - Unknown controller.')
             raise ValueError('Unknown controller')
         
-        self.gain = kwargs.get('gain', [0.0 for _ in range(len(self.reconstructor))])
-        self.decay = kwargs.get('decay', [0.0 for _ in range(len(self.reconstructor))])
-        self.ki = kwargs.get('ki', [0.0 for _ in range(len(self.reconstructor))])
+        if self.controllerType == 'stateSpace':
+            self.A = kwargs.get('A', None)
+            self.B = kwargs.get('B', None)
+            self.C = kwargs.get('C', None)
+            self.D = kwargs.get('D', None)
+            
+            if self.A is None or self.B is None or self.C is None:
+                raise ValueError("State-space controller requires matrices A, B, and C to be specified.")
+            
+            if not isinstance(self.A, list):
+                self.A = [self.A]
+            if not isinstance(self.B, list):
+                self.B = [self.B]
+            if not isinstance(self.C, list):
+                self.C = [self.C]
+            if self.D is not None and not isinstance(self.D, list):
+                self.D = [self.D]
+                
+            if len(self.A) != len(self.reconstructor) or len(self.B) != len(self.reconstructor) or len(self.C) != len(self.reconstructor):
+                raise ValueError("State-space matrices A, B, C lists must have length equal to the number of DMs.")
+            if self.D is not None and len(self.D) != len(self.reconstructor):
+                raise ValueError("State-space matrix D list must have length equal to the number of DMs.")
+        else:
+            self.gain = kwargs.get('gain', [0.0 for _ in range(len(self.reconstructor))])
+            self.decay = kwargs.get('decay', [0.0 for _ in range(len(self.reconstructor))])
+            self.ki = kwargs.get('ki', [0.0 for _ in range(len(self.reconstructor))])
 
-        if not isinstance(self.gain, list):
-            temp_gain = self.gain
-            self.gain = [temp_gain for _ in range(len(self.reconstructor))]
-        if not isinstance(self.decay, list):
-            temp_decay = self.decay
-            self.decay = [temp_decay for _ in range(len(self.reconstructor))]
-        if not isinstance(self.ki, list):
-            temp_ki = self.ki
-            self.ki = [temp_ki for _ in range(len(self.reconstructor))]                        
+            if not isinstance(self.gain, list):
+                temp_gain = self.gain
+                self.gain = [temp_gain for _ in range(len(self.reconstructor))]
+            if not isinstance(self.decay, list):
+                temp_decay = self.decay
+                self.decay = [temp_decay for _ in range(len(self.reconstructor))]
+            if not isinstance(self.ki, list):
+                temp_ki = self.ki
+                self.ki = [temp_ki for _ in range(len(self.reconstructor))]                        
 
-        if len(self.gain) != len(self.reconstructor):
-            raise ValueError('The gain should be a float or a a list of size nDMs.')
-        if len(self.decay) != len(self.reconstructor):
-            raise ValueError('The decay should be a float or a a list of size nDMs.')
-        if len(self.ki) != len(self.reconstructor):
-            raise ValueError('The ki should be a float or a a list of size nDMs.')                
+            if len(self.gain) != len(self.reconstructor):
+                raise ValueError('The gain should be a float or a a list of size nDMs.')
+            if len(self.decay) != len(self.reconstructor):
+                raise ValueError('The decay should be a float or a a list of size nDMs.')
+            if len(self.ki) != len(self.reconstructor):
+                raise ValueError('The ki should be a float or a a list of size nDMs.')                
 
         # Run the initialization of the controller
         self.initializeController(self.controllerType, self.reconstructor)
@@ -246,7 +277,7 @@ class Controller:
         Parameters
         ----------
         controllerType : str
-            Type of controller ('leaky', 'forwardPI', 'backwardPI').
+            Type of controller ('leaky', 'forwardPI', 'backwardPI', 'stateSpace').
         reconstructor : list
             List of reconstructor matrices per DM.
 
@@ -261,6 +292,45 @@ class Controller:
         elif controllerType == 'forwardPI' or controllerType == 'backwardPI':
             self.command_previous = [torch.zeros((reconstructor[i].shape[0],1), dtype=torch.float64, device=self.device) for i in range(len(reconstructor))]
             self.error_previous = [torch.zeros((reconstructor[i].shape[0],1), dtype=torch.float64, device=self.device) for i in range(len(reconstructor))]
+        elif controllerType == 'stateSpace':
+            self.state_previous = []
+            self.A_tensor = []
+            self.B_tensor = []
+            self.C_tensor = []
+            self.D_tensor = []
+            
+            for i in range(len(reconstructor)):
+                n_inputs = reconstructor[i].shape[0]
+                n_outputs = n_inputs
+                
+                A_i = torch.as_tensor(self.A[i], dtype=torch.float64, device=self.device)
+                B_i = torch.as_tensor(self.B[i], dtype=torch.float64, device=self.device)
+                C_i = torch.as_tensor(self.C[i], dtype=torch.float64, device=self.device)
+                
+                if A_i.ndim != 2 or A_i.shape[0] != A_i.shape[1]:
+                    raise ValueError(f"Matrix A for DM {i} must be a square 2D matrix.")
+                
+                n_states = A_i.shape[0]
+                
+                if B_i.ndim != 2 or B_i.shape[0] != n_states or B_i.shape[1] != n_inputs:
+                    raise ValueError(f"Matrix B for DM {i} must have shape ({n_states}, {n_inputs}).")
+                    
+                if C_i.ndim != 2 or C_i.shape[0] != n_outputs or C_i.shape[1] != n_states:
+                    raise ValueError(f"Matrix C for DM {i} must have shape ({n_outputs}, {n_states}).")
+                
+                if self.D is not None and self.D[i] is not None:
+                    D_i = torch.as_tensor(self.D[i], dtype=torch.float64, device=self.device)
+                    if D_i.ndim != 2 or D_i.shape[0] != n_outputs or D_i.shape[1] != n_inputs:
+                        raise ValueError(f"Matrix D for DM {i} must have shape ({n_outputs}, {n_inputs}).")
+                else:
+                    D_i = torch.zeros((n_outputs, n_inputs), dtype=torch.float64, device=self.device)
+                    
+                self.A_tensor.append(A_i)
+                self.B_tensor.append(B_i)
+                self.C_tensor.append(C_i)
+                self.D_tensor.append(D_i)
+                
+                self.state_previous.append(torch.zeros((n_states, 1), dtype=torch.float64, device=self.device))
         else:
             self.logger.error('Controller::initializeController - Unknown controller')
             raise ValueError('Unknown controller.')
@@ -299,6 +369,7 @@ class Controller:
         # Compute the DM command
         modal_error = []
         modal_cmd = []
+        state_next = []
 
         for i in range(len(self.reconstructor)):
             modal_error.append(self.reconstructor[i]@error[i])
@@ -311,6 +382,17 @@ class Controller:
                 modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[i]-self.error_previous[i]) + self.ki[i]*self.error_previous[i])
             elif self.controllerType == 'backwardPI':
                 modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[i]-self.error_previous[i]) + self.ki[i]*modal_error[i])            
+            elif self.controllerType == 'stateSpace':
+                u_k = modal_error[i]
+                x_k = self.state_previous[i]
+                
+                # Output equation: y_k = C * x_k + D * u_k
+                y_k = self.C_tensor[i] @ x_k + self.D_tensor[i] @ u_k
+                modal_cmd.append(y_k)
+                
+                # Next state equation: x_{k+1} = A * x_k + B * u_k
+                x_next = self.A_tensor[i] @ x_k + self.B_tensor[i] @ u_k
+                state_next.append(x_next)
 
         # Compute the DM command
         dm_cmd = []
@@ -326,6 +408,8 @@ class Controller:
         elif self.controllerType == 'forwardPI' or self.controllerType == 'backwardPI':
             self.command_previous = modal_cmd.copy()
             self.error_previous = modal_error.copy()
+        elif self.controllerType == 'stateSpace':
+            self.state_previous = state_next.copy()
 
         return dm_cmd
 
