@@ -1,8 +1,6 @@
 import numpy as np
 import torch
 
-from SAOS.tomography.predictiveLearnApply import predictiveLearnApply
-
 import time
 
 import logging
@@ -66,7 +64,7 @@ class Controller:
 
         self.samplingTime = telescope.samplingTime
 
-        if reconstructionMethod in {'inversion', 'tikhonov', 'pLA'}:
+        if reconstructionMethod in {'inversion', 'tikhonov'}:
             self.reconstructionMethod = reconstructionMethod
         else:
             self.logger.error('Controller - Unknown reconstructor.')
@@ -214,9 +212,6 @@ class Controller:
                 # Make the list copying the values
                 temp_beta = self.beta
                 self.beta = [temp_beta for _ in range(nDMs)]   
-        elif reconstructionMethod == 'pLA'   :
-            # TODO: initialize Predictive Learn and Appy
-            pass
               
         # Get modal basis
         modal_basis = []
@@ -265,9 +260,6 @@ class Controller:
                     alfa = self.beta[i] * torch.max(S)**2
                     S_reg = S / (S**2 + alfa)
                     temp_reconstructor = Vh.T @ torch.diag(S_reg) @ U.T
-                elif reconstructionMethod == 'pLA'   :
-                    # TODO: initialize Predictive Learn and Appy
-                    pass
                 else:
                     self.logger.error('Controller::initializeReconstructor - Unknown reconstructor')
                     raise ValueError('Unknown reconstructor method.')
@@ -371,10 +363,6 @@ class Controller:
             if len(combined_slopes) > 0:
                 if self.reconstructionMethod == 'inversion' or self.reconstructionMethod == 'tikhonov':
                     error.append((-1)*torch.as_tensor(np.hstack(combined_slopes).T, dtype=torch.float64, device=self.device).unsqueeze(1)) # -1 for the feedback
-                elif self.reconstructionMethod == 'pLA':
-                    status = self.tomopLA.feed(combined_slopes)
-                    if status:
-                        error.append(self.tomopLA.reconstruct())
             else:
                 error.append(torch.zeros((0, 1), dtype=torch.float64, device=self.device))
         
