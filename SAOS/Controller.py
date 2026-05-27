@@ -317,7 +317,7 @@ class Controller:
         """
         buffer_size = max(max(self.delay), 1)
         self.command_history = [
-            [torch.zeros((self.modal_basis[i].shape[1], 1), dtype=torch.float64, device=self.device) for i in range(len(self.modal_basis))]
+            [torch.zeros((reconstructor[i].shape[0], 1), dtype=torch.float64, device=self.device) for i in range(len(reconstructor))]
             for _ in range(buffer_size)
         ]
         self.slopes_res = None
@@ -409,7 +409,7 @@ class Controller:
             dm_cmd = []
             modal_cmd = []
             for i in range(len(self.reconstructor)):
-                n_modes = self.modal_basis[i].shape[1]
+                n_modes = self.reconstructor[i].shape[0]
                 modal_cmd.append(torch.zeros((n_modes, 1), dtype=torch.float64, device=self.device))
                 offset = self.discarded_modes[i]
                 dm_cmd.append(self.modal_basis[i][:, offset : offset + self.reconstructor[i].shape[0]] @ modal_cmd[-1])
@@ -472,10 +472,19 @@ class Controller:
                 offset = self.discarded_modes[i]
                 dm_cmd.append(self.modal_basis[i][:, offset : offset + self.reconstructor[i].shape[0]] @ modal_cmd[i])
         elif self.reconstructionMethod == 'tomopLA':
-            self.tomoReconstructor.feed(self.slopes_polc)
+            if self.slopes_polc is not None:
+                global_slopes = torch.cat(self.slopes_polc, dim=0).cpu().numpy()
+            else:
+                global_slopes = torch.cat(error_res, dim=0).cpu().numpy()
+            
+            self.tomoReconstructor.feed(global_slopes)
 
-            # ZERO MODAL CMD
-            # ZERO ZONAL CMD
+            dm_cmd = []
+            for i in range(len(self.reconstructor)):
+                n_modes = self.reconstructor[i].shape[0]
+                modal_cmd.append(torch.zeros((n_modes, 1), dtype=torch.float64, device=self.device))
+                offset = self.discarded_modes[i]
+                dm_cmd.append(self.modal_basis[i][:, offset : offset + n_modes] @ modal_cmd[-1])
 
         # Update history buffers for the next iteration
         if self.controllerType == 'leaky':
