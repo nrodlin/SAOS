@@ -12,7 +12,8 @@ class Controller:
                  telescope,
                  interactionMatrix,
                  controllerType,
-                 reconstructionMethod,                 
+                 reconstructionMethod,  
+                 operationType='closed',               
                  logger = None,
                  **kwargs):
         """
@@ -28,6 +29,8 @@ class Controller:
             The type of controller that will be used, supported types are: {leaky, forwardPI, backwardPI, stateSpace}. 
         reconstructionMethod : String
             Type of reconstructor used, supported types are: {inversion, tikhonov}.        
+        operationType : String
+            The type of operation that will be used, supported types are: {open, closed, polc}. By default, closed.            
         **kwargs
             rcond : list of length equal to nDMs or float
                 Percentage of the maximum singular value below witch the SV are discarded.
@@ -87,6 +90,11 @@ class Controller:
         else:
             self.logger.error('Controller - Unknown controller.')
             raise ValueError('Unknown controller')
+        
+        if operationType in {'open', 'closed', 'polc'}:
+            self.operationType = operationType
+        else:
+            raise ValueError('Unknown operation type')
         
         if self.controllerType == 'stateSpace':
             self.A = kwargs.get('A', None)
