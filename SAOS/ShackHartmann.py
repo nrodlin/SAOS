@@ -732,9 +732,8 @@ class ShackHartmann:
 
         ideal_frame = self.create_full_frame(I)
         t2 = time.time()
-        # Compute the number of photons considering the flux of the sun, collecting area of the telescope, sampling time and FoV of the WFS 
-        # that may be smaller in the simulation than the FoV of the source
-        nPhotons = np.round(src.flux * self.area_eff * self.integration_time * self.lightRatio * (self.fieldOfView / src.fov)).astype(int)
+        # Compute the number of photons considering the flux of the sun, collecting area of the telescope and sampling time
+        nPhotons = np.round(src.flux * self.area_eff * self.integration_time * self.lightRatio).astype(int)
         # Compute the frame and the slopes
         signal, signal_2D, noisy_frame = self.wfs_integrate(ideal_frame, I, nPhotons)                
         t3 = time.time()
