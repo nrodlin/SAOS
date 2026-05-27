@@ -236,7 +236,7 @@ class Controller:
                 temp_beta = self.beta
                 self.beta = [temp_beta for _ in range(nDMs)]   
         elif reconstructionMethod == 'tomopLA':
-            self.tomoReconstructor = predictiveLearnApply(self.window, self.updateCycles)
+            self.tomoReconstructor = predictiveLearnApply(self.window, self.updateCycles, logger=self.logger)
               
         # Get modal basis
         modal_basis = []
@@ -290,6 +290,9 @@ class Controller:
                     alfa = self.beta[i] * torch.max(S)**2
                     S_reg = S / (S**2 + alfa)
                     temp_reconstructor = Vh.T @ torch.diag(S_reg) @ U.T
+                elif reconstructionMethod == 'tomopLA':
+                    # We need a dummy reconstructor to know the dimensions (n_modes) in computeControlAction
+                    temp_reconstructor = torch.zeros((interaction_matrix_per_DM.shape[1], interaction_matrix_per_DM.shape[0]), dtype=torch.float64, device=self.device)
                 else:
                     self.logger.error('Controller::initializeReconstructor - Unknown reconstructor')
                     raise ValueError('Unknown reconstructor method.')
@@ -398,8 +401,7 @@ class Controller:
             
             # Convert to torch
             if len(combined_slopes) > 0:
-                if self.reconstructionMethod == 'inversion' or self.reconstructionMethod == 'tikhonov':
-                    error_res.append((-1)*torch.as_tensor(np.hstack(combined_slopes).T, dtype=torch.float64, device=self.device).unsqueeze(1)) # -1 for the feedback
+                error_res.append((-1)*torch.as_tensor(np.hstack(combined_slopes).T, dtype=torch.float64, device=self.device).unsqueeze(1)) # -1 for the feedback
             else:
                 error_res.append(torch.zeros((0, 1), dtype=torch.float64, device=self.device))
         
