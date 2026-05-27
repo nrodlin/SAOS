@@ -7,6 +7,7 @@ import logging
 import logging.handlers
 from queue import Queue
 
+from SAOS.tomography.predictiveLearnApply import predictiveLearnApply
 class Controller:
     def __init__(self,
                  telescope,
@@ -28,7 +29,7 @@ class Controller:
         controllerType : String
             The type of controller that will be used, supported types are: {leaky, forwardPI, backwardPI, stateSpace}. 
         reconstructionMethod : String
-            Type of reconstructor used, supported types are: {inversion, tikhonov}.        
+            Type of reconstructor used, supported types are: {inversion, tikhonov, tomopLA}.        
         operationType : String
             The type of operation that will be used, supported types are: {open, closed, polc}. By default, closed.            
         **kwargs
@@ -68,7 +69,7 @@ class Controller:
 
         self.samplingTime = telescope.samplingTime
 
-        if reconstructionMethod in {'inversion', 'tikhonov'}:
+        if reconstructionMethod in {'inversion', 'tikhonov', 'tomopLA'}:
             self.reconstructionMethod = reconstructionMethod
         else:
             self.logger.error('Controller - Unknown reconstructor.')
@@ -80,6 +81,11 @@ class Controller:
         
         # Mask provided by the user to select specific WFS-DM links
         self.control_mask = kwargs.get('control_mask', None)
+
+        # Predictive Learn&Apply params
+        if self.reconstructionMethod == 'tomopLA':
+            self.window = kwargs.get('window', 1000)
+            self.updateCycles = kwargs.get('updateCycles', 2000)
 
         # Run the initialization of the reconstructor
         self.reconstructor, self.modal_basis, self.mask, self.discarded_modes = self.initializeReconstructor(self.reconstructionMethod, interactionMatrix)                
@@ -229,6 +235,8 @@ class Controller:
                 # Make the list copying the values
                 temp_beta = self.beta
                 self.beta = [temp_beta for _ in range(nDMs)]   
+        elif reconstructionMethod == 'tomopLA':
+            self.tomoReconstructor = predictiveLearnApply(self.window, self.updateCycles)
               
         # Get modal basis
         modal_basis = []
@@ -438,30 +446,36 @@ class Controller:
         modal_cmd = []
         state_next = []
 
-        for i in range(len(self.reconstructor)):
-            modal_error.append(self.reconstructor[i]@error[i])
+        if self.reconstructionMethod == 'inversion' or self.reconstructionMethod == 'tikhonov':
+            for i in range(len(self.reconstructor)):
+                modal_error.append(self.reconstructor[i]@error[i])
 
-            if self.controllerType == 'leaky':
-                modal_cmd.append(self.gain[i]*modal_error[i] + self.decay[i] * self.command_previous[i])
-            elif self.controllerType == 'forwardPI':
-                modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[i]-self.error_previous[i]) + self.ki[i]*self.error_previous[i])
-            elif self.controllerType == 'backwardPI':
-                modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[i]-self.error_previous[i]) + self.ki[i]*modal_error[i])            
-            elif self.controllerType == 'stateSpace':
-                u_k = modal_error[i]
-                x_k = self.state_previous[i]
-                
-                y_k = self.C_tensor[i] @ x_k + self.D_tensor[i] @ u_k
-                modal_cmd.append(y_k)
-                
-                x_next = self.A_tensor[i] @ x_k + self.B_tensor[i] @ u_k
-                state_next.append(x_next)
+                if self.controllerType == 'leaky':
+                    modal_cmd.append(self.gain[i]*modal_error[i] + self.decay[i] * self.command_previous[i])
+                elif self.controllerType == 'forwardPI':
+                    modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[i]-self.error_previous[i]) + self.ki[i]*self.error_previous[i])
+                elif self.controllerType == 'backwardPI':
+                    modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[i]-self.error_previous[i]) + self.ki[i]*modal_error[i])            
+                elif self.controllerType == 'stateSpace':
+                    u_k = modal_error[i]
+                    x_k = self.state_previous[i]
+                    
+                    y_k = self.C_tensor[i] @ x_k + self.D_tensor[i] @ u_k
+                    modal_cmd.append(y_k)
+                    
+                    x_next = self.A_tensor[i] @ x_k + self.B_tensor[i] @ u_k
+                    state_next.append(x_next)
 
-        # Compute the DM command
-        dm_cmd = []
-        for i in range(len(self.reconstructor)):
-            offset = self.discarded_modes[i]
-            dm_cmd.append(self.modal_basis[i][:, offset : offset + self.reconstructor[i].shape[0]] @ modal_cmd[i])
+            # Compute the DM command
+            dm_cmd = []
+            for i in range(len(self.reconstructor)):
+                offset = self.discarded_modes[i]
+                dm_cmd.append(self.modal_basis[i][:, offset : offset + self.reconstructor[i].shape[0]] @ modal_cmd[i])
+        elif self.reconstructionMethod == 'tomopLA':
+            self.tomoReconstructor.feed(self.slopes_polc)
+
+            # ZERO MODAL CMD
+            # ZERO ZONAL CMD
 
         # Update history buffers for the next iteration
         if self.controllerType == 'leaky':
