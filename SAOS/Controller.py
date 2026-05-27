@@ -62,6 +62,7 @@ class Controller:
 
         # Define class attributes
         self.tag = 'controller'
+        self.delay_input = kwargs.get('delay', 1)
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -180,6 +181,14 @@ class Controller:
         if nLPs < 1:
             raise ValueError('Number of LPs detected are less than 1.')
         
+        # Setup delay array
+        if isinstance(self.delay_input, list):
+            if len(self.delay_input) != nDMs:
+                raise ValueError('Delay parameter must be an integer or a list of size nDMs.')
+            self.delay = self.delay_input
+        else:
+            self.delay = [self.delay_input for _ in range(nDMs)]
+        
         mask = np.zeros((nDMs, nLPs),dtype=bool)
 
         # Scan for interactions: if None, then there is not interaction.
@@ -243,6 +252,7 @@ class Controller:
         # Now, define the reconstruction matrices for each DM
 
         reconstructor = []
+        self.im_per_dm = []
                 
         for i in range(nDMs):
             interaction_matrix_per_DM = []
@@ -255,10 +265,14 @@ class Controller:
                 self.logger.warning(f'Controller - DM {i} has no associated WFS in the control mask. Setting reconstructor to zero.')
                 nModes = modal_basis[i].shape[1]
                 temp_reconstructor = torch.zeros((nModes, 0), dtype=torch.float64, device=self.device)
+                self.im_per_dm.append(torch.zeros((0, nModes), dtype=torch.float64, device=self.device))
             else:
                 interaction_matrix_per_DM = torch.as_tensor(np.vstack(interaction_matrix_per_DM), dtype=torch.float64, device=self.device).squeeze()
                 if interaction_matrix_per_DM.ndim == 1:
                     interaction_matrix_per_DM = interaction_matrix_per_DM.unsqueeze(0)
+                    
+                self.im_per_dm.append(interaction_matrix_per_DM)
+
                 if reconstructionMethod == 'inversion':
                     temp_reconstructor = torch.linalg.pinv(interaction_matrix_per_DM, self.rcond[i])
                 elif reconstructionMethod == 'tikhonov':
@@ -293,6 +307,13 @@ class Controller:
         bool
             True if initialization succeeds.
         """
+        buffer_size = max(max(self.delay), 1)
+        self.command_history = [
+            [torch.zeros((self.modal_basis[i].shape[1], 1), dtype=torch.float64, device=self.device) for i in range(len(self.modal_basis))]
+            for _ in range(buffer_size)
+        ]
+        self.slopes_res = None
+        self.slopes_polc = None
 
         if controllerType == 'leaky':
             self.command_previous = [torch.zeros((reconstructor[i].shape[0],1), dtype=torch.float64, device=self.device) for i in range(len(reconstructor))]
@@ -357,12 +378,12 @@ class Controller:
         dm_cmd : list
             List of command arrays to be sent to each Deformable Mirror.
         """
-
-        # Get the combined measurement array for each DM
-        error = []
+        # ---------------------------------------------------------
+        # Step 1: Extract residual slopes (combined_slopes)
+        # ---------------------------------------------------------
+        error_res = []
         for i in range(len(self.reconstructor)):
             combined_slopes = []
-
             for j in range(len(lightPaths)):
                 if self.mask[i,j]:
                     combined_slopes.append(lightPaths[j].get_wavefront_error())
@@ -370,11 +391,49 @@ class Controller:
             # Convert to torch
             if len(combined_slopes) > 0:
                 if self.reconstructionMethod == 'inversion' or self.reconstructionMethod == 'tikhonov':
-                    error.append((-1)*torch.as_tensor(np.hstack(combined_slopes).T, dtype=torch.float64, device=self.device).unsqueeze(1)) # -1 for the feedback
+                    error_res.append((-1)*torch.as_tensor(np.hstack(combined_slopes).T, dtype=torch.float64, device=self.device).unsqueeze(1)) # -1 for the feedback
             else:
-                error.append(torch.zeros((0, 1), dtype=torch.float64, device=self.device))
+                error_res.append(torch.zeros((0, 1), dtype=torch.float64, device=self.device))
         
-        # Compute the DM command
+        self.slopes_res = error_res
+
+        if self.operationType == 'open':
+            dm_cmd = []
+            modal_cmd = []
+            for i in range(len(self.reconstructor)):
+                n_modes = self.modal_basis[i].shape[1]
+                modal_cmd.append(torch.zeros((n_modes, 1), dtype=torch.float64, device=self.device))
+                offset = self.discarded_modes[i]
+                dm_cmd.append(self.modal_basis[i][:, offset : offset + self.reconstructor[i].shape[0]] @ modal_cmd[-1])
+            self.command_history.pop(0)
+            self.command_history.append(modal_cmd)
+            return dm_cmd
+
+        # ---------------------------------------------------------
+        # Step 2: Compute POLC slopes if requested
+        # ---------------------------------------------------------
+        if self.operationType == 'polc':
+            error_polc = []
+            for i in range(len(self.reconstructor)):
+                d_i = self.delay[i]
+                # command_history stores from oldest to newest. 
+                # If buffer size is max(delay), index -d_i is exactly d_i steps ago.
+                cmd_delayed = self.command_history[-d_i][i]
+                
+                # Predict slopes from delayed commands
+                pred_s = self.im_per_dm[i] @ cmd_delayed
+                error_polc.append(error_res[i] + pred_s)
+            self.slopes_polc = error_polc
+        else:
+            self.slopes_polc = None
+
+        # Determine the error to feed to the controllers
+        # We use error_res for standard PI/Leaky to prevent windup.
+        error = error_res
+
+        # ---------------------------------------------------------
+        # Step 3: Control Action
+        # ---------------------------------------------------------
         modal_error = []
         modal_cmd = []
         state_next = []
@@ -384,8 +443,6 @@ class Controller:
 
             if self.controllerType == 'leaky':
                 modal_cmd.append(self.gain[i]*modal_error[i] + self.decay[i] * self.command_previous[i])
-            # For the PI (forward and backward), the sampling time is removed from multiplying ki, so that ki is in a closer range to 1, 
-            # instead of having large ki values and small proportional gains
             elif self.controllerType == 'forwardPI':
                 modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[i]-self.error_previous[i]) + self.ki[i]*self.error_previous[i])
             elif self.controllerType == 'backwardPI':
@@ -394,23 +451,19 @@ class Controller:
                 u_k = modal_error[i]
                 x_k = self.state_previous[i]
                 
-                # Output equation: y_k = C * x_k + D * u_k
                 y_k = self.C_tensor[i] @ x_k + self.D_tensor[i] @ u_k
                 modal_cmd.append(y_k)
                 
-                # Next state equation: x_{k+1} = A * x_k + B * u_k
                 x_next = self.A_tensor[i] @ x_k + self.B_tensor[i] @ u_k
                 state_next.append(x_next)
 
         # Compute the DM command
         dm_cmd = []
-
         for i in range(len(self.reconstructor)):
             offset = self.discarded_modes[i]
             dm_cmd.append(self.modal_basis[i][:, offset : offset + self.reconstructor[i].shape[0]] @ modal_cmd[i])
 
         # Update history buffers for the next iteration
-
         if self.controllerType == 'leaky':
             self.command_previous = modal_cmd.copy()
         elif self.controllerType == 'forwardPI' or self.controllerType == 'backwardPI':
@@ -418,6 +471,10 @@ class Controller:
             self.error_previous = modal_error.copy()
         elif self.controllerType == 'stateSpace':
             self.state_previous = state_next.copy()
+
+        # Update POLC command history for the next iteration
+        self.command_history.pop(0)
+        self.command_history.append(modal_cmd.copy())
 
         return dm_cmd
 
