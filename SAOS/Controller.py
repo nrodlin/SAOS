@@ -86,6 +86,7 @@ class Controller:
         if self.reconstructionMethod == 'tomopLA':
             self.window = kwargs.get('window', 1000)
             self.updateCycles = kwargs.get('updateCycles', 2000)
+            self.lightPaths_init = kwargs.get('lightPaths', None)
 
         # Run the initialization of the reconstructor
         self.reconstructor, self.modal_basis, self.mask, self.discarded_modes = self.initializeReconstructor(self.reconstructionMethod, interactionMatrix)                
@@ -236,7 +237,7 @@ class Controller:
                 temp_beta = self.beta
                 self.beta = [temp_beta for _ in range(nDMs)]   
         elif reconstructionMethod == 'tomopLA':
-            self.tomoReconstructor = predictiveLearnApply(self.window, self.updateCycles, logger=self.logger)
+            self.tomoReconstructor = predictiveLearnApply(self.window, self.updateCycles, lightPaths=self.lightPaths_init, logger=self.logger)
               
         # Get modal basis
         modal_basis = []
