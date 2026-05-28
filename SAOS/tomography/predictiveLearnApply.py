@@ -36,6 +36,7 @@ class predictiveLearnApply:
         self.updateCycles = updateCycles # number of cycles after the first matrix before updating the CovMat
         self.iteration = 0
         self.slopes_covmat = None
+        self.buffer_ready = False
         
         # Extracción de parámetros de los lightPaths
         self.n_layers = 0
@@ -190,10 +191,9 @@ class predictiveLearnApply:
 
     def feed(self, combined_slopes):
         """
-        Fill circular buffer with open-loop or pseudo-open-loop slopes and
-        periodically estimate the slopes covariance matrix:
-
-            C_s = 1/N sum_k s_k s_k.T
+        Fill circular buffer with open-loop or pseudo-open-loop slopes.
+        Avoids computing the full covariance matrix C_s = 1/N sum_k s_k s_k.T
+        to save memory, leaving it for on-demand batch computation.
         """
 
         combined_slopes = np.asarray(combined_slopes).ravel()
@@ -211,14 +211,15 @@ class predictiveLearnApply:
         should_update = (
             self.iteration == self.window or
             (
-                self.slopes_covmat is not None and
+                buffer_is_full and
                 (self.iteration - self.window) % self.updateCycles == 0
             )
         )
 
         if buffer_is_full and should_update:
-            X = self.slopes_buffer
-            self.slopes_covmat = (X.T @ X) / self.window
+            self.buffer_ready = True
+            # To save memory, we do NOT compute self.slopes_covmat here anymore.
+            # It will be evaluated on-demand in the stochastic_lm method.
 
         return True
     
@@ -352,6 +353,73 @@ class predictiveLearnApply:
             C_model += cn2_frac[k] * C_k
             
         return C_model
+
+    def compute_covariance_matrix_batch(self, r0, L0, cn2_frac, ii, jj):
+        """
+        Computes the analytical covariance matrix elements only for the requested pairs (ii, jj).
+        This drastically reduces memory and computation time for stochastic LM.
+        """
+        
+        if not hasattr(self, 'layer_slope_coords') or len(self.layer_slope_coords) == 0:
+            raise RuntimeError("Geometry not initialized properly. Cannot compute analytical covariance.")
+            
+        N_batch = len(ii)
+        C_model_batch = np.zeros(N_batch)
+        
+        for k in range(self.n_layers):
+            if cn2_frac[k] <= 0:
+                continue
+                
+            coords = self.layer_slope_coords[k]
+            X = coords['X']
+            Y = coords['Y']
+            Axis = coords['Axis']
+            D = coords['D']
+            
+            X_i, X_j = X[ii], X[jj]
+            Y_i, Y_j = Y[ii], Y[jj]
+            Ax_i, Ax_j = Axis[ii], Axis[jj]
+            D_i, D_j = D[ii], D[jj]
+            
+            dX = X_i - X_j
+            dY = Y_i - Y_j
+            d_ij = D_i * D_j
+            
+            mask_XX = (Ax_i == 0) & (Ax_j == 0)
+            mask_YY = (Ax_i == 1) & (Ax_j == 1)
+            mask_XY = (Ax_i == 0) & (Ax_j == 1)
+            mask_YX = (Ax_i == 1) & (Ax_j == 0)
+            
+            d_val = D[0] # Asumimos d uniforme
+            
+            C_k = np.zeros(N_batch)
+            
+            def C_phi(dx, dy):
+                rho = np.sqrt(dx**2 + dy**2)
+                return self._phase_covariance(rho, r0, L0)
+
+            if np.any(mask_XX):
+                dx_xx, dy_xx = dX[mask_XX], dY[mask_XX]
+                C_k[mask_XX] = (2 * C_phi(dx_xx, dy_xx) - C_phi(dx_xx - d_val, dy_xx) - C_phi(dx_xx + d_val, dy_xx)) / d_ij[mask_XX]
+                
+            if np.any(mask_YY):
+                dx_yy, dy_yy = dX[mask_YY], dY[mask_YY]
+                C_k[mask_YY] = (2 * C_phi(dx_yy, dy_yy) - C_phi(dx_yy, dy_yy - d_val) - C_phi(dx_yy, dy_yy + d_val)) / d_ij[mask_YY]
+                
+            if np.any(mask_XY):
+                dx_xy, dy_xy = dX[mask_XY], dY[mask_XY]
+                C_k[mask_XY] = (C_phi(dx_xy - d_val/2, dy_xy + d_val/2) + C_phi(dx_xy + d_val/2, dy_xy - d_val/2)
+                              - C_phi(dx_xy - d_val/2, dy_xy - d_val/2) - C_phi(dx_xy + d_val/2, dy_xy + d_val/2)) / d_ij[mask_XY]
+                              
+            if np.any(mask_YX):
+                dx_yx, dy_yx = dX[mask_YX], dY[mask_YX]
+                C_k[mask_YX] = (C_phi(dx_yx - d_val/2, dy_yx + d_val/2) + C_phi(dx_yx + d_val/2, dy_yx - d_val/2)
+                              - C_phi(dx_yx - d_val/2, dy_yx - d_val/2) - C_phi(dx_yx + d_val/2, dy_yx + d_val/2)) / d_ij[mask_YX]
+
+            C_model_batch += cn2_frac[k] * C_k
+            
+        return C_model_batch
+
     # ------------------------------------------------------------------
     # Full nonlinear least-squares
     # ------------------------------------------------------------------
@@ -363,8 +431,17 @@ class predictiveLearnApply:
         This is expensive for large slope vectors.
         """
 
+        if getattr(self, 'slopes_buffer', None) is not None:
+            n_slopes_buffer = self.slopes_buffer.shape[1]
+            if n_slopes_buffer > 5000:
+                raise MemoryError(f"Attempting to run full LM on {n_slopes_buffer} slopes. This will cause OOM. Use estimate_stochastic_lm instead.")
+
         if self.slopes_covmat is None:
-            raise RuntimeError("slopes_covmat has not been estimated yet.")
+            if getattr(self, 'buffer_ready', False):
+                X = self.slopes_buffer
+                self.slopes_covmat = (X.T @ X) / self.window
+            else:
+                raise RuntimeError("slopes_covmat has not been estimated yet and buffer is not ready.")
 
         theta0 = self.physical_to_theta(
             r0=r0_init,
@@ -418,11 +495,11 @@ class predictiveLearnApply:
         Stochastic Levenberg-Marquardt.
 
         Each external iteration fits only a random subset of covariance
-        matrix elements.
+        matrix elements, computed on-demand to save memory.
         """
 
-        if self.slopes_covmat is None:
-            raise RuntimeError("slopes_covmat has not been estimated yet.")
+        if not getattr(self, 'buffer_ready', False) and self.slopes_covmat is None:
+            raise RuntimeError("Slopes buffer is not full or covmat not ready yet.")
 
         theta = self.physical_to_theta(
             r0=r0_init,
@@ -431,35 +508,41 @@ class predictiveLearnApply:
         )
 
         N_total = len(self.layer_slope_coords[0]['X'])
-        n_slopes = min(self.slopes_covmat.shape[0], N_total)
-
-        ii_all, jj_all = np.triu_indices(n_slopes)
-        n_terms = ii_all.size
+        if self.slopes_buffer is not None:
+            n_slopes = min(self.slopes_buffer.shape[1], N_total)
+        else:
+            n_slopes = min(self.slopes_covmat.shape[0], N_total)
 
         history = []
 
         for it in range(n_iterations):
-            sample = self.rng.choice(
-                n_terms,
-                size=min(self.batch_size, n_terms),
-                replace=False,
-            )
+            # Generate random pairs of indices directly to avoid 10GB index arrays
+            ii = self.rng.integers(0, n_slopes, size=self.batch_size)
+            jj = self.rng.integers(0, n_slopes, size=self.batch_size)
+            
+            # Ensure j >= i (upper triangle equivalence)
+            swap_mask = ii > jj
+            ii[swap_mask], jj[swap_mask] = jj[swap_mask], ii[swap_mask]
 
-            ii = ii_all[sample]
-            jj = jj_all[sample]
-
-            y = self.slopes_covmat[:n_slopes, :n_slopes][ii, jj]
+            # Compute experimental covariance for the batch
+            if self.slopes_covmat is not None:
+                y = self.slopes_covmat[ii, jj]
+            else:
+                # On-demand calculation directly from the buffer
+                y = np.mean(self.slopes_buffer[:, ii] * self.slopes_buffer[:, jj], axis=0)
 
             def residual(theta_local):
                 r0, L0, cn2_frac = self.theta_to_physical(theta_local)
 
-                C_model = self.compute_covariance_matrix(
+                C_model_batch = self.compute_covariance_matrix_batch(
                     r0=r0,
                     L0=L0,
                     cn2_frac=cn2_frac,
+                    ii=ii,
+                    jj=jj
                 )
 
-                return C_model[:n_slopes, :n_slopes][ii, jj] - y
+                return C_model_batch - y
 
             result = least_squares(
                 residual,
@@ -494,8 +577,9 @@ class predictiveLearnApply:
         return self.r0_hat, self.L0_hat, self.cn2_frac_hat, history            
     
     def reconstruct(self, combined_slopes):
-        if self.slopes_covmat is not None:
-            self.estimate_full_lm(0.08, 20, [0.8, 0.15, 0.05, 0.03, 0.02])
+        if getattr(self, 'buffer_ready', False) or self.slopes_covmat is not None:
+            # Usar la versión estocástica optimizada en lugar de la versión completa
+            self.estimate_stochastic_lm(0.08, 20, [0.8, 0.15, 0.05, 0.03, 0.02], n_iterations=3)
         return True
 
 
