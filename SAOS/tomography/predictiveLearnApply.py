@@ -494,6 +494,8 @@ class predictiveLearnApply:
         return self.r0_hat, self.L0_hat, self.cn2_frac_hat, history            
     
     def reconstruct(self, combined_slopes):
+        if self.slopes_covmat is not None:
+            self.estimate_full_lm(0.08, 20, [0.8, 0.15, 0.05, 0.03, 0.02])
         return True
 
 

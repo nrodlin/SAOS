@@ -481,6 +481,7 @@ class Controller:
                 global_slopes = torch.cat(error_res, dim=0).cpu().numpy()
             
             self.tomoReconstructor.feed(global_slopes)
+            self.tomoReconstructor.reconstruct(global_slopes)
 
             dm_cmd = []
             for i in range(len(self.reconstructor)):
