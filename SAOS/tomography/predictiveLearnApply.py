@@ -372,10 +372,11 @@ class predictiveLearnApply:
             cn2_frac=cn2_frac_init,
         )
 
-        n_slopes = self.slopes_covmat.shape[0]
+        N_total = len(self.layer_slope_coords[0]['X'])
+        n_slopes = min(self.slopes_covmat.shape[0], N_total)
         ii, jj = np.triu_indices(n_slopes)
 
-        y = self.slopes_covmat[ii, jj]
+        y = self.slopes_covmat[:n_slopes, :n_slopes][ii, jj]
 
         def residual(theta):
             r0, L0, cn2_frac = self.theta_to_physical(theta)
@@ -386,7 +387,7 @@ class predictiveLearnApply:
                 cn2_frac=cn2_frac,
             )
 
-            return C_model[ii, jj] - y
+            return C_model[:n_slopes, :n_slopes][ii, jj] - y
 
         result = least_squares(
             residual,
@@ -429,7 +430,8 @@ class predictiveLearnApply:
             cn2_frac=cn2_frac_init,
         )
 
-        n_slopes = self.slopes_covmat.shape[0]
+        N_total = len(self.layer_slope_coords[0]['X'])
+        n_slopes = min(self.slopes_covmat.shape[0], N_total)
 
         ii_all, jj_all = np.triu_indices(n_slopes)
         n_terms = ii_all.size
@@ -446,7 +448,7 @@ class predictiveLearnApply:
             ii = ii_all[sample]
             jj = jj_all[sample]
 
-            y = self.slopes_covmat[ii, jj]
+            y = self.slopes_covmat[:n_slopes, :n_slopes][ii, jj]
 
             def residual(theta_local):
                 r0, L0, cn2_frac = self.theta_to_physical(theta_local)
@@ -457,7 +459,7 @@ class predictiveLearnApply:
                     cn2_frac=cn2_frac,
                 )
 
-                return C_model[ii, jj] - y
+                return C_model[:n_slopes, :n_slopes][ii, jj] - y
 
             result = least_squares(
                 residual,
