@@ -88,6 +88,8 @@ class Controller:
             self.updateCycles = kwargs.get('updateCycles', 2000)
             self.lightPaths_init = kwargs.get('lightPaths', None)
 
+        self.nModes = kwargs.get('nModes', None)
+
         # Run the initialization of the reconstructor
         self.reconstructor, self.modal_basis, self.mask, self.discarded_modes = self.initializeReconstructor(self.reconstructionMethod, interactionMatrix)                
 
@@ -268,7 +270,11 @@ class Controller:
             for j in range(nLPs):
                 if mask[i,j]:
                     # Append the IMs to shape one large matrix of size nValidAct x nSignals
-                    interaction_matrix_per_DM.append(interactionMatrix.interaction_matrix_warehouse[i][j]['IM'])
+                    im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
+                    if self.nModes is not None:
+                        n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
+                        im = im[:, :n_m]
+                    interaction_matrix_per_DM.append(im)
             # Compute the reconstructor
             if len(interaction_matrix_per_DM) == 0:
                 self.logger.warning(f'Controller - DM {i} has no associated WFS in the control mask. Setting reconstructor to zero.')
@@ -475,10 +481,17 @@ class Controller:
                 offset = self.discarded_modes[i]
                 dm_cmd.append(self.modal_basis[i][:, offset : offset + self.reconstructor[i].shape[0]] @ modal_cmd[i])
         elif self.reconstructionMethod == 'tomopLA':
-            if self.slopes_polc is not None:
-                global_slopes = torch.cat(self.slopes_polc, dim=0).cpu().numpy()
+            # Use the residuals from the first DM's mask (assuming it contains all WFS)
+            global_res = error_res[0]
+            if self.operationType == 'polc':
+                total_pred = torch.zeros_like(global_res)
+                for i in range(len(self.reconstructor)):
+                    d_i = self.delay[i]
+                    cmd_delayed = self.command_history[-d_i][i]
+                    total_pred += self.im_per_dm[i] @ cmd_delayed
+                global_slopes = (global_res + total_pred).cpu().numpy()
             else:
-                global_slopes = torch.cat(error_res, dim=0).cpu().numpy()
+                global_slopes = global_res.cpu().numpy()
             
             self.tomoReconstructor.feed(global_slopes)
             self.tomoReconstructor.reconstruct(global_slopes)
