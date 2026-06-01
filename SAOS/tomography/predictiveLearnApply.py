@@ -579,7 +579,7 @@ class predictiveLearnApply:
     def reconstruct(self, combined_slopes):
         if getattr(self, 'buffer_ready', False) or self.slopes_covmat is not None:
             # Usar la versión estocástica optimizada en lugar de la versión completa
-            self.estimate_stochastic_lm(0.08, 20, [0.8, 0.15, 0.05, 0.03, 0.02], n_iterations=3)
+            self.estimate_stochastic_lm(0.08, 20, [0.8, 0.15, 0.05, 0.03, 0.02], n_iterations=10)
         return True
 
 
