@@ -7,7 +7,6 @@ import logging
 import logging.handlers
 from queue import Queue
 
-from SAOS.tomography.predictiveLearnApply import predictiveLearnApply
 class Controller:
     def __init__(self,
                  telescope,
@@ -29,7 +28,7 @@ class Controller:
         controllerType : String
             The type of controller that will be used, supported types are: {leaky, forwardPI, backwardPI, stateSpace}. 
         reconstructionMethod : String
-            Type of reconstructor used, supported types are: {inversion, tikhonov, tomopLA}.        
+            Type of reconstructor used, supported types are: {inversion, tikhonov, tomography}.        
         operationType : String
             The type of operation that will be used, supported types are: {open, closed, polc}. By default, closed.            
         **kwargs
@@ -69,7 +68,7 @@ class Controller:
 
         self.samplingTime = telescope.samplingTime
 
-        if reconstructionMethod in {'inversion', 'tikhonov', 'tomopLA'}:
+        if reconstructionMethod in {'inversion', 'tikhonov', 'tomography'}:
             self.reconstructionMethod = reconstructionMethod
         else:
             self.logger.error('Controller - Unknown reconstructor.')
@@ -81,17 +80,13 @@ class Controller:
         
         # Mask provided by the user to select specific WFS-DM links
         self.control_mask = kwargs.get('control_mask', None)
-
-        # Predictive Learn&Apply params
-        if self.reconstructionMethod == 'tomopLA':
-            self.window = kwargs.get('window', 1000)
-            self.updateCycles = kwargs.get('updateCycles', 2000)
-            self.lightPaths_init = kwargs.get('lightPaths', None)
+        self.target_mask = kwargs.get('target_mask', self.control_mask)
+        self.R_tomo_path = kwargs.get('R_tomo_path', None)
 
         self.nModes = kwargs.get('nModes', None)
 
         # Run the initialization of the reconstructor
-        self.reconstructor, self.modal_basis, self.mask, self.discarded_modes = self.initializeReconstructor(self.reconstructionMethod, interactionMatrix)                
+        self.reconstructor, self.modal_basis, self.mask, self.t_mask, self.discarded_modes = self.initializeReconstructor(self.reconstructionMethod, interactionMatrix)                
 
         # Setup the controller
 
@@ -171,7 +166,9 @@ class Controller:
         modal_basis : list
             List of modal basis per DM.
         mask : np.ndarray
-            Boolean mask indicating interactions between DMs and light paths.
+            Boolean mask indicating interactions between DMs and measured light paths.
+        t_mask : np.ndarray
+            Boolean mask indicating interactions between DMs and targeted light paths.
         discarded_modes : list
             List of number of discarded modes per DM.
         """
@@ -199,6 +196,7 @@ class Controller:
             self.delay = [self.delay_input for _ in range(nDMs)]
         
         mask = np.zeros((nDMs, nLPs),dtype=bool)
+        t_mask = np.zeros((nDMs, nLPs),dtype=bool)
 
         # Scan for interactions: if None, then there is not interaction.
 
@@ -206,6 +204,7 @@ class Controller:
             for j in range(nLPs):
                 if interactionMatrix.interaction_matrix_warehouse[i][j]['IM'] is not None:
                     mask[i, j] = True
+                    t_mask[i, j] = True
 
         if hasattr(self, 'control_mask') and self.control_mask is not None:
             # Check dimensions
@@ -221,26 +220,37 @@ class Controller:
                 
             mask = mask & control_mask_arr
 
+        if hasattr(self, 'target_mask') and self.target_mask is not None:
+            target_mask_arr = np.array(self.target_mask, dtype=bool)
+            if target_mask_arr.shape != (nDMs, nLPs):
+                self.logger.error(f'Controller - target_mask shape must be ({nDMs}, {nLPs})')
+                raise ValueError(f'target_mask shape mismatch. Expected ({nDMs}, {nLPs}), got {target_mask_arr.shape}')
+            
+            invalid_requests = target_mask_arr & (~t_mask)
+            if np.any(invalid_requests):
+                self.logger.warning('Controller - target_mask requests control for DM/LP pairs without an interaction matrix. These will be ignored.')
+            t_mask = t_mask & target_mask_arr
+        else:
+            t_mask = t_mask & mask
+
+
         # Check the reconstructor parameters
-        if reconstructionMethod == 'inversion':
-            if isinstance(self.rcond, list):
-                if len(self.rcond) != nDMs:
-                    raise ValueError('Rcond parameter is expected to be a list of size equal to the number of DMs.')
-            else:
-                # Make the list copying the values
-                temp_rcond = self.rcond
-                self.rcond = [temp_rcond for _ in range(nDMs)]
-        elif reconstructionMethod == 'tikhonov':
-            if isinstance(self.beta, list):
-                if len(self.rcond) != nDMs:
-                    raise ValueError('Beta parameter is expected to be a list of size equal to the number of DMs.')
-            else:
-                # Make the list copying the values
-                temp_beta = self.beta
-                self.beta = [temp_beta for _ in range(nDMs)]   
-        elif reconstructionMethod == 'tomopLA':
-            self.tomoReconstructor = predictiveLearnApply(self.window, self.updateCycles, lightPaths=self.lightPaths_init, logger=self.logger)
-              
+        if isinstance(self.rcond, list):
+            if len(self.rcond) != nDMs:
+                raise ValueError('Rcond parameter is expected to be a list of size equal to the number of DMs.')
+        else:
+            # Make the list copying the values
+            temp_rcond = self.rcond
+            self.rcond = [temp_rcond for _ in range(nDMs)]
+            
+        if isinstance(self.beta, list):
+            if len(self.beta) != nDMs:
+                raise ValueError('Beta parameter is expected to be a list of size equal to the number of DMs.')
+        else:
+            # Make the list copying the values
+            temp_beta = self.beta
+            self.beta = [temp_beta for _ in range(nDMs)]   
+            
         # Get modal basis
         modal_basis = []
         for i in range(nDMs):
@@ -260,12 +270,28 @@ class Controller:
                     break
             discarded_modes.append(found_discarded_modes)
 
+        if reconstructionMethod == 'tomography':
+            import h5py
+            if hasattr(self, 'R_tomo_path') and self.R_tomo_path is not None:
+                try:
+                    with h5py.File(self.R_tomo_path, 'r') as f:
+                        R_tomo_np = np.array(f['R_tomo'])
+                    self.R_tomo = torch.as_tensor(R_tomo_np, dtype=torch.float64, device=self.device)
+                    self.logger.info(f"Loaded tomographic reconstructor from {self.R_tomo_path}")
+                except Exception as e:
+                    self.logger.error(f"Failed to load R_tomo from {self.R_tomo_path}: {e}")
+                    raise
+            else:
+                self.logger.error("R_tomo_path must be provided for tomography reconstruction method.")
+                raise ValueError("R_tomo_path must be provided for tomography reconstruction method.")
+
         # Now, define the reconstruction matrices for each DM
 
         reconstructor = []
         self.im_per_dm = []
                 
         for i in range(nDMs):
+            # 1. Measured IM for POLC
             interaction_matrix_per_DM = []
             for j in range(nLPs):
                 if mask[i,j]:
@@ -275,31 +301,45 @@ class Controller:
                         n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
                         im = im[:, :n_m]
                     interaction_matrix_per_DM.append(im)
-            # Compute the reconstructor
+                    
             if len(interaction_matrix_per_DM) == 0:
-                self.logger.warning(f'Controller - DM {i} has no associated WFS in the control mask. Setting reconstructor to zero.')
                 nModes = modal_basis[i].shape[1]
-                temp_reconstructor = torch.zeros((nModes, 0), dtype=torch.float64, device=self.device)
                 self.im_per_dm.append(torch.zeros((0, nModes), dtype=torch.float64, device=self.device))
             else:
-                interaction_matrix_per_DM = torch.as_tensor(np.vstack(interaction_matrix_per_DM), dtype=torch.float64, device=self.device).squeeze()
-                if interaction_matrix_per_DM.ndim == 1:
-                    interaction_matrix_per_DM = interaction_matrix_per_DM.unsqueeze(0)
-                    
-                self.im_per_dm.append(interaction_matrix_per_DM)
+                im_measured_tensor = torch.as_tensor(np.vstack(interaction_matrix_per_DM), dtype=torch.float64, device=self.device).squeeze()
+                if im_measured_tensor.ndim == 1:
+                    im_measured_tensor = im_measured_tensor.unsqueeze(0)
+                self.im_per_dm.append(im_measured_tensor)
 
-                if reconstructionMethod == 'inversion':
-                    temp_reconstructor = torch.linalg.pinv(interaction_matrix_per_DM, self.rcond[i])
+            # 2. Target IM for Reconstructor
+            im_target_list = []
+            for j in range(nLPs):
+                if t_mask[i,j]:
+                    im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
+                    if self.nModes is not None:
+                        n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
+                        im = im[:, :n_m]
+                    im_target_list.append(im)
+
+            # Compute the reconstructor
+            if len(im_target_list) == 0:
+                self.logger.warning(f'Controller - DM {i} has no associated WFS in the target mask. Setting reconstructor to zero.')
+                nModes = modal_basis[i].shape[1]
+                temp_reconstructor = torch.zeros((nModes, 0), dtype=torch.float64, device=self.device)
+            else:
+                im_target_tensor = torch.as_tensor(np.vstack(im_target_list), dtype=torch.float64, device=self.device).squeeze()
+                if im_target_tensor.ndim == 1:
+                    im_target_tensor = im_target_tensor.unsqueeze(0)
+                    
+                if reconstructionMethod == 'inversion' or reconstructionMethod == 'tomography':
+                    temp_reconstructor = torch.linalg.pinv(im_target_tensor, self.rcond[i])
                 elif reconstructionMethod == 'tikhonov':
                     # (D.T@D + alfa*I)@D.T --> implemented through SVD to improve the stability of the inversion and the automation of alfa
-                    H = interaction_matrix_per_DM
+                    H = im_target_tensor
                     U, S, Vh = torch.linalg.svd(H, full_matrices=False)
                     alfa = self.beta[i] * torch.max(S)**2
                     S_reg = S / (S**2 + alfa)
                     temp_reconstructor = Vh.T @ torch.diag(S_reg) @ U.T
-                elif reconstructionMethod == 'tomopLA':
-                    # We need a dummy reconstructor to know the dimensions (n_modes) in computeControlAction
-                    temp_reconstructor = torch.zeros((interaction_matrix_per_DM.shape[1], interaction_matrix_per_DM.shape[0]), dtype=torch.float64, device=self.device)
                 else:
                     self.logger.error('Controller::initializeReconstructor - Unknown reconstructor')
                     raise ValueError('Unknown reconstructor method.')
@@ -307,7 +347,7 @@ class Controller:
 
         self.logger.info(f'Controller::initializeReconstructor - Reconstruction took {time.time()-t0}[s]')
 
-        return reconstructor, modal_basis, mask, discarded_modes
+        return reconstructor, modal_basis, mask, t_mask, discarded_modes
     
     def initializeController(self, controllerType, reconstructor):
         """
@@ -439,7 +479,7 @@ class Controller:
                 
                 # Predict slopes from delayed commands
                 pred_s = self.im_per_dm[i] @ cmd_delayed
-                error_polc.append(error_res[i] + pred_s)
+                error_polc.append(error_res[i] - pred_s)
             self.slopes_polc = error_polc
         else:
             self.slopes_polc = None
@@ -480,8 +520,8 @@ class Controller:
             for i in range(len(self.reconstructor)):
                 offset = self.discarded_modes[i]
                 dm_cmd.append(self.modal_basis[i][:, offset : offset + self.reconstructor[i].shape[0]] @ modal_cmd[i])
-        elif self.reconstructionMethod == 'tomopLA':
-            # Use the residuals from the first DM's mask (assuming it contains all WFS)
+        elif self.reconstructionMethod == 'tomography':
+            # Use the residuals from the first DM's mask (assuming it contains all measured WFS)
             global_res = error_res[0]
             if self.operationType == 'polc':
                 total_pred = torch.zeros_like(global_res)
@@ -489,20 +529,22 @@ class Controller:
                     d_i = self.delay[i]
                     cmd_delayed = self.command_history[-d_i][i]
                     total_pred += self.im_per_dm[i] @ cmd_delayed
-                global_slopes = (global_res + total_pred).cpu().numpy()
+                global_slopes = global_res - total_pred
             else:
-                global_slopes = global_res.cpu().numpy()
+                global_slopes = global_res
             
-            self.tomoReconstructor.feed(global_slopes)
-            self.tomoReconstructor.reconstruct(global_slopes)
+            # Project measured slopes to target slopes using R_tomo
+            # target_slopes will have shape [N_target_slopes, 1]
+            target_slopes = self.R_tomo @ global_slopes
 
             dm_cmd = []
             for i in range(len(self.reconstructor)):
                 n_modes = self.reconstructor[i].shape[0]
-                modal_cmd.append(torch.zeros((n_modes, 1), dtype=torch.float64, device=self.device))
+                # Apply pseudo-inverse of target IM
+                modal_cmd.append(self.reconstructor[i] @ target_slopes)
+                
                 offset = self.discarded_modes[i]
                 dm_cmd.append(self.modal_basis[i][:, offset : offset + n_modes] @ modal_cmd[-1])
-
         # Update history buffers for the next iteration
         if self.controllerType == 'leaky':
             self.command_previous = modal_cmd.copy()
