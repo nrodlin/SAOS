@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import minimize
-from tomoDataClasses import AtmosphereProfile, TomographyConfig
-from covarianceBuilder import CovarianceBuilder
+from SAOS.tomography.tomoDataClasses import AtmosphereProfile, TomographyConfig
+from SAOS.tomography.covarianceBuilder import CovarianceBuilder
 
 
 def _remove_wfs_spatial_mean(matrix, subaps_per_wfs, device=None):
