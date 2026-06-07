@@ -22,14 +22,17 @@ class WFSGeometry:
     lgs_altitude: float | None = None
 
     @classmethod
-    def from_saos_wfs(cls, wfs, name: str = None) -> "WFSGeometry":
-        r_arcsec = wfs.src.coordinates[0]
-        theta_rad = np.deg2rad(wfs.src.coordinates[1])
+    def from_saos_wfs(cls, lp, name: str = None) -> "WFSGeometry":
+        wfs = lp.wfs
+        src = lp.src
+        
+        r_arcsec = src.coordinates[0]
+        theta_rad = np.deg2rad(src.coordinates[1])
         x_arcsec = r_arcsec * np.cos(theta_rad)
         y_arcsec = r_arcsec * np.sin(theta_rad)
         
-        is_lgs = (wfs.src.tag == 'LGS')
-        lgs_altitude = wfs.src.altitude if is_lgs else None
+        is_lgs = (src.tag == 'LGS')
+        lgs_altitude = src.altitude if is_lgs else None
         
         valid_subaps = None
         if hasattr(wfs, 'valid_subapertures'):
@@ -38,7 +41,7 @@ class WFSGeometry:
         return cls(
             name=name if name else getattr(wfs, 'tag', 'WFS'),
             field_angle_arcsec=(x_arcsec, y_arcsec),
-            diameter=wfs.telescope.D,
+            diameter=lp.tel.D,
             n_subaps=wfs.nSubap,
             valid_subaps=valid_subaps,
             is_lgs=is_lgs,
@@ -111,11 +114,11 @@ class TomographyConfig:
         regularization: float = 1e-6
     ) -> "TomographyConfig":
         
-        measured_wfs = [WFSGeometry.from_saos_wfs(lp.wfs, name=f"WFS_meas_{i}") for i, lp in enumerate(measured_lps)]
+        measured_wfs = [WFSGeometry.from_saos_wfs(lp, name=f"WFS_meas_{i}") for i, lp in enumerate(measured_lps)]
         
         target_wfs = None
         if target_lps is not None:
-            target_wfs = [WFSGeometry.from_saos_wfs(lp.wfs, name=f"WFS_target_{i}") for i, lp in enumerate(target_lps)]
+            target_wfs = [WFSGeometry.from_saos_wfs(lp, name=f"WFS_target_{i}") for i, lp in enumerate(target_lps)]
             
         all_lps = measured_lps + (target_lps if target_lps else [])
         unique_dms = []
