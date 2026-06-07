@@ -71,8 +71,15 @@ class PredictiveTomographicReconstructor:
             import torch
             # Use PyTorch Cholesky and Solve on device
             cholesky_factor = torch.linalg.cholesky(Css_reg)
-            R_tomo_T = torch.cholesky_solve(Czs.T, cholesky_factor, upper=False)
-            R_tomo = R_tomo_T.T
+            
+            # Solve in chunks to avoid massive VRAM spikes with Czs.T and R_tomo_T
+            R_tomo = torch.empty((Czs.shape[0], Czs.shape[1]), dtype=Czs.dtype, device=Czs.device)
+            chunk_size = 2000
+            for i in range(0, Czs.shape[0], chunk_size):
+                end = min(i + chunk_size, Czs.shape[0])
+                B_chunk = Czs[i:end, :].T.contiguous()
+                X_chunk = torch.cholesky_solve(B_chunk, cholesky_factor, upper=False)
+                R_tomo[i:end, :] = X_chunk.T
         else:
             cholesky_factor = cho_factor(
                 Css_reg,

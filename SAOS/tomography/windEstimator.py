@@ -178,7 +178,7 @@ def estimate_wind_from_cdt(
         )
 
         diff = Cdt_emp_sub - scale * Cdt_model_sub_np
-        loss = np.linalg.norm(diff, ord="fro") / norm_emp
+        loss = 10000.0 * np.linalg.norm(diff, ord="fro") / norm_emp
         
         objective_function.eval_count += 1
         if objective_function.eval_count % 10 == 0:
@@ -195,7 +195,7 @@ def estimate_wind_from_cdt(
         v_init,
         method="L-BFGS-B",
         bounds=bounds,
-        options={"maxiter": max_iter, "disp": True, "ftol": 1e-4, "eps": 2.0},
+        options={"maxiter": max_iter, "disp": True, "eps": 1.0},
     )
 
     # Extract optimized velocities
