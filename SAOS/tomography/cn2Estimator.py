@@ -109,24 +109,29 @@ def estimate_cn2_from_css(
                 A_atmos_cols.append(C_proj_norm.reshape(-1)[::stride].astype(np.float32))
     else:
         if is_torch:
-            Css_emp_np = Css_emp.detach().cpu().numpy()
+            # Slice directly on PyTorch tensor to avoid moving/copying the full 12600x12600 array
+            Css_emp_sliced = Css_emp.reshape(-1)[::stride].detach().cpu().numpy().astype(np.float32)
+            norm_val_emp = torch.norm(Css_emp, p='fro').item() if frobenius_normalization else 1.0
         else:
-            Css_emp_np = np.asarray(Css_emp)
+            Css_emp_sliced = Css_emp.reshape(-1)[::stride].astype(np.float32)
+            norm_val_emp = np.linalg.norm(Css_emp, ord='fro') if frobenius_normalization else 1.0
             
-        norm_val_emp = np.linalg.norm(Css_emp_np, ord='fro') if frobenius_normalization else 1.0
-        Css_emp_norm = Css_emp_np / norm_val_emp
-        b = Css_emp_norm.reshape(-1)[::stride].astype(np.float32)
+        if norm_val_emp != 1.0:
+            Css_emp_sliced /= np.float32(norm_val_emp)
+        b = Css_emp_sliced
         
         A_atmos_cols = []
         for layer in Css_layers:
             if is_torch:
-                C_np = layer.detach().cpu().numpy()
+                C_sliced = layer.reshape(-1)[::stride].detach().cpu().numpy().astype(np.float32)
+                norm_val = torch.norm(layer, p='fro').item() if frobenius_normalization else 1.0
             else:
-                C_np = np.asarray(layer)
+                C_sliced = layer.reshape(-1)[::stride].astype(np.float32)
+                norm_val = np.linalg.norm(layer, ord='fro') if frobenius_normalization else 1.0
                 
-            norm_val = np.linalg.norm(C_np, ord='fro') if frobenius_normalization else 1.0
-            C_norm = C_np / norm_val
-            A_atmos_cols.append(C_norm.reshape(-1)[::stride].astype(np.float32, copy=True))
+            if norm_val != 1.0:
+                C_sliced /= np.float32(norm_val)
+            A_atmos_cols.append(C_sliced)
 
     # Build atmospheric columns for design matrix A
     A_atmos = np.column_stack(A_atmos_cols)
