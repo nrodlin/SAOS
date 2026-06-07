@@ -179,22 +179,23 @@ def estimate_wind_from_cdt(
 
         diff = Cdt_emp_sub - scale * Cdt_model_sub_np
         loss = np.linalg.norm(diff, ord="fro") / norm_emp
+        
+        objective_function.eval_count += 1
+        if objective_function.eval_count % 10 == 0:
+            print(f"  L-BFGS-B eval {objective_function.eval_count}: loss = {loss:.4f}")
+            
         return float(loss)
 
-    # Create initial simplex to avoid extremely small default step sizes
-    N = len(v_init)
-    simplex = np.zeros((N + 1, N))
-    simplex[0] = v_init
-    for i in range(N):
-        simplex[i + 1] = v_init.copy()
-        simplex[i + 1, i] = 2.0  # Step size of 2.0 m/s
+    objective_function.eval_count = 0
 
-    # Run Powell/Nelder-Mead minimize with custom tolerances and simplex
+    # Run L-BFGS-B minimize with bounds and a larger eps for finite difference gradients
+    bounds = [(-50.0, 50.0)] * len(v_init)
     res = minimize(
         objective_function,
         v_init,
-        method="Nelder-Mead",
-        options={"initial_simplex": simplex, "maxiter": max_iter, "disp": False, "xatol": 1e-3, "fatol": 1e-5},
+        method="L-BFGS-B",
+        bounds=bounds,
+        options={"maxiter": max_iter, "disp": True, "ftol": 1e-4, "eps": 2.0},
     )
 
     # Extract optimized velocities
