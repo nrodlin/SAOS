@@ -66,15 +66,24 @@ def estimate_cn2_from_css(
                 H_gpu[y_idx[:, None], y_idx[None, :]] -= 1.0 / n_sub
                 
             Css_emp_proj = H_gpu @ Css_emp @ H_gpu.T
-            Css_layers_proj_np = []
+            
+            norm_val_emp = torch.norm(Css_emp_proj, p='fro').item() if frobenius_normalization else 1.0
+            Css_emp_norm = Css_emp_proj / norm_val_emp
+            b = Css_emp_norm.reshape(-1)[::stride].detach().cpu().numpy().astype(np.float32)
+
+            A_atmos_cols = []
             for C in Css_layers:
-                C_proj = H_gpu @ C @ H_gpu.T
-                Css_layers_proj_np.append(C_proj.detach().cpu().numpy().astype(np.float32))
-                del C_proj
+                C_gpu = C.to(device) if hasattr(C, 'to') else C
+                C_proj = H_gpu @ C_gpu @ H_gpu.T
+                
+                norm_val = torch.norm(C_proj, p='fro').item() if frobenius_normalization else 1.0
+                C_proj_norm = C_proj / norm_val
+                
+                A_atmos_cols.append(C_proj_norm.reshape(-1)[::stride].detach().cpu().numpy().astype(np.float32))
+                del C_proj, C_gpu, C_proj_norm
                 torch.cuda.empty_cache()
             
-            Css_emp_np = Css_emp_proj.detach().cpu().numpy().astype(np.float32)
-            del H_gpu, Css_emp_proj
+            del H_gpu, Css_emp_proj, Css_emp_norm
             torch.cuda.empty_cache()
         else:
             H = np.eye(n_slopes, dtype=np.float32)
@@ -87,28 +96,40 @@ def estimate_cn2_from_css(
                 H[x_idx[:, None], x_idx[None, :]] -= 1.0 / n_sub
                 H[y_idx[:, None], y_idx[None, :]] -= 1.0 / n_sub
                 
-            Css_emp_np = H @ Css_emp @ H.T
-            Css_layers_proj_np = [H @ C @ H.T for C in Css_layers]
+            Css_emp_proj = H @ Css_emp @ H.T
+            norm_val_emp = np.linalg.norm(Css_emp_proj, ord='fro') if frobenius_normalization else 1.0
+            Css_emp_norm = Css_emp_proj / norm_val_emp
+            b = Css_emp_norm.reshape(-1)[::stride].astype(np.float32)
+            
+            A_atmos_cols = []
+            for C in Css_layers:
+                C_proj = H @ C @ H.T
+                norm_val = np.linalg.norm(C_proj, ord='fro') if frobenius_normalization else 1.0
+                C_proj_norm = C_proj / norm_val
+                A_atmos_cols.append(C_proj_norm.reshape(-1)[::stride].astype(np.float32))
     else:
         if is_torch:
-            Css_emp_np = Css_emp.detach().cpu().numpy().astype(np.float32)
-            Css_layers_proj_np = [layer.detach().cpu().numpy().astype(np.float32) for layer in Css_layers]
+            Css_emp_np = Css_emp.detach().cpu().numpy()
         else:
-            Css_emp_np = np.asarray(Css_emp, dtype=np.float32)
-            Css_layers_proj_np = [np.asarray(layer, dtype=np.float32) for layer in Css_layers]
-
-    # Apply Frobenius normalization if requested
-    if frobenius_normalization:
-        Css_emp_np = Css_emp_np / np.linalg.norm(Css_emp_np, ord='fro')
-        Css_layers_proj_norm = [C / np.linalg.norm(C, ord='fro') for C in Css_layers_proj_np]
-    else:
-        Css_layers_proj_norm = Css_layers_proj_np
+            Css_emp_np = np.asarray(Css_emp)
+            
+        norm_val_emp = np.linalg.norm(Css_emp_np, ord='fro') if frobenius_normalization else 1.0
+        Css_emp_norm = Css_emp_np / norm_val_emp
+        b = Css_emp_norm.reshape(-1)[::stride].astype(np.float32)
+        
+        A_atmos_cols = []
+        for layer in Css_layers:
+            if is_torch:
+                C_np = layer.detach().cpu().numpy()
+            else:
+                C_np = np.asarray(layer)
+                
+            norm_val = np.linalg.norm(C_np, ord='fro') if frobenius_normalization else 1.0
+            C_norm = C_np / norm_val
+            A_atmos_cols.append(C_norm.reshape(-1)[::stride].astype(np.float32, copy=True))
 
     # Build atmospheric columns for design matrix A
-    A_atmos = np.column_stack([
-        C.reshape(-1)[::stride]
-        for C in Css_layers_proj_norm
-    ])
+    A_atmos = np.column_stack(A_atmos_cols)
 
     # Build and project WFS noise columns if requested
     noise_columns = []
@@ -208,9 +229,6 @@ def estimate_cn2_from_css(
         A = np.column_stack([A_atmos, np.column_stack(noise_columns)])
     else:
         A = A_atmos
-
-    b = Css_emp_np.reshape(-1)[::stride]
-
     if non_negative:
         weights, _ = nnls(A, b)
     else:

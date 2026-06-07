@@ -452,7 +452,10 @@ class CovarianceBuilder:
                 atmosphere.cn2_weights[:] = 0.0
                 atmosphere.cn2_weights[layer_index] = 1.0
 
-                layers.append(self.build_css(atmosphere))
+                layer_cov = self.build_css(atmosphere)
+                if hasattr(layer_cov, 'cpu'):
+                    layer_cov = layer_cov.cpu()
+                layers.append(layer_cov)
 
         finally:
             atmosphere.cn2_weights[:] = original_weights
@@ -491,6 +494,9 @@ class CovarianceBuilder:
                     predictive_delay=delay,
                     shift_output=True,
                 )
+                
+                if hasattr(layer_covariance, 'cpu'):
+                    layer_covariance = layer_covariance.cpu()
 
                 layers.append(layer_covariance)
 
