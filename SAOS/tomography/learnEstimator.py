@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+import h5py
 
 from scipy.special import gamma
 
@@ -72,6 +73,7 @@ class LearnEstimator:
 
             wfs_dict['subap_size']  = lps[i].wfs.subaperture_size
             wfs_dict['plate_scale'] = lps[i].wfs.plate_scale
+            wfs_dict['wavelength']  = lps[i].src.wavelength
             
              # Compute the coordinates per layer
             x = np.linspace(-lps[i].tel.D / 2 + lps[i].wfs.subaperture_size / 2, lps[i].tel.D / 2 - lps[i].wfs.subaperture_size / 2, lps[i].wfs.nSubap)
@@ -346,11 +348,69 @@ class LearnEstimator:
                         r0, L0, AB, Ab, aB, ab, dZ, dS, constants
                     )
 
-                    cov_matrix[r0a:r1a, c0:c1] = (
-                        cov_matrix[r0a:r1a, c0:c1] + fractR0[iLayer] * block
-                    )
+                    cov_matrix[r0a:r1a, c0:c1] = (cov_matrix[r0a:r1a, c0:c1] + fractR0[iLayer] * block)
 
         return cov_matrix
+    
+    def loadMeasurements(self, data_path, nWFS, subapsSel, selSamples):
+        # Open data set
+        with h5py.File(data_path, 'r') as f:
+            wfs_slopes = []
+            # Read number of samples
+            nSamples = f['/LightPath_0/slopes_1D/data'].shape[0]
+            # Generate random selection
+            nSel = max(1, int(selSamples * nSamples))
+
+            idx = np.sort(np.random.choice(nSamples, size=nSel, replace=False))
+            # Read data
+            for iWFS in range(nWFS):
+                data = f[f'/LightPath_{iWFS}/slopes_1D/data']
+
+                nSlopes = data.shape[1]
+                nSubaps = nSlopes // 2
+                sel = np.sort(np.concatenate([subapsSel[iWFS], subapsSel[iWFS] + nSubaps]))
+                wfs_slopes.append(data[idx][:, sel])                
+
+        return wfs_slopes
+    
+    def compute_measurement_covariance(self, wfs_slopes, gain, dtype):
+        nWFS = len(wfs_slopes)
+        nSubaps = wfs_slopes[0].shape[1] // 2
+        nSamples = wfs_slopes[0].shape[0]
+
+        cov_mat = np.zeros((2 * nWFS * nSubaps, 2 * nWFS * nSubaps))
+
+        for iWFS in range(nWFS):
+            slopes_x_i = wfs_slopes[iWFS][:, :nSubaps]
+            slopes_y_i = wfs_slopes[iWFS][:, nSubaps:]
+
+            slopes_x_i = slopes_x_i - slopes_x_i.mean(axis=0, keepdims=True)
+            slopes_y_i = slopes_y_i - slopes_y_i.mean(axis=0, keepdims=True)
+
+            for jWFS in range(nWFS):
+                slopes_x_j = wfs_slopes[jWFS][:, :nSubaps]
+                slopes_y_j = wfs_slopes[jWFS][:, nSubaps:]
+
+                slopes_x_j = slopes_x_j - slopes_x_j.mean(axis=0, keepdims=True)
+                slopes_y_j = slopes_y_j - slopes_y_j.mean(axis=0, keepdims=True)
+
+                Cxx = slopes_x_i.T @ slopes_x_j / (nSamples - 1)
+                Cxy = slopes_x_i.T @ slopes_y_j / (nSamples - 1)
+                Cyx = slopes_y_i.T @ slopes_x_j / (nSamples - 1)
+                Cyy = slopes_y_i.T @ slopes_y_j / (nSamples - 1)
+
+                rxi = iWFS * nSubaps
+                rxj = jWFS * nSubaps
+                ryi = nWFS * nSubaps + iWFS * nSubaps
+                ryj = nWFS * nSubaps + jWFS * nSubaps
+
+                cov_mat[rxi:rxi+nSubaps, rxj:rxj+nSubaps] = Cxx * (gain**2)
+                cov_mat[rxi:rxi+nSubaps, ryj:ryj+nSubaps] = Cxy * (gain**2)
+                cov_mat[ryi:ryi+nSubaps, rxj:rxj+nSubaps] = Cyx * (gain**2)
+                cov_mat[ryi:ryi+nSubaps, ryj:ryj+nSubaps] = Cyy * (gain**2)
+
+        return torch.as_tensor(cov_mat, dtype=dtype, device=self.device)
+
 
     def learn(self, atm_guess, data_path, output_path, selSubaps=0.1, selSamples=0.1):
         self.logger.info('LearnEstimator::learn - loading initial params.')
@@ -378,9 +438,8 @@ class LearnEstimator:
 
             nSel = max(1, int(selSubaps * nSubaps))
 
-            idx = np.random.choice(nSubaps, size=nSel, replace=False)
+            idx = np.sort(np.random.choice(nSubaps, size=nSel, replace=False))
             subapsSel.append(idx)
-
 
         dtype = torch.float64
         # Compute separations for the subapertures selected
@@ -391,13 +450,18 @@ class LearnEstimator:
         separations_torch = self.separations_to_torch(separations_theo_meas, dtype)
         # Compute theoretical covariance matrix
         t1 = time.time()        
+        self.logger.info('LearnEstimator::learn - Compute theoretical covariance matrix.')
         constants = self.prepare_vk_constants_torch(dtype)
         cov_theo = self.compute_covariance_matrix_torch(separations_torch, initial_r0, initial_L0, initial_fractionalR0, self.measWFSparams, self.measWFSparams, constants, dtype=dtype)
         t2 = time.time()
-
-        self.logger.info(f'Separation {t1-t0}, CovMat (1it):{t2-t1}')
-        # Load data 
-        cov_meas = cov_theo.clone()
+        # Experimental covariance matrix 
+        self.logger.info('LearnEstimator::learn - Load slopes measurements.')
+        meas_slopes = self.loadMeasurements(data_path, len(self.measWFSparams), subapsSel, selSamples)
+        self.logger.info('LearnEstimator::learn - Compute exprimental covariance.')
+        gain = (self.measWFSparams[0]['subap_size']*2*np.pi*2)/(206265.0*self.measWFSparams[0]['plate_scale']*self.measWFSparams[0]['wavelength'])
+        cov_meas    = self.compute_measurement_covariance(meas_slopes, gain, dtype)
+        t3 = time.time()
+        self.logger.info(f'Separation {t1-t0}, CovMat (1it):{t2-t1}, Experimental: {t3-t2}')
 
         # Define parameters to be optimized
         initial_r0_torch = torch.as_tensor(initial_r0, dtype=dtype, device=self.device)
