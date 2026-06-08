@@ -1,310 +1,193 @@
-from dataclasses import dataclass
 import numpy as np
+import torch
 
-from .tomoDataClasses import AtmosphereProfile, TomographyConfig
-from .telemetryReader import TelemetryReader
-from .covarianceBuilder import CovarianceBuilder
+import logging
+import logging.handlers
+from queue import Queue
 
-
-@dataclass
-class EmpiricalCovariances:
-    """
-    Empirical covariance matrices estimated from telemetry.
-    """
-
-    Css: np.ndarray
-    Cdt: np.ndarray | None = None
-    n_frames: int | None = None
-    delay_frames: int | None = None
-
+import matplotlib.pyplot as plt
 
 class LearnEstimator:
     """
     Estimate atmospheric parameters from WFS telemetry.
-
-    First stage:
-        - Read empirical covariance matrices from HDF5.
-        - Validate compatibility with analytical covariance matrices.
     """
 
-    def __init__(
-        self,
-        config: TomographyConfig,
-        reader: TelemetryReader,
-        datasets_by_wfs: dict[str, str],
-    ):
-        self.config = config
-        self.reader = reader
-        self.datasets_by_wfs = datasets_by_wfs
+    def __init__(self, 
+                 dataset_filename, 
+                 output_path, 
+                 altitudes, 
+                 zenith, 
+                 atm_guess,
+                 measLPs,
+                 targetLPs,
+                 logger=None):
 
-        self.builder = CovarianceBuilder(config)
+        # shared logging setup
+        if logger is None:
+            self.queue_listerner = self.setup_logging()
+            self.logger = logging.getLogger()
+            self.external_logger_flag = False
+        else:
+            self.external_logger_flag = True
+            self.logger = logger
 
-        self._validate_wfs_dataset_mapping()
+        self.tag                            = 'learnEstimator'
 
-    def compute_empirical_covariances(
-        self,
-        frame_slice: slice | None = None,
-        delay_frames: int | None = None,
-        chunk_size: int = 5000,
-    ) -> EmpiricalCovariances:
-        """
-        Compute empirical zero-delay and delayed covariance matrices.
-        """
+        self.dataset_filename = dataset_filename
+        self.output_path = output_path
 
-        Css_emp = compute_empirical_covariance_from_h5(
-            reader=self.reader,
-            datasets_by_wfs=self.datasets_by_wfs,
-            frame_slice=frame_slice,
-            chunk_size=chunk_size,
+        self.initial_r0 = atm_guess['r0']
+        self.initial_L0 = atm_guess['L0']
+
+        self.altitudes = np.array(altitudes)
+        self.nLayers   = len(self.altitudes)
+
+        self.zenith    = zenith
+
+        self.initial_fractionalR0 = np.array(atm_guess['fractionalR0'])
+        self.initial_windSpeedX = np.array(atm_guess['windSpeedX'])
+        self.initial_windSpeedY = np.array(atm_guess['windSpeedY'])
+
+        # Correct altitudes by zenith
+        self.altitudes = self.altitudes / np.cos((self.zenith/180)*np.pi)
+
+        # Check input parameters
+
+        if self.initial_fractionalR0.shape[0] != self.nLayers:
+            raise ValueError('LearnEstimator::__init__ - Fractional r0 dimensions does not correspond the number of layers')
+        if self.initial_windSpeedX.shape[0] != self.nLayers:
+            raise ValueError('LearnEstimator::__init__ - Vx dimensions does not correspond the number of layers')
+        if self.initial_windSpeedY.shape[0] != self.nLayers:
+            raise ValueError('LearnEstimator::__init__ - Vy dimensions does not correspond the number of layers')        
+        
+        # Create the WFS structure
+        
+        self.measWFSparams   = self.initializeWFS(measLPs)
+        self.targetWFSparams = self.initializeWFS(targetLPs)
+
+        # Generate midpoints
+
+        self.measWFSmidpoint_X, self.measWFSmidpoint_Y     = self.generate_midpoints_coords(self.measWFSparams)
+        self.targetWFSmidpoint_X, self.targetWFSmidpoint_Y = self.generate_midpoints_coords(self.targetWFSparams)
+
+        self.logger.info('LearnEstimator::__init__ - Initialization completed.')
+
+    def initializeWFS(self, lps):
+        # Scan each LP to check that there is a WFS
+        # If there is a WFS, then store its properties -> valid map, physical coordinates
+
+        wfs_params = []
+
+        for i in range(len(lps)):
+            # Input check
+            if lps[i].wfs is None:
+                raise ValueError(f'LearnEstimator::initializeMeasureWFS - LP {i} does not have a WFS.')
+
+            # Save params of each WFS
+            wfs_dict = {}
+
+            wfs_dict['subap_size']  = lps[i].wfs.subaperture_size
+            wfs_dict['plate_scale'] = lps[i].wfs.plate_scale
+            
+             # Compute the coordinates per layer
+            x = np.linspace(-lps[i].tel.D / 2 + lps[i].wfs.subaperture_size / 2, lps[i].tel.D / 2 - lps[i].wfs.subaperture_size / 2, lps[i].wfs.nSubap)
+            y = np.linspace(-lps[i].tel.D / 2 + lps[i].wfs.subaperture_size / 2, lps[i].tel.D / 2 - lps[i].wfs.subaperture_size / 2, lps[i].wfs.nSubap)
+
+            xx, yy = np.meshgrid(x, y)
+
+            # Create list to store the coordinates of the subaps center per layer
+            wfs_coordinates = [] 
+
+            for j in range(self.nLayers):
+                # Compute grid origin at the layer
+                origin_x_arcsec = lps[i].src.coordinates[0] * np.cos(lps[i].src.coordinates[1] * (np.pi/180))
+                origin_y_arcsec = lps[i].src.coordinates[0] * np.sin(lps[i].src.coordinates[1] * (np.pi/180))
+
+                origin_x = self.altitudes[j] * (origin_x_arcsec / 206265.) # in meters
+                origin_y = self.altitudes[j] * (origin_y_arcsec / 206265.) # in meters
+
+                # Move grid
+                layer_x_map = origin_x + xx
+                layer_y_map = origin_y + yy
+
+                # Select valid subaps
+                layer_x_map_valid = layer_x_map[lps[i].wfs.valid_subapertures]
+                layer_y_map_valid = layer_y_map[lps[i].wfs.valid_subapertures]
+
+                # Concat arrays
+                wfs_coordinates.append(np.column_stack((layer_x_map_valid, layer_y_map_valid)))
+            
+            # Store the coordinates in the WFS params dictionary
+            wfs_dict['coordinates_per_layer'] =  np.array(wfs_coordinates)
+
+            # Append dictionary to list
+            wfs_params.append(wfs_dict.copy())
+
+        # Return the parameters as a list of size nWFS
+        return wfs_params
+
+    # CGenerate midpoints to compute separations
+
+    def generate_midpoints_coords(self, wfs_params):
+
+        # Gradient X
+        wfs_midpoints_gradientX = []
+
+        wfs_midpoints_dict = {}
+
+        for i in range(len(wfs_params)):
+            wfs_midpoints_dict['midPointA']  = wfs_params[i]['coordinates_per_layer'].copy()
+            wfs_midpoints_dict['midPointa']  = wfs_params[i]['coordinates_per_layer'].copy()
+
+            wfs_midpoints_dict['midPointA'][:,:,0] += wfs_params[i]['subap_size']/2
+            wfs_midpoints_dict['midPointa'][:,:,0] -= wfs_params[i]['subap_size']/2
+
+            wfs_midpoints_gradientX.append(wfs_midpoints_dict.copy())
+
+        # Gradient Y
+        wfs_midpoints_gradientY = []
+
+        wfs_midpoints_dict = {}
+
+        for i in range(len(wfs_params)):
+            wfs_midpoints_dict['midPointA']  = wfs_params[i]['coordinates_per_layer'].copy()
+            wfs_midpoints_dict['midPointa']  = wfs_params[i]['coordinates_per_layer'].copy()
+
+            wfs_midpoints_dict['midPointA'][:,:,1] += wfs_params[i]['subap_size']/2
+            wfs_midpoints_dict['midPointa'][:,:,1] -= wfs_params[i]['subap_size']/2
+
+            wfs_midpoints_gradientY.append(wfs_midpoints_dict.copy())
+        
+        return wfs_midpoints_gradientX, wfs_midpoints_gradientY
+
+
+
+    def setup_logging(self, logging_level=logging.WARNING):
+        #  Setup of logging at the main process using QueueHandler
+        log_queue = Queue()
+        queue_handler = logging.handlers.QueueHandler(log_queue)
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging_level)  # Minimum log level
+
+        # Setup of the formatting
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(message)s"
         )
 
-        Cdt_emp = None
+        # Output to terminal
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
 
-        if delay_frames is not None and delay_frames > 0:
-            Cdt_emp = compute_empirical_delayed_covariance_from_h5(
-                reader=self.reader,
-                datasets_by_wfs=self.datasets_by_wfs,
-                delay_frames=delay_frames,
-                frame_slice=frame_slice,
-                chunk_size=chunk_size,
-            )
+        # Qeue handler captures the messages from the different logs and serialize them
+        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
+        root_logger.addHandler(queue_handler)
+        queue_listener.start()
 
-        return EmpiricalCovariances(
-            Css=Css_emp,
-            Cdt=Cdt_emp,
-            delay_frames=delay_frames,
-        )
-
-    def validate_against_model(
-        self,
-        empirical: EmpiricalCovariances,
-        atmosphere: AtmosphereProfile,
-    ) -> None:
-        """
-        Validate empirical covariance dimensions against model dimensions.
-        """
-
-        Css_model = self.builder.build_css(atmosphere)
-
-        if empirical.Css.shape != Css_model.shape:
-            raise ValueError(
-                "Empirical Css shape does not match model Css shape: "
-                f"{empirical.Css.shape} != {Css_model.shape}"
-            )
-
-        if empirical.Cdt is not None:
-            Cdt_model = self.builder.build_covariance(
-                output_wfs=self.config.measured_wfs,
-                input_wfs=self.config.measured_wfs,
-                atmosphere=atmosphere,
-                predictive_delay=self.config.delay,
-                shift_output=True,
-            )
-
-            if empirical.Cdt.shape != Cdt_model.shape:
-                raise ValueError(
-                    "Empirical Cdt shape does not match model Cdt shape: "
-                    f"{empirical.Cdt.shape} != {Cdt_model.shape}"
-                )
-
-    def _validate_wfs_dataset_mapping(self) -> None:
-        """
-        Validate that all measured WFSs have an associated HDF5 dataset.
-        """
-
-        measured_names = [wfs.name for wfs in self.config.measured_wfs]
-
-        missing = [
-            name for name in measured_names
-            if name not in self.datasets_by_wfs
-        ]
-
-        if missing:
-            raise ValueError(
-                "Missing HDF5 dataset paths for measured WFSs: "
-                f"{missing}"
-            )
-
-        extra = [
-            name for name in self.datasets_by_wfs
-            if name not in measured_names
-        ]
-
-        if extra:
-            raise ValueError(
-                "HDF5 dataset paths were provided for unknown WFSs: "
-                f"{extra}"
-            )
-    def validate_dataset_shapes_against_geometry(self) -> None:
-        """
-        Validate each HDF5 dataset slope count against the WFS geometry.
-        """
-
-        shapes = self.reader.get_dataset_shapes(self.datasets_by_wfs)
-
-        for wfs in self.config.measured_wfs:
-            expected_n_slopes = 2 * self.builder._get_n_valid_subaps(wfs)
-            actual_n_slopes = shapes[wfs.name][1]
-
-            if actual_n_slopes != expected_n_slopes:
-                raise ValueError(
-                    f"WFS '{wfs.name}' has incompatible slope count: "
-                    f"HDF5 has {actual_n_slopes}, model expects {expected_n_slopes}."
-                )        
-
-
-def compute_empirical_covariances_from_array(
-    slopes: np.ndarray,
-    delay_frames: int = 0,
-) -> tuple[np.ndarray, np.ndarray | None]:
-    """
-    Compute empirical zero-delay and delayed covariance matrices from RAM data.
-    """
-
-    if slopes.ndim != 2:
-        raise ValueError("slopes must have shape (n_frames, n_slopes).")
-
-    n_frames = slopes.shape[0]
-
-    if n_frames < 2:
-        raise ValueError("At least two frames are required.")
-
-    mean_s = np.mean(slopes, axis=0)
-
-    Css_emp = slopes.T @ slopes / n_frames
-    Css_emp -= np.outer(mean_s, mean_s)
-
-    if delay_frames <= 0:
-        return Css_emp, None
-
-    if delay_frames >= n_frames:
-        raise ValueError("delay_frames must be smaller than n_frames.")
-
-    S0 = slopes[:-delay_frames]
-    S1 = slopes[delay_frames:]
-
-    Cdt_emp = S1.T @ S0 / S0.shape[0]
-    Cdt_emp -= np.outer(
-        np.mean(S1, axis=0),
-        np.mean(S0, axis=0),
-    )
-
-    return Css_emp, Cdt_emp
-
-
-def compute_empirical_covariance_from_h5(
-    reader: TelemetryReader,
-    datasets_by_wfs: dict[str, str],
-    frame_slice: slice | None = None,
-    chunk_size: int = 5000,
-) -> np.ndarray:
-    """
-    Compute Css_emp = cov(s(t), s(t)) from HDF5 telemetry using chunks.
-
-    This avoids loading the full telemetry buffer into RAM.
-    """
-
-    n_total_frames = 0
-    sum_s = None
-    sum_ss = None
-
-    for chunk in reader.iter_wfs_slopes(
-        datasets_by_wfs=datasets_by_wfs,
-        frame_slice=frame_slice,
-        chunk_size=chunk_size,
-    ):
-        n_chunk = chunk.shape[0]
-
-        if sum_s is None:
-            n_slopes = chunk.shape[1]
-            sum_s = np.zeros(n_slopes, dtype=float)
-            sum_ss = np.zeros((n_slopes, n_slopes), dtype=float)
-
-        sum_s += np.sum(chunk, axis=0)
-        sum_ss += chunk.T @ chunk
-        n_total_frames += n_chunk
-
-    if n_total_frames == 0:
-        raise ValueError("No frames were read from telemetry.")
-
-    mean_s = sum_s / n_total_frames
-
-    Css_emp = sum_ss / n_total_frames
-    Css_emp -= np.outer(mean_s, mean_s)
-
-    return Css_emp
-
-
-def compute_empirical_delayed_covariance_from_h5(
-    reader: TelemetryReader,
-    datasets_by_wfs: dict[str, str],
-    delay_frames: int,
-    frame_slice: slice | None = None,
-    chunk_size: int = 5000,
-) -> np.ndarray:
-    """
-    Compute Cdt_emp = cov(s(t + delay), s(t)) from HDF5 telemetry.
-
-    This version reads aligned chunks directly:
-        S0 = s(t)
-        S1 = s(t + delay)
-    """
-
-    if delay_frames <= 0:
-        raise ValueError("delay_frames must be positive.")
-
-    shapes = reader.get_dataset_shapes(datasets_by_wfs)
-    n_frames = next(iter(shapes.values()))[0]
-
-    if frame_slice is None:
-        start, stop, step = 0, n_frames, 1
-    else:
-        start, stop, step = frame_slice.indices(n_frames)
-
-    if step != 1:
-        raise ValueError("Only frame slices with step=1 are supported.")
-
-    if stop - start <= delay_frames:
-        raise ValueError("Frame slice is too short for the requested delay.")
-
-    pair_start = start
-    pair_stop = stop - delay_frames
-
-    n_pairs = 0
-    sum_s0 = None
-    sum_s1 = None
-    sum_s1s0 = None
-
-    for chunk_start in range(pair_start, pair_stop, chunk_size):
-        chunk_stop = min(chunk_start + chunk_size, pair_stop)
-
-        S0 = reader.read_wfs_slopes(
-            datasets_by_wfs=datasets_by_wfs,
-            frame_slice=slice(chunk_start, chunk_stop),
-            remove_mean=False,
-        )
-
-        S1 = reader.read_wfs_slopes(
-            datasets_by_wfs=datasets_by_wfs,
-            frame_slice=slice(chunk_start + delay_frames, chunk_stop + delay_frames),
-            remove_mean=False,
-        )
-
-        if sum_s0 is None:
-            n_slopes = S0.shape[1]
-            sum_s0 = np.zeros(n_slopes, dtype=float)
-            sum_s1 = np.zeros(n_slopes, dtype=float)
-            sum_s1s0 = np.zeros((n_slopes, n_slopes), dtype=float)
-
-        sum_s0 += np.sum(S0, axis=0)
-        sum_s1 += np.sum(S1, axis=0)
-        sum_s1s0 += S1.T @ S0
-        n_pairs += S0.shape[0]
-
-    mean_s0 = sum_s0 / n_pairs
-    mean_s1 = sum_s1 / n_pairs
-
-    Cdt_emp = sum_s1s0 / n_pairs
-    Cdt_emp -= np.outer(mean_s1, mean_s0)
-
-    return Cdt_emp
+        return queue_listener
+    
+    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
+    # If the logger is external, then the queue is stop outside of the class scope and we shall
+    # avoid to attempt its destruction
+    def __del__(self):
+        if not self.external_logger_flag:
+            self.queue_listerner.stop()
