@@ -211,7 +211,7 @@ class LearnEstimator:
         ab = np.linalg.norm(a_row[:, :, None, :] - b_col[:, None, :, :], axis=-1)
         return AB, Ab, aB, ab
 
-    def compute_covariance_matrix_torch(self, separations_torch, r0, L0, fractR0, scale, constants, noise_var=None, row_sizes_tensor=None, diag_idx=None):
+    def compute_covariance_matrix_torch(self, separations_torch, r0, L0, fractionalCn2, scale, constants, noise_var=None, row_sizes_tensor=None, diag_idx=None):
         # separations_torch: shape (4, nLayers, N_rows, N_cols)
         # scale: shape (N_rows, N_cols)
         # constants: dict containing k1, a0, b0
@@ -223,9 +223,9 @@ class LearnEstimator:
         # block shape: (nLayers, N_rows, N_cols)
         block = scale * (-D[0] + D[1] + D[2] - D[3])
         
-        # Sum over layers weighted by fractR0
-        # fractR0 shape: (nLayers,)
-        cov_matrix = torch.sum(fractR0[:, None, None] * block, dim=0)
+        # Sum over layers weighted by fractionalCn2
+        # fractionalCn2 shape: (nLayers,)
+        cov_matrix = torch.sum(fractionalCn2[:, None, None] * block, dim=0)
         
         # Add noise variance if applicable
         if noise_var is not None and row_sizes_tensor is not None and diag_idx is not None:
@@ -418,7 +418,7 @@ class LearnEstimator:
 
             r0 = torch.nn.functional.softplus(raw_r0) + 1e-6
             L0 = torch.nn.functional.softplus(raw_L0) + 1e-6
-            fractR0 = torch.nn.functional.softmax(raw_cn2, dim=0)
+            fractionalCn2 = torch.nn.functional.softmax(raw_cn2, dim=0)
             
             if optimize_noise:
                 noise_var = torch.nn.functional.softplus(raw_noise) + 1e-8
@@ -426,7 +426,7 @@ class LearnEstimator:
                 noise_var = None
 
             cov_theo = self.compute_covariance_matrix_torch(
-                separations_torch, r0, L0, fractR0, scale, constants,
+                separations_torch, r0, L0, fractionalCn2, scale, constants,
                 noise_var=noise_var, row_sizes_tensor=row_sizes_tensor, diag_idx=diag_idx
             )
 
@@ -457,7 +457,7 @@ class LearnEstimator:
 
             if it % 25 == 0:
                 noise_str = f", noise={noise_var.detach().cpu().numpy()}" if optimize_noise else ""
-                self.logger.info(f"it={it}, loss={loss_val:.6e}, r0={r0.item():.4f}, L0={L0.item():.4f}, Cn2={fractR0.detach().cpu().numpy()}{noise_str}")
+                self.logger.info(f"it={it}, loss={loss_val:.6e}, r0={r0.item():.4f}, L0={L0.item():.4f}, Cn2={fractionalCn2.detach().cpu().numpy()}{noise_str}")
 
             if patience_counter >= patience:
                 self.logger.info(f"it={it} - [Early Stopping] Triggered. No improvement in loss for {patience} iterations.")
@@ -476,7 +476,7 @@ class LearnEstimator:
         with torch.no_grad():
             r0_opt = torch.nn.functional.softplus(raw_r0) + 1e-6
             L0_opt = torch.nn.functional.softplus(raw_L0) + 1e-6
-            fractR0_opt = torch.nn.functional.softmax(raw_cn2, dim=0)
+            fractionalCn2_opt = torch.nn.functional.softmax(raw_cn2, dim=0)
             if optimize_noise:
                 noise_opt = torch.nn.functional.softplus(raw_noise) + 1e-8
             else:
@@ -484,7 +484,7 @@ class LearnEstimator:
 
         self.r0 = r0_opt.item()
         self.L0 = L0_opt.item()
-        self.fractionalR0 = fractR0_opt.detach().cpu().numpy()
+        self.fractionalR0 = fractionalCn2_opt.detach().cpu().numpy()
         if optimize_noise:
             self.noise_var = noise_opt.detach().cpu().numpy()
         else:
