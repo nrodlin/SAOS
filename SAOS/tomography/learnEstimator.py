@@ -263,6 +263,103 @@ class LearnEstimator:
             
         return cov_matrix
     
+    def compute_covariance_matrix_chunked_torch(self, A_row, a_row, B_col, b_col, r0, L0, fractionalCn2, scale, constants, noise_var=None, row_sizes_tensor=None, diag_idx=None, Vx=None, Vy=None, dt=None, chunk_size=100, device=None, label="Covariance"):
+        # A_row, a_row: shape (nLayers, N_rows, 2)
+        # B_col, b_col: shape (nLayers, N_cols, 2)
+        
+        dtype = torch.float64
+        calc_device = device if device is not None else self.device
+        
+        A_row_torch = torch.as_tensor(A_row, dtype=dtype, device=calc_device)
+        a_row_torch = torch.as_tensor(a_row, dtype=dtype, device=calc_device)
+        B_col_torch = torch.as_tensor(B_col, dtype=dtype, device=calc_device)
+        b_col_torch = torch.as_tensor(b_col, dtype=dtype, device=calc_device)
+        
+        r0_dev = r0.to(calc_device)
+        L0_dev = L0.to(calc_device)
+        fractionalCn2_dev = fractionalCn2.to(calc_device)
+        constants_dev = {k: v.to(calc_device) for k, v in constants.items()}
+        
+        N_rows = A_row_torch.shape[1]
+        N_cols = B_col_torch.shape[1]
+        
+        cov_matrix = torch.zeros((N_rows, N_cols), dtype=dtype, device=calc_device)
+        
+        # Precompute displacement if wind is present
+        if Vx is not None and Vy is not None and dt is not None and dt != 0:
+            Vx_dev = Vx.to(calc_device)
+            Vy_dev = Vy.to(calc_device)
+            disp_x = Vx_dev[:, None, None] * dt
+            disp_y = Vy_dev[:, None, None] * dt
+            disp = torch.stack((disp_x, disp_y), dim=-1) # (nLayers, 1, 1, 2)
+        else:
+            disp = None
+            
+        n_chunks = (N_rows + chunk_size - 1) // chunk_size
+        
+        for idx_chunk, i in enumerate(range(0, N_rows, chunk_size)):
+            if idx_chunk % 5 == 0 or idx_chunk == n_chunks - 1:
+                self.logger.info(f"[{label}] Processing chunk {idx_chunk + 1}/{n_chunks} (rows {i} to {min(i + chunk_size, N_rows)})...")
+                
+            end_idx = min(i + chunk_size, N_rows)
+            chunk_rows = end_idx - i
+            chunk_A = A_row_torch[:, i:end_idx, :]
+            chunk_a = a_row_torch[:, i:end_idx, :]
+            
+            # Pre-allocate differences stack to avoid duplicating memory allocation
+            chunk_diff_stack = torch.zeros((4, A_row_torch.shape[0], chunk_rows, N_cols, 2), dtype=dtype, device=calc_device)
+            
+            # Compute coordinate differences directly into the pre-allocated stack
+            torch.sub(chunk_A[:, :, None, :], B_col_torch[:, None, :, :], out=chunk_diff_stack[0])
+            torch.sub(chunk_A[:, :, None, :], b_col_torch[:, None, :, :], out=chunk_diff_stack[1])
+            torch.sub(chunk_a[:, :, None, :], B_col_torch[:, None, :, :], out=chunk_diff_stack[2])
+            torch.sub(chunk_a[:, :, None, :], b_col_torch[:, None, :, :], out=chunk_diff_stack[3])
+            
+            if disp is not None:
+                s_diff = chunk_diff_stack + disp
+                separations_torch = torch.norm(s_diff, p=2, dim=-1)
+            else:
+                separations_torch = torch.norm(chunk_diff_stack, p=2, dim=-1)
+            
+            # Clean up intermediate difference tensors to free memory immediately
+            del chunk_diff_stack
+            
+            # Compute Von Karman structure function for this chunk
+            D = self.vk_structure_torch(r0_dev, L0_dev, separations_torch, constants_dev)
+            
+            # Compute covariance block for the chunk
+            # slice scale first (which could be on CPU), then move chunk_scale to calc_device
+            chunk_scale = scale[i:end_idx, :].to(calc_device)
+            block = chunk_scale * (-D[0] + D[1] + D[2] - D[3])
+            
+            # Sum over layers weighted by fractionalCn2
+            chunk_cov = torch.sum(fractionalCn2_dev[:, None, None] * block, dim=0)
+            
+            cov_matrix[i:end_idx, :] = chunk_cov
+            
+            # Clean up loop variables to release memory
+            del separations_torch, D, block, chunk_cov
+            
+        # Add noise variance to diagonal if noise_var is provided
+        if noise_var is not None and row_sizes_tensor is not None and diag_idx is not None:
+            noise_var_dev = noise_var.to(calc_device)
+            row_sizes_tensor_dev = row_sizes_tensor.to(calc_device)
+            diag_idx_dev = diag_idx.to(calc_device)
+            
+            nWFS = row_sizes_tensor_dev.shape[0] // 2
+            if noise_var_dev.ndim == 0:
+                noise_var_full = noise_var_dev.expand(nWFS)
+            elif noise_var_dev.shape[0] == 1:
+                noise_var_full = noise_var_dev.expand(nWFS)
+            else:
+                noise_var_full = noise_var_dev
+            noise_block_values = torch.cat((noise_var_full, noise_var_full))
+            noise_diag = torch.repeat_interleave(noise_block_values, row_sizes_tensor_dev)
+            cov_matrix[diag_idx_dev, diag_idx_dev] = cov_matrix[diag_idx_dev, diag_idx_dev] + noise_diag
+            
+        return cov_matrix
+
+    
     def loadMeasurements(self, data_path, nWFS, subapsSel, selSamples, lp_indices=None, delay_frames=0):
         # Open data set
         with h5py.File(data_path, 'r') as f:
@@ -643,7 +740,7 @@ class LearnEstimator:
         }
 
 
-    def build_reconstructor(self, r0=None, L0=None, fractionalCn2=None, noise_var=None, regularization=1e-9, windSpeedX=None, windSpeedY=None, dt=None):
+    def build_reconstructor(self, r0=None, L0=None, fractionalCn2=None, noise_var=None, regularization=1e-9, windSpeedX=None, windSpeedY=None, dt=None, chunk_size=None, device='cpu'):
         """
         Build the tomographic reconstructor R_tomo = C_ts (C_ss + C_nn)^-1
         
@@ -666,6 +763,10 @@ class LearnEstimator:
             Wind speed along Y for delay compensation. If None, uses self.windSpeedY.
         dt: float, optional
             Time delay in seconds. If None, computes from target LP delay.
+        chunk_size: int, optional
+            Chunk size along the rows for memory-efficient computation.
+        device: str or torch.device, optional
+            The device to perform computations on. Default 'cpu'.
         """
         if r0 is None:
             r0 = self.r0
@@ -690,113 +791,123 @@ class LearnEstimator:
             dt = delay_frames * sampling_time
 
         dtype = torch.float64
-        constants = self.prepare_vk_constants_torch(dtype)
+        calc_device = device if device is not None else self.device
+        if chunk_size is None:
+            chunk_size = 100
 
-        r0_torch = torch.as_tensor(r0, dtype=dtype, device=self.device)
-        L0_torch = torch.as_tensor(L0, dtype=dtype, device=self.device)
-        fractionalCn2_torch = torch.as_tensor(fractionalCn2, dtype=dtype, device=self.device)
-
-        if windSpeedX is not None and windSpeedY is not None and dt != 0:
-            windSpeedX_torch = torch.as_tensor(windSpeedX, dtype=dtype, device=self.device)
-            windSpeedY_torch = torch.as_tensor(windSpeedY, dtype=dtype, device=self.device)
-        else:
-            windSpeedX_torch = None
-            windSpeedY_torch = None
-
-        # 1. Build C_ss (sensed-sensed covariance matrix) using all subapertures
-        subaps_sensed = [np.arange(wfs['coordinates_per_layer'].shape[1]) for wfs in self.measWFSparams]
-        
-        self.logger.info("LearnEstimator::build_reconstructor - Computing sensed-sensed separations...")
-        A_row_s = np.concatenate([self.measWFSmidpoint_X[j]['midPointA'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))] + 
-                                 [self.measWFSmidpoint_Y[j]['midPointA'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))], axis=1)
-        a_row_s = np.concatenate([self.measWFSmidpoint_X[j]['midPointa'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))] + 
-                                 [self.measWFSmidpoint_Y[j]['midPointa'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))], axis=1)
-        
-        diff_stack_ss = self.compute_coordinate_differences(A_row_s, a_row_s, A_row_s, a_row_s)
-        diff_stack_ss_torch = torch.as_tensor(diff_stack_ss, dtype=dtype, device=self.device)
-
-        self.logger.info("LearnEstimator::build_reconstructor - Computing C_ss covariance matrix...")
-        if noise_var is not None:
-            noise_var_torch = torch.as_tensor(noise_var, dtype=dtype, device=self.device)
-        else:
-            noise_var_torch = None
-
-        sizes_meas = []
-        for j, wfs in enumerate(self.measWFSparams):
-            sizes_meas.extend([wfs["subap_size"]] * len(subaps_sensed[j]))
-        sizes_meas = sizes_meas + sizes_meas
-        d_meas = torch.tensor(sizes_meas, dtype=dtype, device=self.device)
-        
-        scale_ss = 1.0 / (2.0 * d_meas[:, None] * d_meas[None, :])
-        
-        row_sizes_meas = [len(subaps_sensed[j]) for j in range(len(self.measWFSparams))] * 2
-        row_sizes_meas_tensor = torch.tensor(row_sizes_meas, device=self.device)
-        diag_idx_ss = torch.arange(sum(row_sizes_meas), device=self.device)
-
-        Css = self.compute_covariance_matrix_torch(
-            diff_stack_ss_torch, r0_torch, L0_torch, fractionalCn2_torch,
-            scale_ss, constants, noise_var=noise_var_torch,
-            row_sizes_tensor=row_sizes_meas_tensor, diag_idx=diag_idx_ss
-        )
-
-        # Apply diagonal regularization
-        if regularization > 0:
-            diag_idx = torch.arange(Css.shape[0], device=self.device)
-            Css[diag_idx, diag_idx] = Css[diag_idx, diag_idx] + regularization
-
-        # 2. Build C_ts (target-sensed covariance matrix) using all subapertures
-        subaps_target = [np.arange(wfs['coordinates_per_layer'].shape[1]) for wfs in self.targetWFSparams]
-
-        self.logger.info("LearnEstimator::build_reconstructor - Computing target-sensed separations...")
-        A_row_t = np.concatenate([self.targetWFSmidpoint_X[j]['midPointA'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))] + 
-                                 [self.targetWFSmidpoint_Y[j]['midPointA'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))], axis=1)
-        a_row_t = np.concatenate([self.targetWFSmidpoint_X[j]['midPointa'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))] + 
-                                 [self.targetWFSmidpoint_Y[j]['midPointa'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))], axis=1)
-        
-        diff_stack_ts = self.compute_coordinate_differences(A_row_t, a_row_t, A_row_s, a_row_s)
-        diff_stack_ts_torch = torch.as_tensor(diff_stack_ts, dtype=dtype, device=self.device)
-
-        self.logger.info("LearnEstimator::build_reconstructor - Computing C_ts covariance matrix...")
-        
-        sizes_target = []
-        for j, wfs in enumerate(self.targetWFSparams):
-            sizes_target.extend([wfs["subap_size"]] * len(subaps_target[j]))
-        sizes_target = sizes_target + sizes_target
-        d_target = torch.tensor(sizes_target, dtype=dtype, device=self.device)
-        
-        scale_ts = 1.0 / (2.0 * d_target[:, None] * d_meas[None, :])
-
-        Cts = self.compute_covariance_matrix_torch(
-            diff_stack_ts_torch, r0_torch, L0_torch, fractionalCn2_torch,
-            scale_ts, constants, noise_var=None,
-            Vx=windSpeedX_torch, Vy=windSpeedY_torch, dt=dt
-        )
-
-        # 3. Solve R_tomo = C_ts @ Css^-1 using a stable solver
-        self.logger.info("LearnEstimator::build_reconstructor - Solving reconstructor R_tomo...")
         try:
-            L_factor = torch.linalg.cholesky(Css)
-            Rtomo_T = torch.cholesky_solve(Cts.T.contiguous(), L_factor, upper=False)
-            Rtomo = Rtomo_T.T
-        except RuntimeError as e:
-            self.logger.warning(f"Cholesky solve failed: {e}. Falling back to torch.linalg.solve.")
-            Rtomo_T = torch.linalg.solve(Css, Cts.T.contiguous())
-            Rtomo = Rtomo_T.T
+            constants = self.prepare_vk_constants_torch(dtype)
 
-        # Clean up CUDA memory cache
-        del Css, Cts, diff_stack_ss_torch, diff_stack_ts_torch
-        if noise_var_torch is not None:
-            del noise_var_torch
-        if windSpeedX_torch is not None:
-            del windSpeedX_torch
-        if windSpeedY_torch is not None:
-            del windSpeedY_torch
-        if torch.cuda.is_available():
-            import gc
-            gc.collect()
-            torch.cuda.empty_cache()
+            r0_torch = torch.as_tensor(r0, dtype=dtype, device=calc_device)
+            L0_torch = torch.as_tensor(L0, dtype=dtype, device=calc_device)
+            fractionalCn2_torch = torch.as_tensor(fractionalCn2, dtype=dtype, device=calc_device)
 
-        return Rtomo.cpu().numpy()
+            if windSpeedX is not None and windSpeedY is not None and dt != 0:
+                windSpeedX_torch = torch.as_tensor(windSpeedX, dtype=dtype, device=calc_device)
+                windSpeedY_torch = torch.as_tensor(windSpeedY, dtype=dtype, device=calc_device)
+            else:
+                windSpeedX_torch = None
+                windSpeedY_torch = None
+
+            # 1. Build C_ss (sensed-sensed covariance matrix) using all subapertures
+            subaps_sensed = [np.arange(wfs['coordinates_per_layer'].shape[1]) for wfs in self.measWFSparams]
+            
+            self.logger.info("LearnEstimator::build_reconstructor - Computing sensed-sensed C_ss covariance matrix...")
+            A_row_s = np.concatenate([self.measWFSmidpoint_X[j]['midPointA'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))] + 
+                                     [self.measWFSmidpoint_Y[j]['midPointA'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))], axis=1)
+            a_row_s = np.concatenate([self.measWFSmidpoint_X[j]['midPointa'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))] + 
+                                     [self.measWFSmidpoint_Y[j]['midPointa'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))], axis=1)
+            
+            if noise_var is not None:
+                noise_var_torch = torch.as_tensor(noise_var, dtype=dtype, device=calc_device)
+            else:
+                noise_var_torch = None
+
+            sizes_meas = []
+            for j, wfs in enumerate(self.measWFSparams):
+                sizes_meas.extend([wfs["subap_size"]] * len(subaps_sensed[j]))
+            sizes_meas = sizes_meas + sizes_meas
+            d_meas = torch.tensor(sizes_meas, dtype=dtype, device='cpu')
+            
+            scale_ss = 1.0 / (2.0 * d_meas[:, None] * d_meas[None, :])
+            
+            row_sizes_meas = [len(subaps_sensed[j]) for j in range(len(self.measWFSparams))] * 2
+            row_sizes_meas_tensor = torch.tensor(row_sizes_meas, device=calc_device)
+            diag_idx_ss = torch.arange(sum(row_sizes_meas), device=calc_device)
+
+            Css = self.compute_covariance_matrix_chunked_torch(
+                A_row_s, a_row_s, A_row_s, a_row_s, r0_torch, L0_torch, fractionalCn2_torch,
+                scale_ss, constants, noise_var=noise_var_torch,
+                row_sizes_tensor=row_sizes_meas_tensor, diag_idx=diag_idx_ss, chunk_size=chunk_size, device=calc_device, label="Css"
+            )
+
+            # Apply diagonal regularization
+            if regularization > 0:
+                diag_idx = torch.arange(Css.shape[0], device=calc_device)
+                Css[diag_idx, diag_idx] = Css[diag_idx, diag_idx] + regularization
+
+            # 2. Build C_ts (target-sensed covariance matrix) using all subapertures
+            subaps_target = [np.arange(wfs['coordinates_per_layer'].shape[1]) for wfs in self.targetWFSparams]
+
+            self.logger.info("LearnEstimator::build_reconstructor - Computing target-sensed C_ts covariance matrix...")
+            A_row_t = np.concatenate([self.targetWFSmidpoint_X[j]['midPointA'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))] + 
+                                     [self.targetWFSmidpoint_Y[j]['midPointA'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))], axis=1)
+            a_row_t = np.concatenate([self.targetWFSmidpoint_X[j]['midPointa'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))] + 
+                                     [self.targetWFSmidpoint_Y[j]['midPointa'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))], axis=1)
+            
+            sizes_target = []
+            for j, wfs in enumerate(self.targetWFSparams):
+                sizes_target.extend([wfs["subap_size"]] * len(subaps_target[j]))
+            sizes_target = sizes_target + sizes_target
+            d_target = torch.tensor(sizes_target, dtype=dtype, device='cpu')
+            
+            scale_ts = 1.0 / (2.0 * d_target[:, None] * d_meas[None, :])
+
+            Cts = self.compute_covariance_matrix_chunked_torch(
+                A_row_t, a_row_t, A_row_s, a_row_s, r0_torch, L0_torch, fractionalCn2_torch,
+                scale_ts, constants, noise_var=None,
+                Vx=windSpeedX_torch, Vy=windSpeedY_torch, dt=dt, chunk_size=chunk_size, device=calc_device, label="Cts"
+            )
+
+            # 3. Solve R_tomo = C_ts @ Css^-1 using a stable solver
+            self.logger.info("LearnEstimator::build_reconstructor - Solving reconstructor R_tomo...")
+            try:
+                L_factor = torch.linalg.cholesky(Css)
+                Rtomo_T = torch.cholesky_solve(Cts.T.contiguous(), L_factor, upper=False)
+                Rtomo = Rtomo_T.T
+            except RuntimeError as e:
+                self.logger.warning(f"Cholesky solve failed: {e}. Falling back to torch.linalg.solve.")
+                Rtomo_T = torch.linalg.solve(Css, Cts.T.contiguous())
+                Rtomo = Rtomo_T.T
+
+            # Clean up CUDA memory cache
+            del Css, Cts
+            if noise_var_torch is not None:
+                del noise_var_torch
+            if windSpeedX_torch is not None:
+                del windSpeedX_torch
+            if windSpeedY_torch is not None:
+                del windSpeedY_torch
+            if torch.cuda.is_available():
+                import gc
+                gc.collect()
+                torch.cuda.empty_cache()
+
+            return Rtomo.cpu().numpy()
+
+        except (torch.OutOfMemoryError, RuntimeError) as e:
+            if calc_device != 'cpu' and torch.cuda.is_available():
+                self.logger.warning(f"CUDA Out Of Memory or error during build_reconstructor on device {calc_device}: {e}. Falling back to CPU...")
+                # Clear GPU cache to free up VRAM for other tasks
+                torch.cuda.empty_cache()
+                # Run on CPU with a larger chunk_size (1000) for speed
+                return self.build_reconstructor(
+                    r0=r0, L0=L0, fractionalCn2=fractionalCn2, noise_var=noise_var,
+                    regularization=regularization, windSpeedX=windSpeedX, windSpeedY=windSpeedY,
+                    dt=dt, chunk_size=1000, device='cpu'
+                )
+            else:
+                raise e
 
 
     def setup_logging(self, logging_level=logging.INFO):
