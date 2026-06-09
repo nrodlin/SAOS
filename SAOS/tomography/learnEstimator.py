@@ -740,7 +740,7 @@ class LearnEstimator:
         }
 
 
-    def build_reconstructor(self, r0=None, L0=None, fractionalCn2=None, noise_var=None, regularization=1e-9, windSpeedX=None, windSpeedY=None, dt=None, chunk_size=None, device='cpu'):
+    def build_reconstructor(self, r0=None, L0=None, fractionalCn2=None, noise_var=None, regularization=1e-9, windSpeedX=None, windSpeedY=None, dt=None, chunk_size=None, device='cpu', permute_for_controller=True):
         """
         Build the tomographic reconstructor R_tomo = C_ts (C_ss + C_nn)^-1
         
@@ -893,6 +893,30 @@ class LearnEstimator:
                 gc.collect()
                 torch.cuda.empty_cache()
 
+            if permute_for_controller:
+                self.logger.info("LearnEstimator::build_reconstructor - Permuting Rtomo to [WFS0_X, WFS0_Y, WFS1_X, WFS1_Y, ...] controller format.")
+                # Sensed WFS permutation
+                n_subs_s = [wfs['coordinates_per_layer'].shape[1] for wfs in self.measWFSparams]
+                total_sub_s = sum(n_subs_s)
+                x_starts_s = [0] + list(np.cumsum(n_subs_s)[:-1])
+                y_starts_s = [total_sub_s + start for start in x_starts_s]
+                perm_s = []
+                for i in range(len(n_subs_s)):
+                    perm_s.extend(list(range(x_starts_s[i], x_starts_s[i] + n_subs_s[i])) + 
+                                  list(range(y_starts_s[i], y_starts_s[i] + n_subs_s[i])))
+
+                # Target WFS permutation
+                n_subs_t = [wfs['coordinates_per_layer'].shape[1] for wfs in self.targetWFSparams]
+                total_sub_t = sum(n_subs_t)
+                x_starts_t = [0] + list(np.cumsum(n_subs_t)[:-1])
+                y_starts_t = [total_sub_t + start for start in x_starts_t]
+                perm_t = []
+                for i in range(len(n_subs_t)):
+                    perm_t.extend(list(range(x_starts_t[i], x_starts_t[i] + n_subs_t[i])) + 
+                                  list(range(y_starts_t[i], y_starts_t[i] + n_subs_t[i])))
+
+                Rtomo = Rtomo[perm_t, :][:, perm_s]
+
             return Rtomo.cpu().numpy()
 
         except (torch.OutOfMemoryError, RuntimeError) as e:
@@ -904,7 +928,7 @@ class LearnEstimator:
                 return self.build_reconstructor(
                     r0=r0, L0=L0, fractionalCn2=fractionalCn2, noise_var=noise_var,
                     regularization=regularization, windSpeedX=windSpeedX, windSpeedY=windSpeedY,
-                    dt=dt, chunk_size=1000, device='cpu'
+                    dt=dt, chunk_size=1000, device='cpu', permute_for_controller=permute_for_controller
                 )
             else:
                 raise e
