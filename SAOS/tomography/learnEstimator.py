@@ -873,15 +873,30 @@ class LearnEstimator:
             self.logger.info("LearnEstimator::build_reconstructor - Solving reconstructor R_tomo...")
             try:
                 L_factor = torch.linalg.cholesky(Css)
+                # Css is no longer needed after Cholesky factorization, free it
+                del Css
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+
                 Rtomo_T = torch.cholesky_solve(Cts.T.contiguous(), L_factor, upper=False)
                 Rtomo = Rtomo_T.T
+                del L_factor, Cts
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
             except RuntimeError as e:
                 self.logger.warning(f"Cholesky solve failed: {e}. Falling back to torch.linalg.solve.")
                 Rtomo_T = torch.linalg.solve(Css, Cts.T.contiguous())
                 Rtomo = Rtomo_T.T
+                del Css, Cts
+                import gc
+                gc.collect()
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             # Clean up CUDA memory cache
-            del Css, Cts
             if noise_var_torch is not None:
                 del noise_var_torch
             if windSpeedX_torch is not None:
