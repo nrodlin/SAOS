@@ -529,6 +529,8 @@ class Controller:
                     d_i = self.delay[i]
                     cmd_delayed = self.command_history[-d_i][i]
                     total_pred += self.im_per_dm[i] @ cmd_delayed
+                # In POLC: open-loop slopes = s_res + IM @ cmd.
+                # Since global_res is -s_res, global_res - total_pred = - (s_res + IM @ cmd) = -s_turb (negative open-loop slopes)
                 global_slopes = global_res - total_pred
             else:
                 global_slopes = global_res
@@ -540,8 +542,19 @@ class Controller:
             dm_cmd = []
             for i in range(len(self.reconstructor)):
                 n_modes = self.reconstructor[i].shape[0]
-                # Apply pseudo-inverse of target IM
-                modal_cmd.append(self.reconstructor[i] @ target_slopes)
+                
+                # Multiply by -1 to flip the negative open-loop slopes sign into a positive correction step
+                modal_error.append((-1.0) * (self.reconstructor[i] @ target_slopes))
+                
+                if self.controllerType == 'leaky':
+                    modal_cmd.append(self.gain[i]*modal_error[-1] + self.decay[i] * self.command_previous[i])
+                elif self.controllerType == 'forwardPI':
+                    modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[-1]-self.error_previous[i]) + self.ki[i]*self.error_previous[i])
+                elif self.controllerType == 'backwardPI':
+                    modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[-1]-self.error_previous[i]) + self.ki[i]*modal_error[-1])
+                else:
+                    # Fallback to direct reconstruction if no controller type matched
+                    modal_cmd.append(modal_error[-1])
                 
                 offset = self.discarded_modes[i]
                 dm_cmd.append(self.modal_basis[i][:, offset : offset + n_modes] @ modal_cmd[-1])
