@@ -312,12 +312,12 @@ class LearnEstimator:
         initial_r0 = atm_guess['r0']
         initial_L0 = atm_guess['L0']
         
-        initial_fractionalR0 = np.array(atm_guess['fractionalR0'])
+        initial_fractionalCn2 = np.array(atm_guess['fractionalCn2'])
         initial_windSpeedX = np.array(atm_guess['windSpeedX'])
         initial_windSpeedY = np.array(atm_guess['windSpeedY'])   
 
         # Check input parameters
-        if initial_fractionalR0.shape[0] != self.nLayers:
+        if initial_fractionalCn2.shape[0] != self.nLayers:
             raise ValueError('LearnEstimator::__init__ - Fractional r0 dimensions does not correspond the number of layers')
         if initial_windSpeedX.shape[0] != self.nLayers:
             raise ValueError('LearnEstimator::__init__ - Vx dimensions does not correspond the number of layers')
@@ -371,11 +371,11 @@ class LearnEstimator:
         # Define parameters to be optimized
         initial_r0_torch = torch.as_tensor(initial_r0, dtype=dtype, device=self.device)
         initial_L0_torch = torch.as_tensor(initial_L0, dtype=dtype, device=self.device)
-        initial_fractionalR0_torch = torch.as_tensor(initial_fractionalR0, dtype=dtype, device=self.device)        
+        initial_fractionalCn2_torch = torch.as_tensor(initial_fractionalCn2, dtype=dtype, device=self.device)        
         
         # Initial call to compute_covariance_matrix_torch (no noise optimization parameters here yet)
         cov_theo = self.compute_covariance_matrix_torch(
-            separations_torch, initial_r0_torch, initial_L0_torch, initial_fractionalR0_torch,
+            separations_torch, initial_r0_torch, initial_L0_torch, initial_fractionalCn2_torch,
             scale, constants, noise_var=None
         )
         t2 = time.time()
@@ -391,7 +391,7 @@ class LearnEstimator:
         # Define parameters to be optimized in PyTorch
         raw_r0 = torch.nn.Parameter(torch.log(torch.expm1(initial_r0_torch)))
         raw_L0 = torch.nn.Parameter(torch.log(torch.expm1(initial_L0_torch)))
-        raw_cn2 = torch.nn.Parameter(torch.log(initial_fractionalR0_torch + 1e-12))
+        raw_cn2 = torch.nn.Parameter(torch.log(initial_fractionalCn2_torch + 1e-12))
 
         # Setup noise optimization if requested
         if optimize_noise:
@@ -484,14 +484,14 @@ class LearnEstimator:
 
         self.r0 = r0_opt.item()
         self.L0 = L0_opt.item()
-        self.fractionalR0 = fractionalCn2_opt.detach().cpu().numpy()
+        self.fractionalCn2 = fractionalCn2_opt.detach().cpu().numpy()
         if optimize_noise:
             self.noise_var = noise_opt.detach().cpu().numpy()
         else:
             self.noise_var = None
 
         self.logger.info(f"Optimization completed. Best Loss: {best_loss:.6e}")
-        self.logger.info(f"Optimized parameters: r0={self.r0:.4f}, L0={self.L0:.4f}, Cn2={self.fractionalR0}")
+        self.logger.info(f"Optimized parameters: r0={self.r0:.4f}, L0={self.L0:.4f}, Cn2={self.fractionalCn2}")
         if optimize_noise:
             self.logger.info(f"Optimized noise variance per WFS: {self.noise_var}")
 
@@ -507,12 +507,12 @@ class LearnEstimator:
         return {
             'r0': self.r0,
             'L0': self.L0,
-            'fractionalR0': self.fractionalR0,
+            'fractionalCn2': self.fractionalCn2,
             'noise_var': self.noise_var
         }
 
 
-    def build_reconstructor(self, r0=None, L0=None, fractionalR0=None, noise_var=None, regularization=1e-9):
+    def build_reconstructor(self, r0=None, L0=None, fractionalCn2=None, noise_var=None, regularization=1e-9):
         """
         Build the tomographic reconstructor R_tomo = C_ts (C_ss + C_nn)^-1
         
@@ -522,8 +522,8 @@ class LearnEstimator:
             Fried parameter. If None, uses self.r0.
         L0: float, optional
             Outer scale. If None, uses self.L0.
-        fractionalR0: array-like, optional
-            Fractional Cn2 profile. If None, uses self.fractionalR0.
+        fractionalCn2: array-like, optional
+            Fractional Cn2 profile. If None, uses self.fractionalCn2.
         noise_var: array-like, optional
             Noise variance per sensed WFS. If None, uses self.noise_var.
             If self.noise_var is None, uses zero noise.
@@ -534,20 +534,20 @@ class LearnEstimator:
             r0 = self.r0
         if L0 is None:
             L0 = self.L0
-        if fractionalR0 is None:
-            fractionalR0 = self.fractionalR0
+        if fractionalCn2 is None:
+            fractionalCn2 = self.fractionalCn2
         if noise_var is None:
             noise_var = self.noise_var
 
-        if r0 is None or L0 is None or fractionalR0 is None:
-            raise ValueError("r0, L0, and fractionalR0 must be estimated or provided.")
+        if r0 is None or L0 is None or fractionalCn2 is None:
+            raise ValueError("r0, L0, and fractionalCn2 must be estimated or provided.")
 
         dtype = torch.float64
         constants = self.prepare_vk_constants_torch(dtype)
 
         r0_torch = torch.as_tensor(r0, dtype=dtype, device=self.device)
         L0_torch = torch.as_tensor(L0, dtype=dtype, device=self.device)
-        fractionalR0_torch = torch.as_tensor(fractionalR0, dtype=dtype, device=self.device)
+        fractionalCn2_torch = torch.as_tensor(fractionalCn2, dtype=dtype, device=self.device)
 
         # 1. Build C_ss (sensed-sensed covariance matrix) using all subapertures
         subaps_sensed = [np.arange(wfs['coordinates_per_layer'].shape[1]) for wfs in self.measWFSparams]
@@ -580,7 +580,7 @@ class LearnEstimator:
         diag_idx_ss = torch.arange(sum(row_sizes_meas), device=self.device)
 
         Css = self.compute_covariance_matrix_torch(
-            separations_ss, r0_torch, L0_torch, fractionalR0_torch,
+            separations_ss, r0_torch, L0_torch, fractionalCn2_torch,
             scale_ss, constants, noise_var=noise_var_torch,
             row_sizes_tensor=row_sizes_meas_tensor, diag_idx=diag_idx_ss
         )
@@ -613,7 +613,7 @@ class LearnEstimator:
         scale_ts = 1.0 / (2.0 * d_target[:, None] * d_meas[None, :])
 
         Cts = self.compute_covariance_matrix_torch(
-            separations_ts, r0_torch, L0_torch, fractionalR0_torch,
+            separations_ts, r0_torch, L0_torch, fractionalCn2_torch,
             scale_ts, constants, noise_var=None
         )
 
