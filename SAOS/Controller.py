@@ -548,8 +548,11 @@ class Controller:
             for i in range(len(self.reconstructor)):
                 n_modes = self.reconstructor[i].shape[0]
                 
-                # The negative sign of target_slopes corresponds to the negative corrective command required to cancel the positive OPD contribution of the DM
-                modal_error.append(self.reconstructor[i] @ target_slopes)
+                d_i = self.delay[i]
+                cmd_delayed = self.command_history[-d_i][i]
+                # Subtract cmd_delayed to implement the canonical POLC feedback loop.
+                # This cancels out the accumulated DM shape contribution, resulting in stable closed-loop eigenvalues.
+                modal_error.append(self.reconstructor[i] @ target_slopes - cmd_delayed)
                 
                 if self.controllerType == 'leaky':
                     modal_cmd.append(self.gain[i]*modal_error[-1] + self.decay[i] * self.command_previous[i])
