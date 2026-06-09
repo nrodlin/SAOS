@@ -275,7 +275,12 @@ class Controller:
             if hasattr(self, 'R_tomo_path') and self.R_tomo_path is not None:
                 try:
                     with h5py.File(self.R_tomo_path, 'r') as f:
-                        R_tomo_np = np.array(f['R_tomo'])
+                        if 'R_tomo' in f:
+                            R_tomo_np = np.array(f['R_tomo'])
+                        elif 'Rtomo' in f:
+                            R_tomo_np = np.array(f['Rtomo'])
+                        else:
+                            raise KeyError("Neither 'R_tomo' nor 'Rtomo' dataset found in the HDF5 file.")
                     self.R_tomo = torch.as_tensor(R_tomo_np, dtype=torch.float64, device=self.device)
                     self.logger.info(f"Loaded tomographic reconstructor from {self.R_tomo_path}")
                 except Exception as e:
