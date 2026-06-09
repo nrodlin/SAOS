@@ -534,9 +534,9 @@ class Controller:
                     d_i = self.delay[i]
                     cmd_delayed = self.command_history[-d_i][i]
                     total_pred += self.im_per_dm[i] @ cmd_delayed
-                # In POLC: open-loop slopes = s_res + IM @ cmd.
-                # Since global_res is -s_res, global_res - total_pred = - (s_res + IM @ cmd) = -s_turb (negative open-loop slopes)
-                global_slopes = global_res - total_pred
+                # In POLC: open-loop slopes = s_res - IM @ cmd.
+                # Since global_res is -s_res, global_res + total_pred = - (s_res - IM @ cmd) = -s_turb (negative open-loop slopes)
+                global_slopes = global_res + total_pred
             else:
                 global_slopes = global_res
             
@@ -548,8 +548,8 @@ class Controller:
             for i in range(len(self.reconstructor)):
                 n_modes = self.reconstructor[i].shape[0]
                 
-                # Multiply by -1 to flip the negative open-loop slopes sign into a positive correction step
-                modal_error.append((-1.0) * (self.reconstructor[i] @ target_slopes))
+                # The negative sign of target_slopes corresponds to the negative corrective command required to cancel the positive OPD contribution of the DM
+                modal_error.append(self.reconstructor[i] @ target_slopes)
                 
                 if self.controllerType == 'leaky':
                     modal_cmd.append(self.gain[i]*modal_error[-1] + self.decay[i] * self.command_previous[i])
