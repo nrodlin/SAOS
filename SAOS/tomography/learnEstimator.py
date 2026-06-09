@@ -198,171 +198,48 @@ class LearnEstimator:
     
     # Compute separations
 
-    def separations_to_torch(self, separations, dtype=torch.float64):
-        sep_torch = np.empty(separations.shape, dtype=object)
+    def separations_to_torch(self, AB, Ab, aB, ab, dtype=torch.float64):
+        sep_stack = np.stack((AB, Ab, aB, ab), axis=0)
+        return torch.as_tensor(sep_stack, dtype=dtype, device=self.device)
 
-        for idx in np.ndindex(separations.shape):
-            AB, Ab, aB, ab = separations[idx]
-            sep_torch[idx] = (
-                torch.as_tensor(AB, dtype=dtype, device=self.device),
-                torch.as_tensor(Ab, dtype=dtype, device=self.device),
-                torch.as_tensor(aB, dtype=dtype, device=self.device),
-                torch.as_tensor(ab, dtype=dtype, device=self.device),
-            )
+    def compute_separations_vectorized(self, A_row, a_row, B_col, b_col):
+        # A_row, a_row: shape (nLayers, N_row, 2)
+        # B_col, b_col: shape (nLayers, N_col, 2)
+        AB = np.linalg.norm(A_row[:, :, None, :] - B_col[:, None, :, :], axis=-1)
+        Ab = np.linalg.norm(A_row[:, :, None, :] - b_col[:, None, :, :], axis=-1)
+        aB = np.linalg.norm(a_row[:, :, None, :] - B_col[:, None, :, :], axis=-1)
+        ab = np.linalg.norm(a_row[:, :, None, :] - b_col[:, None, :, :], axis=-1)
+        return AB, Ab, aB, ab
 
-        return sep_torch        
-    
-    def compute_separations(self, A, a, B, b):
-        # A, a: shape (nSubapA, 2)
-        # B, b: shape (nSubapB, 2)
-
-        AB = np.linalg.norm(A[:, None, :] - B[None, :, :], axis=2)
-        Ab = np.linalg.norm(A[:, None, :] - b[None, :, :], axis=2)
-        aB = np.linalg.norm(a[:, None, :] - B[None, :, :], axis=2)
-        ab = np.linalg.norm(a[:, None, :] - b[None, :, :], axis=2)
-
-        return AB, Ab, aB, ab    
-    
-    def compute_separations_array(self, subapsSelZ, subapsSelS, listWFS_Z_X, listWFS_Z_Y, listWFS_S_X, listWFS_S_Y):
+    def compute_covariance_matrix_torch(self, separations_torch, r0, L0, fractR0, scale, constants, noise_var=None, row_sizes_tensor=None, diag_idx=None):
+        # separations_torch: shape (4, nLayers, N_rows, N_cols)
+        # scale: shape (N_rows, N_cols)
+        # constants: dict containing k1, a0, b0
         
-        separations = {'XX': [], 'XY': [], 'YX': [], 'YY': []}
-
-        for iLayer in range(self.nLayers):
-
-            layer_sep  = {'XX': [], 'XY': [], 'YX': [], 'YY': []}
-
-            for jWFS in range(len(listWFS_Z_X)):
-                for kWFS in range(len(listWFS_S_X)):
-                    sel_j = subapsSelZ[jWFS]
-                    sel_k = subapsSelS[kWFS]
-
-                    # XX
-                    A = listWFS_Z_X[jWFS]['midPointA'][iLayer, sel_j, :]
-                    a = listWFS_Z_X[jWFS]['midPointa'][iLayer, sel_j, :]
-                    B = listWFS_S_X[kWFS]['midPointA'][iLayer, sel_k, :]
-                    b = listWFS_S_X[kWFS]['midPointa'][iLayer, sel_k, :]
-
-                    layer_sep['XX'].append(
-                        self.compute_separations(A, a, B, b)
-                    )
-
-                    # XY
-                    A = listWFS_Z_X[jWFS]['midPointA'][iLayer, sel_j, :]
-                    a = listWFS_Z_X[jWFS]['midPointa'][iLayer, sel_j, :]
-                    B = listWFS_S_Y[kWFS]['midPointA'][iLayer, sel_k, :]
-                    b = listWFS_S_Y[kWFS]['midPointa'][iLayer, sel_k, :]
-
-                    layer_sep['XY'].append(
-                        self.compute_separations(A, a, B, b)
-                    )
-
-                    # YX
-                    A = listWFS_Z_Y[jWFS]['midPointA'][iLayer, sel_j, :]
-                    a = listWFS_Z_Y[jWFS]['midPointa'][iLayer, sel_j, :]
-                    B = listWFS_S_X[kWFS]['midPointA'][iLayer, sel_k, :]
-                    b = listWFS_S_X[kWFS]['midPointa'][iLayer, sel_k, :]
-
-                    layer_sep['YX'].append(
-                        self.compute_separations(A, a, B, b)
-                    )
-
-                    # YY
-                    A = listWFS_Z_Y[jWFS]['midPointA'][iLayer, sel_j, :]
-                    a = listWFS_Z_Y[jWFS]['midPointa'][iLayer, sel_j, :]
-                    B = listWFS_S_Y[kWFS]['midPointA'][iLayer, sel_k, :]
-                    b = listWFS_S_Y[kWFS]['midPointa'][iLayer, sel_k, :]
-
-                    layer_sep['YY'].append(
-                        self.compute_separations(A, a, B, b)
-                    )
-            for key in separations:
-                separations[key].append(layer_sep[key])
-
-        # Separations per layer to array
-        nWFS_Z = len(listWFS_Z_X)
-        nWFS_S = len(listWFS_S_X)
-
-        separations_array = []
-
-        for iLayer in range(self.nLayers):
-
-            XX = np.empty((nWFS_Z, nWFS_S), dtype=object)
-            XY = np.empty((nWFS_Z, nWFS_S), dtype=object)
-            YX = np.empty((nWFS_Z, nWFS_S), dtype=object)
-            YY = np.empty((nWFS_Z, nWFS_S), dtype=object)
-
-            for jWFS in range(nWFS_Z):
-                for kWFS in range(nWFS_S):
-                    pair_id = jWFS * nWFS_S + kWFS
-
-                    XX[jWFS, kWFS] = separations['XX'][iLayer][pair_id]
-                    XY[jWFS, kWFS] = separations['XY'][iLayer][pair_id]
-                    YX[jWFS, kWFS] = separations['YX'][iLayer][pair_id]
-                    YY[jWFS, kWFS] = separations['YY'][iLayer][pair_id]
-
-            sep = np.block([
-                [XX, XY],
-                [YX, YY]
-            ])
-
-            separations_array.append(sep)
-        # Each cell of the array contains a tuple (AB, Ab, aB, ab)
-        separations_array = np.array(separations_array, dtype=object)
-
-        return separations_array
-    
-    def covariance_from_separations_torch(self, r0, L0, AB, Ab, aB, ab, sizeZ, sizeS, constants):
-        sep_stack = torch.stack((AB, Ab, aB, ab), dim=0)
-        D = self.vk_structure_torch(r0, L0, sep_stack, constants)
-
-        return (1.0 / (2.0 * sizeZ * sizeS)) * (-D[0] + D[1] + D[2] - D[3])
-    
-    def compute_covariance_matrix_torch(self, separations, r0, L0, fractR0, listWFS_Z_params, listWFS_S_params, constants, dtype=torch.float64, noise_var=None):
-
-        nWFS_Z = len(listWFS_Z_params)
-        nWFS_S = len(listWFS_S_params)
-
-        row_sizes = [separations[0, row, 0][0].shape[0] for row in range(2 * nWFS_Z)]
-        col_sizes = [separations[0, 0, col][0].shape[1] for col in range(2 * nWFS_S)]
-
-        row_offsets = np.cumsum([0] + row_sizes)
-        col_offsets = np.cumsum([0] + col_sizes)
-
-        cov_matrix = torch.zeros((row_offsets[-1], col_offsets[-1]), dtype=dtype, device=self.device)
-
-        for iLayer in range(self.nLayers):
-            for row in range(2 * nWFS_Z):
-                jWFS = row if row < nWFS_Z else row - nWFS_Z
-                r0a, r1a = row_offsets[row], row_offsets[row + 1]
-
-                for col in range(2 * nWFS_S):
-                    kWFS = col if col < nWFS_S else col - nWFS_S
-                    c0, c1 = col_offsets[col], col_offsets[col + 1]
-
-                    AB, Ab, aB, ab = separations[iLayer, row, col]
-
-                    dZ = listWFS_Z_params[jWFS]["subap_size"]
-                    dS = listWFS_S_params[kWFS]["subap_size"]
-
-                    block = self.covariance_from_separations_torch(
-                        r0, L0, AB, Ab, aB, ab, dZ, dS, constants
-                    )
-
-                    cov_matrix[r0a:r1a, c0:c1] = (cov_matrix[r0a:r1a, c0:c1] + fractR0[iLayer] * block)
-
-        # Add noise variance to the diagonal blocks if Z == S (auto-covariance)
-        if noise_var is not None and listWFS_Z_params is listWFS_S_params:
-            for j in range(nWFS_Z):
-                # X-slopes diagonal
-                r0a, r1a = row_offsets[j], row_offsets[j + 1]
-                idx_x = torch.arange(r0a, r1a, device=self.device)
-                cov_matrix[idx_x, idx_x] = cov_matrix[idx_x, idx_x] + noise_var[j]
-
-                # Y-slopes diagonal
-                r0a_y, r1a_y = row_offsets[j + nWFS_Z], row_offsets[j + nWFS_Z + 1]
-                idx_y = torch.arange(r0a_y, r1a_y, device=self.device)
-                cov_matrix[idx_y, idx_y] = cov_matrix[idx_y, idx_y] + noise_var[j]
-
+        # Compute Von Karman structure function
+        D = self.vk_structure_torch(r0, L0, separations_torch, constants)
+        
+        # Compute covariance block
+        # block shape: (nLayers, N_rows, N_cols)
+        block = scale * (-D[0] + D[1] + D[2] - D[3])
+        
+        # Sum over layers weighted by fractR0
+        # fractR0 shape: (nLayers,)
+        cov_matrix = torch.sum(fractR0[:, None, None] * block, dim=0)
+        
+        # Add noise variance if applicable
+        if noise_var is not None and row_sizes_tensor is not None and diag_idx is not None:
+            nWFS = row_sizes_tensor.shape[0] // 2
+            if noise_var.ndim == 0:
+                noise_var_full = noise_var.expand(nWFS)
+            elif noise_var.shape[0] == 1:
+                noise_var_full = noise_var.expand(nWFS)
+            else:
+                noise_var_full = noise_var
+            noise_block_values = torch.cat((noise_var_full, noise_var_full))
+            noise_diag = torch.repeat_interleave(noise_block_values, row_sizes_tensor)
+            cov_matrix[diag_idx, diag_idx] = cov_matrix[diag_idx, diag_idx] + noise_diag
+            
         return cov_matrix
     
     def loadMeasurements(self, data_path, nWFS, subapsSel, selSamples, lp_indices=None):
@@ -427,7 +304,7 @@ class LearnEstimator:
 
 
     def learn(self, atm_guess, data_path, output_path, selSubaps=0.1, selSamples=0.1,
-              lr=1e-2, max_iters=500, patience=50, min_delta=1e-9,
+              lr=1e-2, max_iters=150, patience=50, min_delta=1e-9,
               lr_patience=20, lr_factor=0.5, optimize_noise=True, initial_noise=1e-2,
               lp_indices=None):
         self.logger.info('LearnEstimator::learn - loading initial params.')
@@ -462,16 +339,45 @@ class LearnEstimator:
         # Compute separations for the subapertures selected
         self.logger.info('LearnEstimator::learn - computing separations for randomly selected subaps.')
         t0 = time.time()
-        separations_theo_meas = self.compute_separations_array(subapsSel, subapsSel, self.measWFSmidpoint_X, self.measWFSmidpoint_Y, 
-                                                               self.measWFSmidpoint_X, self.measWFSmidpoint_Y)
-        separations_torch = self.separations_to_torch(separations_theo_meas, dtype)
+        
+        # Vectorized coordinate computation for Z and S (which are both measWFSparams with subapsSel)
+        A_row = np.concatenate([self.measWFSmidpoint_X[j]['midPointA'][:, subapsSel[j], :] for j in range(len(self.measWFSparams))] + 
+                               [self.measWFSmidpoint_Y[j]['midPointA'][:, subapsSel[j], :] for j in range(len(self.measWFSparams))], axis=1)
+        a_row = np.concatenate([self.measWFSmidpoint_X[j]['midPointa'][:, subapsSel[j], :] for j in range(len(self.measWFSparams))] + 
+                               [self.measWFSmidpoint_Y[j]['midPointa'][:, subapsSel[j], :] for j in range(len(self.measWFSparams))], axis=1)
+        
+        AB, Ab, aB, ab = self.compute_separations_vectorized(A_row, a_row, A_row, a_row)
+        separations_torch = self.separations_to_torch(AB, Ab, aB, ab, dtype)
+        
         # Compute theoretical covariance matrix
         t1 = time.time()        
         self.logger.info('LearnEstimator::learn - Compute theoretical covariance matrix.')
         constants = self.prepare_vk_constants_torch(dtype)
         
+        # Precompute sizes, scale and tensors for noise
+        sizes_Z = []
+        for j, wfs in enumerate(self.measWFSparams):
+            sizes_Z.extend([wfs["subap_size"]] * len(subapsSel[j]))
+        sizes_Z = sizes_Z + sizes_Z
+        dZ = torch.tensor(sizes_Z, dtype=dtype, device=self.device)
+        
+        scale = 1.0 / (2.0 * dZ[:, None] * dZ[None, :])
+        
+        row_sizes = [len(subapsSel[j]) for j in range(len(self.measWFSparams))] * 2
+        row_sizes_tensor = torch.tensor(row_sizes, device=self.device)
+        cov_matrix_shape_0 = sum(row_sizes)
+        diag_idx = torch.arange(cov_matrix_shape_0, device=self.device)
+        
+        # Define parameters to be optimized
+        initial_r0_torch = torch.as_tensor(initial_r0, dtype=dtype, device=self.device)
+        initial_L0_torch = torch.as_tensor(initial_L0, dtype=dtype, device=self.device)
+        initial_fractionalR0_torch = torch.as_tensor(initial_fractionalR0, dtype=dtype, device=self.device)        
+        
         # Initial call to compute_covariance_matrix_torch (no noise optimization parameters here yet)
-        cov_theo = self.compute_covariance_matrix_torch(separations_torch, initial_r0, initial_L0, initial_fractionalR0, self.measWFSparams, self.measWFSparams, constants, dtype=dtype)
+        cov_theo = self.compute_covariance_matrix_torch(
+            separations_torch, initial_r0_torch, initial_L0_torch, initial_fractionalR0_torch,
+            scale, constants, noise_var=None
+        )
         t2 = time.time()
         # Experimental covariance matrix 
         self.logger.info('LearnEstimator::learn - Load slopes measurements.')
@@ -482,18 +388,14 @@ class LearnEstimator:
         t3 = time.time()
         self.logger.info(f'Separation {t1-t0}, CovMat (1it):{t2-t1}, Experimental: {t3-t2}')
 
-        # Define parameters to be optimized
-        initial_r0_torch = torch.as_tensor(initial_r0, dtype=dtype, device=self.device)
-        initial_L0_torch = torch.as_tensor(initial_L0, dtype=dtype, device=self.device)
-        initial_fractionalR0_torch = torch.as_tensor(initial_fractionalR0, dtype=dtype, device=self.device)        
-        
+        # Define parameters to be optimized in PyTorch
         raw_r0 = torch.nn.Parameter(torch.log(torch.expm1(initial_r0_torch)))
         raw_L0 = torch.nn.Parameter(torch.log(torch.expm1(initial_L0_torch)))
         raw_cn2 = torch.nn.Parameter(torch.log(initial_fractionalR0_torch + 1e-12))
 
         # Setup noise optimization if requested
         if optimize_noise:
-            initial_noise_torch = torch.full((len(self.measWFSparams),), initial_noise, dtype=dtype, device=self.device)
+            initial_noise_torch = torch.as_tensor(initial_noise, dtype=dtype, device=self.device)
             raw_noise = torch.nn.Parameter(torch.log(torch.expm1(initial_noise_torch)))
             optimizer = torch.optim.Adam([raw_r0, raw_L0, raw_cn2, raw_noise], lr=lr)
         else:
@@ -523,7 +425,10 @@ class LearnEstimator:
             else:
                 noise_var = None
 
-            cov_theo = self.compute_covariance_matrix_torch(separations_torch, r0, L0, fractR0, self.measWFSparams, self.measWFSparams, constants, dtype=dtype, noise_var=noise_var)
+            cov_theo = self.compute_covariance_matrix_torch(
+                separations_torch, r0, L0, fractR0, scale, constants,
+                noise_var=noise_var, row_sizes_tensor=row_sizes_tensor, diag_idx=diag_idx
+            )
 
             loss = torch.mean((cov_theo - cov_meas) ** 2)
 
@@ -640,16 +545,21 @@ class LearnEstimator:
         dtype = torch.float64
         constants = self.prepare_vk_constants_torch(dtype)
 
+        r0_torch = torch.as_tensor(r0, dtype=dtype, device=self.device)
+        L0_torch = torch.as_tensor(L0, dtype=dtype, device=self.device)
+        fractionalR0_torch = torch.as_tensor(fractionalR0, dtype=dtype, device=self.device)
+
         # 1. Build C_ss (sensed-sensed covariance matrix) using all subapertures
         subaps_sensed = [np.arange(wfs['coordinates_per_layer'].shape[1]) for wfs in self.measWFSparams]
         
         self.logger.info("LearnEstimator::build_reconstructor - Computing sensed-sensed separations...")
-        separations_ss_np = self.compute_separations_array(
-            subaps_sensed, subaps_sensed,
-            self.measWFSmidpoint_X, self.measWFSmidpoint_Y,
-            self.measWFSmidpoint_X, self.measWFSmidpoint_Y
-        )
-        separations_ss = self.separations_to_torch(separations_ss_np, dtype)
+        A_row_s = np.concatenate([self.measWFSmidpoint_X[j]['midPointA'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))] + 
+                                 [self.measWFSmidpoint_Y[j]['midPointA'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))], axis=1)
+        a_row_s = np.concatenate([self.measWFSmidpoint_X[j]['midPointa'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))] + 
+                                 [self.measWFSmidpoint_Y[j]['midPointa'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))], axis=1)
+        
+        AB_ss, Ab_ss, aB_ss, ab_ss = self.compute_separations_vectorized(A_row_s, a_row_s, A_row_s, a_row_s)
+        separations_ss = self.separations_to_torch(AB_ss, Ab_ss, aB_ss, ab_ss, dtype)
 
         self.logger.info("LearnEstimator::build_reconstructor - Computing C_ss covariance matrix...")
         if noise_var is not None:
@@ -657,10 +567,22 @@ class LearnEstimator:
         else:
             noise_var_torch = None
 
+        sizes_meas = []
+        for j, wfs in enumerate(self.measWFSparams):
+            sizes_meas.extend([wfs["subap_size"]] * len(subaps_sensed[j]))
+        sizes_meas = sizes_meas + sizes_meas
+        d_meas = torch.tensor(sizes_meas, dtype=dtype, device=self.device)
+        
+        scale_ss = 1.0 / (2.0 * d_meas[:, None] * d_meas[None, :])
+        
+        row_sizes_meas = [len(subaps_sensed[j]) for j in range(len(self.measWFSparams))] * 2
+        row_sizes_meas_tensor = torch.tensor(row_sizes_meas, device=self.device)
+        diag_idx_ss = torch.arange(sum(row_sizes_meas), device=self.device)
+
         Css = self.compute_covariance_matrix_torch(
-            separations_ss, r0, L0, fractionalR0,
-            self.measWFSparams, self.measWFSparams,
-            constants, dtype=dtype, noise_var=noise_var_torch
+            separations_ss, r0_torch, L0_torch, fractionalR0_torch,
+            scale_ss, constants, noise_var=noise_var_torch,
+            row_sizes_tensor=row_sizes_meas_tensor, diag_idx=diag_idx_ss
         )
 
         # Apply diagonal regularization
@@ -672,18 +594,27 @@ class LearnEstimator:
         subaps_target = [np.arange(wfs['coordinates_per_layer'].shape[1]) for wfs in self.targetWFSparams]
 
         self.logger.info("LearnEstimator::build_reconstructor - Computing target-sensed separations...")
-        separations_ts_np = self.compute_separations_array(
-            subaps_target, subaps_sensed,
-            self.targetWFSmidpoint_X, self.targetWFSmidpoint_Y,
-            self.measWFSmidpoint_X, self.measWFSmidpoint_Y
-        )
-        separations_ts = self.separations_to_torch(separations_ts_np, dtype)
+        A_row_t = np.concatenate([self.targetWFSmidpoint_X[j]['midPointA'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))] + 
+                                 [self.targetWFSmidpoint_Y[j]['midPointA'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))], axis=1)
+        a_row_t = np.concatenate([self.targetWFSmidpoint_X[j]['midPointa'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))] + 
+                                 [self.targetWFSmidpoint_Y[j]['midPointa'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))], axis=1)
+        
+        AB_ts, Ab_ts, aB_ts, ab_ts = self.compute_separations_vectorized(A_row_t, a_row_t, A_row_s, a_row_s)
+        separations_ts = self.separations_to_torch(AB_ts, Ab_ts, aB_ts, ab_ts, dtype)
 
         self.logger.info("LearnEstimator::build_reconstructor - Computing C_ts covariance matrix...")
+        
+        sizes_target = []
+        for j, wfs in enumerate(self.targetWFSparams):
+            sizes_target.extend([wfs["subap_size"]] * len(subaps_target[j]))
+        sizes_target = sizes_target + sizes_target
+        d_target = torch.tensor(sizes_target, dtype=dtype, device=self.device)
+        
+        scale_ts = 1.0 / (2.0 * d_target[:, None] * d_meas[None, :])
+
         Cts = self.compute_covariance_matrix_torch(
-            separations_ts, r0, L0, fractionalR0,
-            self.targetWFSparams, self.measWFSparams,
-            constants, dtype=dtype, noise_var=None
+            separations_ts, r0_torch, L0_torch, fractionalR0_torch,
+            scale_ts, constants, noise_var=None
         )
 
         # 3. Solve R_tomo = C_ts @ Css^-1 using a stable solver
