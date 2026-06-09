@@ -42,6 +42,9 @@ class LearnEstimator:
 
         self.device    = "cuda" if torch.cuda.is_available() else "cpu"
 
+        self.measLPs = measLPs
+        self.targetLPs = targetLPs
+
         # Correct altitudes by zenith
         self.altitudes = self.altitudes / np.cos((self.zenith/180)*np.pi)       
         
@@ -202,6 +205,15 @@ class LearnEstimator:
         sep_stack = np.stack((AB, Ab, aB, ab), axis=0)
         return torch.as_tensor(sep_stack, dtype=dtype, device=self.device)
 
+    def compute_coordinate_differences(self, A_row, a_row, B_col, b_col):
+        # A_row, a_row: shape (nLayers, N_row, 2)
+        # B_col, b_col: shape (nLayers, N_col, 2)
+        diff_AB = A_row[:, :, None, :] - B_col[:, None, :, :]
+        diff_Ab = A_row[:, :, None, :] - b_col[:, None, :, :]
+        diff_aB = a_row[:, :, None, :] - B_col[:, None, :, :]
+        diff_ab = a_row[:, :, None, :] - b_col[:, None, :, :]
+        return np.stack((diff_AB, diff_Ab, diff_aB, diff_ab), axis=0)
+
     def compute_separations_vectorized(self, A_row, a_row, B_col, b_col):
         # A_row, a_row: shape (nLayers, N_row, 2)
         # B_col, b_col: shape (nLayers, N_col, 2)
@@ -211,10 +223,19 @@ class LearnEstimator:
         ab = np.linalg.norm(a_row[:, :, None, :] - b_col[:, None, :, :], axis=-1)
         return AB, Ab, aB, ab
 
-    def compute_covariance_matrix_torch(self, separations_torch, r0, L0, fractionalCn2, scale, constants, noise_var=None, row_sizes_tensor=None, diag_idx=None):
-        # separations_torch: shape (4, nLayers, N_rows, N_cols)
+    def compute_covariance_matrix_torch(self, diff_stack_torch, r0, L0, fractionalCn2, scale, constants, noise_var=None, row_sizes_tensor=None, diag_idx=None, Vx=None, Vy=None, dt=None):
+        # diff_stack_torch: shape (4, nLayers, N_rows, N_cols, 2)
         # scale: shape (N_rows, N_cols)
         # constants: dict containing k1, a0, b0
+        
+        if Vx is not None and Vy is not None and dt is not None and dt != 0:
+            disp_x = Vx[:, None, None] * dt
+            disp_y = Vy[:, None, None] * dt
+            disp = torch.stack((disp_x, disp_y), dim=-1) # (nLayers, 1, 1, 2)
+            s_diff = diff_stack_torch + disp
+            separations_torch = torch.norm(s_diff, p=2, dim=-1)
+        else:
+            separations_torch = torch.norm(diff_stack_torch, p=2, dim=-1)
         
         # Compute Von Karman structure function
         D = self.vk_structure_torch(r0, L0, separations_torch, constants)
@@ -242,16 +263,19 @@ class LearnEstimator:
             
         return cov_matrix
     
-    def loadMeasurements(self, data_path, nWFS, subapsSel, selSamples, lp_indices=None):
+    def loadMeasurements(self, data_path, nWFS, subapsSel, selSamples, lp_indices=None, delay_frames=0):
         # Open data set
         with h5py.File(data_path, 'r') as f:
-            wfs_slopes = []
+            wfs_slopes_t = []
+            wfs_slopes_tdelay = []
             # Read number of samples
             nSamples = f['/LightPath_0/slopes_1D/data'].shape[0]
+            n_valid_samples = nSamples - delay_frames
             # Generate random selection
-            nSel = max(1, int(selSamples * nSamples))
+            nSel = max(1, int(selSamples * n_valid_samples))
 
-            idx = np.sort(np.random.choice(nSamples, size=nSel, replace=False))
+            idx_t = np.sort(np.random.choice(n_valid_samples, size=nSel, replace=False))
+            idx_tdelay = idx_t + delay_frames
             # Read data
             for iWFS in range(nWFS):
                 lp_idx = lp_indices[iWFS] if lp_indices is not None else iWFS
@@ -260,27 +284,31 @@ class LearnEstimator:
                 nSlopes = data.shape[1]
                 nSubaps = nSlopes // 2
                 sel = np.sort(np.concatenate([subapsSel[iWFS], subapsSel[iWFS] + nSubaps]))
-                wfs_slopes.append(data[idx][:, sel])                
+                wfs_slopes_t.append(data[idx_t][:, sel])
+                if delay_frames > 0:
+                    wfs_slopes_tdelay.append(data[idx_tdelay][:, sel])
+                else:
+                    wfs_slopes_tdelay.append(data[idx_t][:, sel])
 
-        return wfs_slopes
+        return wfs_slopes_t, wfs_slopes_tdelay
     
-    def compute_measurement_covariance(self, wfs_slopes, gain, dtype):
-        nWFS = len(wfs_slopes)
-        nSubaps = wfs_slopes[0].shape[1] // 2
-        nSamples = wfs_slopes[0].shape[0]
+    def compute_measurement_covariance(self, wfs_slopes_t, wfs_slopes_tdelay, gain, dtype):
+        nWFS = len(wfs_slopes_t)
+        nSubaps = wfs_slopes_t[0].shape[1] // 2
+        nSamples = wfs_slopes_t[0].shape[0]
 
         cov_mat = np.zeros((2 * nWFS * nSubaps, 2 * nWFS * nSubaps))
 
         for iWFS in range(nWFS):
-            slopes_x_i = wfs_slopes[iWFS][:, :nSubaps]
-            slopes_y_i = wfs_slopes[iWFS][:, nSubaps:]
+            slopes_x_i = wfs_slopes_t[iWFS][:, :nSubaps]
+            slopes_y_i = wfs_slopes_t[iWFS][:, nSubaps:]
 
             slopes_x_i = slopes_x_i - slopes_x_i.mean(axis=0, keepdims=True)
             slopes_y_i = slopes_y_i - slopes_y_i.mean(axis=0, keepdims=True)
 
             for jWFS in range(nWFS):
-                slopes_x_j = wfs_slopes[jWFS][:, :nSubaps]
-                slopes_y_j = wfs_slopes[jWFS][:, nSubaps:]
+                slopes_x_j = wfs_slopes_tdelay[jWFS][:, :nSubaps]
+                slopes_y_j = wfs_slopes_tdelay[jWFS][:, nSubaps:]
 
                 slopes_x_j = slopes_x_j - slopes_x_j.mean(axis=0, keepdims=True)
                 slopes_y_j = slopes_y_j - slopes_y_j.mean(axis=0, keepdims=True)
@@ -306,15 +334,16 @@ class LearnEstimator:
     def learn(self, atm_guess, data_path, output_path, selSubaps=0.1, selSamples=0.1,
               lr=1e-2, max_iters=150, patience=50, min_delta=1e-9,
               lr_patience=20, lr_factor=0.5, optimize_noise=True, initial_noise=1e-2,
-              lp_indices=None):
+              lp_indices=None, wind_delay_frames=10, max_iters_wind=150, lr_wind=1e-1,
+              patience_wind=50):
         self.logger.info('LearnEstimator::learn - loading initial params.')
         # Extract initial params
         initial_r0 = atm_guess['r0']
         initial_L0 = atm_guess['L0']
         
         initial_fractionalCn2 = np.array(atm_guess['fractionalCn2'])
-        initial_windSpeedX = np.array(atm_guess['windSpeedX'])
-        initial_windSpeedY = np.array(atm_guess['windSpeedY'])   
+        initial_windSpeedX = np.array(atm_guess.get('windSpeedX', np.zeros(self.nLayers)))
+        initial_windSpeedY = np.array(atm_guess.get('windSpeedY', np.zeros(self.nLayers)))   
 
         # Check input parameters
         if initial_fractionalCn2.shape[0] != self.nLayers:
@@ -336,8 +365,8 @@ class LearnEstimator:
             subapsSel.append(idx)
 
         dtype = torch.float64
-        # Compute separations for the subapertures selected
-        self.logger.info('LearnEstimator::learn - computing separations for randomly selected subaps.')
+        # Compute coordinate differences for the subapertures selected
+        self.logger.info('LearnEstimator::learn - computing coordinate differences for randomly selected subaps.')
         t0 = time.time()
         
         # Vectorized coordinate computation for Z and S (which are both measWFSparams with subapsSel)
@@ -346,8 +375,8 @@ class LearnEstimator:
         a_row = np.concatenate([self.measWFSmidpoint_X[j]['midPointa'][:, subapsSel[j], :] for j in range(len(self.measWFSparams))] + 
                                [self.measWFSmidpoint_Y[j]['midPointa'][:, subapsSel[j], :] for j in range(len(self.measWFSparams))], axis=1)
         
-        AB, Ab, aB, ab = self.compute_separations_vectorized(A_row, a_row, A_row, a_row)
-        separations_torch = self.separations_to_torch(AB, Ab, aB, ab, dtype)
+        diff_stack = self.compute_coordinate_differences(A_row, a_row, A_row, a_row)
+        diff_stack_torch = torch.as_tensor(diff_stack, dtype=dtype, device=self.device)
         
         # Compute theoretical covariance matrix
         t1 = time.time()        
@@ -375,20 +404,21 @@ class LearnEstimator:
         
         # Initial call to compute_covariance_matrix_torch (no noise optimization parameters here yet)
         cov_theo = self.compute_covariance_matrix_torch(
-            separations_torch, initial_r0_torch, initial_L0_torch, initial_fractionalCn2_torch,
+            diff_stack_torch, initial_r0_torch, initial_L0_torch, initial_fractionalCn2_torch,
             scale, constants, noise_var=None
         )
         t2 = time.time()
-        # Experimental covariance matrix 
-        self.logger.info('LearnEstimator::learn - Load slopes measurements.')
-        meas_slopes = self.loadMeasurements(data_path, len(self.measWFSparams), subapsSel, selSamples, lp_indices=lp_indices)
-        self.logger.info('LearnEstimator::learn - Compute exprimental covariance.')
+        # Experimental covariance matrix (instantaneous, delay = 0)
+        self.logger.info('LearnEstimator::learn - Load slopes measurements for Phase 1.')
+        meas_slopes_t, meas_slopes_tdelay = self.loadMeasurements(data_path, len(self.measWFSparams), subapsSel, selSamples, lp_indices=lp_indices, delay_frames=0)
+        self.logger.info('LearnEstimator::learn - Compute experimental covariance for Phase 1.')
         gain = (self.measWFSparams[0]['subap_size']*2*np.pi*2)/(206265.0*self.measWFSparams[0]['plate_scale']*self.measWFSparams[0]['wavelength'])
-        cov_meas    = self.compute_measurement_covariance(meas_slopes, gain, dtype)
+        cov_meas = self.compute_measurement_covariance(meas_slopes_t, meas_slopes_tdelay, gain, dtype)
         t3 = time.time()
         self.logger.info(f'Separation {t1-t0}, CovMat (1it):{t2-t1}, Experimental: {t3-t2}')
 
-        # Define parameters to be optimized in PyTorch
+        # Phase 1: Atmosphere & Noise Estimation
+        self.logger.info("LearnEstimator::learn - Starting Phase 1: Atmosphere & Noise Estimation...")
         raw_r0 = torch.nn.Parameter(torch.log(torch.expm1(initial_r0_torch)))
         raw_L0 = torch.nn.Parameter(torch.log(torch.expm1(initial_L0_torch)))
         raw_cn2 = torch.nn.Parameter(torch.log(initial_fractionalCn2_torch + 1e-12))
@@ -426,7 +456,7 @@ class LearnEstimator:
                 noise_var = None
 
             cov_theo = self.compute_covariance_matrix_torch(
-                separations_torch, r0, L0, fractionalCn2, scale, constants,
+                diff_stack_torch, r0, L0, fractionalCn2, scale, constants,
                 noise_var=noise_var, row_sizes_tensor=row_sizes_tensor, diag_idx=diag_idx
             )
 
@@ -490,14 +520,113 @@ class LearnEstimator:
         else:
             self.noise_var = None
 
-        self.logger.info(f"Optimization completed. Best Loss: {best_loss:.6e}")
-        self.logger.info(f"Optimized parameters: r0={self.r0:.4f}, L0={self.L0:.4f}, Cn2={self.fractionalCn2}")
+        self.logger.info(f"Phase 1 completed. Best Loss: {best_loss:.6e}")
+        self.logger.info(f"Optimized parameters (Phase 1): r0={self.r0:.4f}, L0={self.L0:.4f}, Cn2={self.fractionalCn2}")
         if optimize_noise:
-            self.logger.info(f"Optimized noise variance per WFS: {self.noise_var}")
+            self.logger.info(f"Optimized noise variance per WFS (Phase 1): {self.noise_var}")
+
+        # Phase 2: Wind Velocity Estimation (Vx, Vy)
+        self.logger.info("LearnEstimator::learn - Starting Phase 2: Wind Speed Estimation...")
+        
+        # Freeze atmospheric parameters
+        r0_fixed = torch.as_tensor(self.r0, dtype=dtype, device=self.device)
+        L0_fixed = torch.as_tensor(self.L0, dtype=dtype, device=self.device)
+        fractionalCn2_fixed = torch.as_tensor(self.fractionalCn2, dtype=dtype, device=self.device)
+        noise_var_fixed = torch.as_tensor(self.noise_var, dtype=dtype, device=self.device) if self.noise_var is not None else None
+
+        if isinstance(wind_delay_frames, int):
+            wind_delays = [wind_delay_frames]
+        else:
+            wind_delays = list(wind_delay_frames)
+
+        cov_meas_wind_list = []
+        dt_list = []
+        sampling_time = self.measLPs[0].tel.samplingTime if len(self.measLPs) > 0 else 0.0005
+
+        for delay in wind_delays:
+            # Load measurement slopes with delay
+            self.logger.info(f'LearnEstimator::learn - Load slopes measurements for Phase 2 (delay={delay} frames).')
+            meas_slopes_t_wind, meas_slopes_tdelay_wind = self.loadMeasurements(
+                data_path, len(self.measWFSparams), subapsSel, selSamples, lp_indices=lp_indices, delay_frames=delay
+            )
+            self.logger.info(f'LearnEstimator::learn - Compute experimental cross-covariance for Phase 2 (delay={delay} frames).')
+            cov_meas_wind = self.compute_measurement_covariance(meas_slopes_t_wind, meas_slopes_tdelay_wind, gain, dtype)
+            cov_meas_wind_list.append(cov_meas_wind)
+            dt_list.append(delay * sampling_time)
+
+        # Define wind parameters to be optimized in PyTorch
+        raw_Vx = torch.nn.Parameter(torch.as_tensor(initial_windSpeedX, dtype=dtype, device=self.device))
+        raw_Vy = torch.nn.Parameter(torch.as_tensor(initial_windSpeedY, dtype=dtype, device=self.device))
+
+        optimizer_wind = torch.optim.Adam([raw_Vx, raw_Vy], lr=lr_wind)
+        scheduler_wind = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer_wind, mode='min', factor=lr_factor, patience=lr_patience, threshold=1e-6
+        )
+
+        best_loss_wind = float('inf')
+        best_params_wind = None
+        patience_counter_wind = 0
+        last_lr_wind = lr_wind
+
+        for it in range(max_iters_wind):
+            optimizer_wind.zero_grad()
+
+            loss_wind = 0.0
+            for cov_meas_wind, dt in zip(cov_meas_wind_list, dt_list):
+                cov_theo_wind = self.compute_covariance_matrix_torch(
+                    diff_stack_torch, r0_fixed, L0_fixed, fractionalCn2_fixed, scale, constants,
+                    noise_var=noise_var_fixed, row_sizes_tensor=row_sizes_tensor, diag_idx=diag_idx,
+                    Vx=raw_Vx, Vy=raw_Vy, dt=dt
+                )
+                loss_wind = loss_wind + torch.mean((cov_theo_wind - cov_meas_wind) ** 2)
+            
+            # Average the loss across all delays
+            loss_wind = loss_wind / len(wind_delays)
+            
+            loss_wind.backward()
+            optimizer_wind.step()
+
+            loss_val_wind = loss_wind.item()
+            scheduler_wind.step(loss_val_wind)
+
+            current_lr_wind = optimizer_wind.param_groups[0]['lr']
+            if current_lr_wind < last_lr_wind:
+                self.logger.info(f"wind_it={it} - [Plateau Detected] Reducing wind learning rate from {last_lr_wind:.2e} to {current_lr_wind:.2e}")
+                last_lr_wind = current_lr_wind
+
+            if loss_val_wind < best_loss_wind - min_delta:
+                best_loss_wind = loss_val_wind
+                best_params_wind = (raw_Vx.detach().clone(), raw_Vy.detach().clone())
+                patience_counter_wind = 0
+            else:
+                patience_counter_wind += 1
+
+            if it % 25 == 0:
+                self.logger.info(f"wind_it={it}, loss={loss_val_wind:.6e}, Vx={raw_Vx.detach().cpu().numpy()}, Vy={raw_Vy.detach().cpu().numpy()}")
+
+            if patience_counter_wind >= patience_wind:
+                self.logger.info(f"wind_it={it} - [Early Stopping] Triggered. No improvement in wind loss for {patience_wind} iterations.")
+                break
+
+        # Restore best wind parameters
+        if best_params_wind is not None:
+            with torch.no_grad():
+                raw_Vx.copy_(best_params_wind[0])
+                raw_Vy.copy_(best_params_wind[1])
+
+        self.windSpeedX = raw_Vx.detach().cpu().numpy()
+        self.windSpeedY = raw_Vy.detach().cpu().numpy()
+
+        self.logger.info(f"Phase 2 completed. Best Loss: {best_loss_wind:.6e}")
+        self.logger.info(f"Optimized parameters: r0={self.r0:.4f}, L0={self.L0:.4f}, Cn2={self.fractionalCn2}, Vx={self.windSpeedX}, Vy={self.windSpeedY}")
 
         # Clean up local references and release CUDA memory cache
         if torch.cuda.is_available():
-            del raw_r0, raw_L0, raw_cn2, optimizer, scheduler, cov_theo, cov_meas, separations_torch, best_params
+            del raw_r0, raw_L0, raw_cn2, raw_Vx, raw_Vy, optimizer, scheduler, optimizer_wind, scheduler_wind
+            del cov_theo, cov_meas, diff_stack_torch, best_params, best_params_wind
+            if 'cov_theo_wind' in locals():
+                del cov_theo_wind
+            del cov_meas_wind_list
             if optimize_noise:
                 del raw_noise
             import gc
@@ -508,11 +637,13 @@ class LearnEstimator:
             'r0': self.r0,
             'L0': self.L0,
             'fractionalCn2': self.fractionalCn2,
-            'noise_var': self.noise_var
+            'noise_var': self.noise_var,
+            'windSpeedX': self.windSpeedX,
+            'windSpeedY': self.windSpeedY
         }
 
 
-    def build_reconstructor(self, r0=None, L0=None, fractionalCn2=None, noise_var=None, regularization=1e-9):
+    def build_reconstructor(self, r0=None, L0=None, fractionalCn2=None, noise_var=None, regularization=1e-9, windSpeedX=None, windSpeedY=None, dt=None):
         """
         Build the tomographic reconstructor R_tomo = C_ts (C_ss + C_nn)^-1
         
@@ -529,6 +660,12 @@ class LearnEstimator:
             If self.noise_var is None, uses zero noise.
         regularization: float, optional
             Diagonal regularization added to C_ss.
+        windSpeedX: array-like, optional
+            Wind speed along X for delay compensation. If None, uses self.windSpeedX.
+        windSpeedY: array-like, optional
+            Wind speed along Y for delay compensation. If None, uses self.windSpeedY.
+        dt: float, optional
+            Time delay in seconds. If None, computes from target LP delay.
         """
         if r0 is None:
             r0 = self.r0
@@ -538,9 +675,19 @@ class LearnEstimator:
             fractionalCn2 = self.fractionalCn2
         if noise_var is None:
             noise_var = self.noise_var
+        if windSpeedX is None:
+            windSpeedX = getattr(self, 'windSpeedX', None)
+        if windSpeedY is None:
+            windSpeedY = getattr(self, 'windSpeedY', None)
 
         if r0 is None or L0 is None or fractionalCn2 is None:
             raise ValueError("r0, L0, and fractionalCn2 must be estimated or provided.")
+
+        if dt is None:
+            # Check target LPs delay
+            delay_frames = self.targetLPs[0].delay if hasattr(self, 'targetLPs') and len(self.targetLPs) > 0 else 0
+            sampling_time = self.targetLPs[0].tel.samplingTime if hasattr(self, 'targetLPs') and len(self.targetLPs) > 0 else 0.001
+            dt = delay_frames * sampling_time
 
         dtype = torch.float64
         constants = self.prepare_vk_constants_torch(dtype)
@@ -548,6 +695,13 @@ class LearnEstimator:
         r0_torch = torch.as_tensor(r0, dtype=dtype, device=self.device)
         L0_torch = torch.as_tensor(L0, dtype=dtype, device=self.device)
         fractionalCn2_torch = torch.as_tensor(fractionalCn2, dtype=dtype, device=self.device)
+
+        if windSpeedX is not None and windSpeedY is not None and dt != 0:
+            windSpeedX_torch = torch.as_tensor(windSpeedX, dtype=dtype, device=self.device)
+            windSpeedY_torch = torch.as_tensor(windSpeedY, dtype=dtype, device=self.device)
+        else:
+            windSpeedX_torch = None
+            windSpeedY_torch = None
 
         # 1. Build C_ss (sensed-sensed covariance matrix) using all subapertures
         subaps_sensed = [np.arange(wfs['coordinates_per_layer'].shape[1]) for wfs in self.measWFSparams]
@@ -558,8 +712,8 @@ class LearnEstimator:
         a_row_s = np.concatenate([self.measWFSmidpoint_X[j]['midPointa'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))] + 
                                  [self.measWFSmidpoint_Y[j]['midPointa'][:, subaps_sensed[j], :] for j in range(len(self.measWFSparams))], axis=1)
         
-        AB_ss, Ab_ss, aB_ss, ab_ss = self.compute_separations_vectorized(A_row_s, a_row_s, A_row_s, a_row_s)
-        separations_ss = self.separations_to_torch(AB_ss, Ab_ss, aB_ss, ab_ss, dtype)
+        diff_stack_ss = self.compute_coordinate_differences(A_row_s, a_row_s, A_row_s, a_row_s)
+        diff_stack_ss_torch = torch.as_tensor(diff_stack_ss, dtype=dtype, device=self.device)
 
         self.logger.info("LearnEstimator::build_reconstructor - Computing C_ss covariance matrix...")
         if noise_var is not None:
@@ -580,7 +734,7 @@ class LearnEstimator:
         diag_idx_ss = torch.arange(sum(row_sizes_meas), device=self.device)
 
         Css = self.compute_covariance_matrix_torch(
-            separations_ss, r0_torch, L0_torch, fractionalCn2_torch,
+            diff_stack_ss_torch, r0_torch, L0_torch, fractionalCn2_torch,
             scale_ss, constants, noise_var=noise_var_torch,
             row_sizes_tensor=row_sizes_meas_tensor, diag_idx=diag_idx_ss
         )
@@ -599,8 +753,8 @@ class LearnEstimator:
         a_row_t = np.concatenate([self.targetWFSmidpoint_X[j]['midPointa'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))] + 
                                  [self.targetWFSmidpoint_Y[j]['midPointa'][:, subaps_target[j], :] for j in range(len(self.targetWFSparams))], axis=1)
         
-        AB_ts, Ab_ts, aB_ts, ab_ts = self.compute_separations_vectorized(A_row_t, a_row_t, A_row_s, a_row_s)
-        separations_ts = self.separations_to_torch(AB_ts, Ab_ts, aB_ts, ab_ts, dtype)
+        diff_stack_ts = self.compute_coordinate_differences(A_row_t, a_row_t, A_row_s, a_row_s)
+        diff_stack_ts_torch = torch.as_tensor(diff_stack_ts, dtype=dtype, device=self.device)
 
         self.logger.info("LearnEstimator::build_reconstructor - Computing C_ts covariance matrix...")
         
@@ -613,8 +767,9 @@ class LearnEstimator:
         scale_ts = 1.0 / (2.0 * d_target[:, None] * d_meas[None, :])
 
         Cts = self.compute_covariance_matrix_torch(
-            separations_ts, r0_torch, L0_torch, fractionalCn2_torch,
-            scale_ts, constants, noise_var=None
+            diff_stack_ts_torch, r0_torch, L0_torch, fractionalCn2_torch,
+            scale_ts, constants, noise_var=None,
+            Vx=windSpeedX_torch, Vy=windSpeedY_torch, dt=dt
         )
 
         # 3. Solve R_tomo = C_ts @ Css^-1 using a stable solver
@@ -629,9 +784,13 @@ class LearnEstimator:
             Rtomo = Rtomo_T.T
 
         # Clean up CUDA memory cache
-        del Css, Cts, separations_ss, separations_ts
+        del Css, Cts, diff_stack_ss_torch, diff_stack_ts_torch
         if noise_var_torch is not None:
             del noise_var_torch
+        if windSpeedX_torch is not None:
+            del windSpeedX_torch
+        if windSpeedY_torch is not None:
+            del windSpeedY_torch
         if torch.cuda.is_available():
             import gc
             gc.collect()
@@ -640,7 +799,7 @@ class LearnEstimator:
         return Rtomo.cpu().numpy()
 
 
-    def setup_logging(self, logging_level=logging.WARNING):
+    def setup_logging(self, logging_level=logging.INFO):
         #  Setup of logging at the main process using QueueHandler
         log_queue = Queue()
         queue_handler = logging.handlers.QueueHandler(log_queue)
