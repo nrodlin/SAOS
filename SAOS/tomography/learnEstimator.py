@@ -317,7 +317,7 @@ class LearnEstimator:
 
         return (1.0 / (2.0 * sizeZ * sizeS)) * (-D[0] + D[1] + D[2] - D[3])
     
-    def compute_covariance_matrix_torch(self, separations, r0, L0, fractR0, listWFS_Z_params, listWFS_S_params, constants, dtype=torch.float64):
+    def compute_covariance_matrix_torch(self, separations, r0, L0, fractR0, listWFS_Z_params, listWFS_S_params, constants, dtype=torch.float64, noise_var=None):
 
         nWFS_Z = len(listWFS_Z_params)
         nWFS_S = len(listWFS_S_params)
@@ -350,9 +350,22 @@ class LearnEstimator:
 
                     cov_matrix[r0a:r1a, c0:c1] = (cov_matrix[r0a:r1a, c0:c1] + fractR0[iLayer] * block)
 
+        # Add noise variance to the diagonal blocks if Z == S (auto-covariance)
+        if noise_var is not None and listWFS_Z_params is listWFS_S_params:
+            for j in range(nWFS_Z):
+                # X-slopes diagonal
+                r0a, r1a = row_offsets[j], row_offsets[j + 1]
+                idx_x = torch.arange(r0a, r1a, device=self.device)
+                cov_matrix[idx_x, idx_x] = cov_matrix[idx_x, idx_x] + noise_var[j]
+
+                # Y-slopes diagonal
+                r0a_y, r1a_y = row_offsets[j + nWFS_Z], row_offsets[j + nWFS_Z + 1]
+                idx_y = torch.arange(r0a_y, r1a_y, device=self.device)
+                cov_matrix[idx_y, idx_y] = cov_matrix[idx_y, idx_y] + noise_var[j]
+
         return cov_matrix
     
-    def loadMeasurements(self, data_path, nWFS, subapsSel, selSamples):
+    def loadMeasurements(self, data_path, nWFS, subapsSel, selSamples, lp_indices=None):
         # Open data set
         with h5py.File(data_path, 'r') as f:
             wfs_slopes = []
@@ -364,7 +377,8 @@ class LearnEstimator:
             idx = np.sort(np.random.choice(nSamples, size=nSel, replace=False))
             # Read data
             for iWFS in range(nWFS):
-                data = f[f'/LightPath_{iWFS}/slopes_1D/data']
+                lp_idx = lp_indices[iWFS] if lp_indices is not None else iWFS
+                data = f[f'/LightPath_{lp_idx}/slopes_1D/data']
 
                 nSlopes = data.shape[1]
                 nSubaps = nSlopes // 2
@@ -412,7 +426,10 @@ class LearnEstimator:
         return torch.as_tensor(cov_mat, dtype=dtype, device=self.device)
 
 
-    def learn(self, atm_guess, data_path, output_path, selSubaps=0.1, selSamples=0.1):
+    def learn(self, atm_guess, data_path, output_path, selSubaps=0.1, selSamples=0.1,
+              lr=1e-2, max_iters=500, patience=50, min_delta=1e-9,
+              lr_patience=20, lr_factor=0.5, optimize_noise=True, initial_noise=1e-2,
+              lp_indices=None):
         self.logger.info('LearnEstimator::learn - loading initial params.')
         # Extract initial params
         initial_r0 = atm_guess['r0']
@@ -452,11 +469,13 @@ class LearnEstimator:
         t1 = time.time()        
         self.logger.info('LearnEstimator::learn - Compute theoretical covariance matrix.')
         constants = self.prepare_vk_constants_torch(dtype)
+        
+        # Initial call to compute_covariance_matrix_torch (no noise optimization parameters here yet)
         cov_theo = self.compute_covariance_matrix_torch(separations_torch, initial_r0, initial_L0, initial_fractionalR0, self.measWFSparams, self.measWFSparams, constants, dtype=dtype)
         t2 = time.time()
         # Experimental covariance matrix 
         self.logger.info('LearnEstimator::learn - Load slopes measurements.')
-        meas_slopes = self.loadMeasurements(data_path, len(self.measWFSparams), subapsSel, selSamples)
+        meas_slopes = self.loadMeasurements(data_path, len(self.measWFSparams), subapsSel, selSamples, lp_indices=lp_indices)
         self.logger.info('LearnEstimator::learn - Compute exprimental covariance.')
         gain = (self.measWFSparams[0]['subap_size']*2*np.pi*2)/(206265.0*self.measWFSparams[0]['plate_scale']*self.measWFSparams[0]['wavelength'])
         cov_meas    = self.compute_measurement_covariance(meas_slopes, gain, dtype)
@@ -472,27 +491,222 @@ class LearnEstimator:
         raw_L0 = torch.nn.Parameter(torch.log(torch.expm1(initial_L0_torch)))
         raw_cn2 = torch.nn.Parameter(torch.log(initial_fractionalR0_torch + 1e-12))
 
-        # Setup the optimizer
-        optimizer = torch.optim.Adam([raw_r0, raw_L0, raw_cn2], lr=1e-2)
+        # Setup noise optimization if requested
+        if optimize_noise:
+            initial_noise_torch = torch.full((len(self.measWFSparams),), initial_noise, dtype=dtype, device=self.device)
+            raw_noise = torch.nn.Parameter(torch.log(torch.expm1(initial_noise_torch)))
+            optimizer = torch.optim.Adam([raw_r0, raw_L0, raw_cn2, raw_noise], lr=lr)
+        else:
+            raw_noise = None
+            optimizer = torch.optim.Adam([raw_r0, raw_L0, raw_cn2], lr=lr)
 
-        for it in range(500):
+        # Setup learning rate scheduler for plateau detection
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=lr_factor, patience=lr_patience, threshold=1e-6
+        )
+
+        # Variables to track early stopping state
+        best_loss = float('inf')
+        best_params = None
+        patience_counter = 0
+        last_lr = lr
+
+        for it in range(max_iters):
             optimizer.zero_grad()
 
             r0 = torch.nn.functional.softplus(raw_r0) + 1e-6
             L0 = torch.nn.functional.softplus(raw_L0) + 1e-6
             fractR0 = torch.nn.functional.softmax(raw_cn2, dim=0)
+            
+            if optimize_noise:
+                noise_var = torch.nn.functional.softplus(raw_noise) + 1e-8
+            else:
+                noise_var = None
 
-            cov_theo = self.compute_covariance_matrix_torch(separations_torch, r0, L0, fractR0, self.measWFSparams, self.measWFSparams, constants, dtype=dtype)
+            cov_theo = self.compute_covariance_matrix_torch(separations_torch, r0, L0, fractR0, self.measWFSparams, self.measWFSparams, constants, dtype=dtype, noise_var=noise_var)
 
             loss = torch.mean((cov_theo - cov_meas) ** 2)
 
             loss.backward()
             optimizer.step()
 
-            if it % 25 == 0:
-                self.logger.info(f"it={it}, loss={loss.item():.6e}, r0={r0.item():.4f}, L0={L0.item():.4f}, Cn2={fractR0.detach().cpu().numpy()}")
+            loss_val = loss.item()
 
-        return True
+            # Update scheduler for plateau detection
+            scheduler.step(loss_val)
+
+            # Monitor learning rate reduction for logging plateau detection
+            current_lr = optimizer.param_groups[0]['lr']
+            if current_lr < last_lr:
+                self.logger.info(f"it={it} - [Plateau Detected] Reducing learning rate from {last_lr:.2e} to {current_lr:.2e}")
+                last_lr = current_lr
+            if loss_val < best_loss - min_delta:
+                best_loss = loss_val
+                if optimize_noise:
+                    best_params = (raw_r0.detach().clone(), raw_L0.detach().clone(), raw_cn2.detach().clone(), raw_noise.detach().clone())
+                else:
+                    best_params = (raw_r0.detach().clone(), raw_L0.detach().clone(), raw_cn2.detach().clone(), None)
+                patience_counter = 0
+            else:
+                patience_counter += 1
+
+            if it % 25 == 0:
+                noise_str = f", noise={noise_var.detach().cpu().numpy()}" if optimize_noise else ""
+                self.logger.info(f"it={it}, loss={loss_val:.6e}, r0={r0.item():.4f}, L0={L0.item():.4f}, Cn2={fractR0.detach().cpu().numpy()}{noise_str}")
+
+            if patience_counter >= patience:
+                self.logger.info(f"it={it} - [Early Stopping] Triggered. No improvement in loss for {patience} iterations.")
+                break
+
+        # Restore the best parameters
+        if best_params is not None:
+            with torch.no_grad():
+                raw_r0.copy_(best_params[0])
+                raw_L0.copy_(best_params[1])
+                raw_cn2.copy_(best_params[2])
+                if optimize_noise and best_params[3] is not None:
+                    raw_noise.copy_(best_params[3])
+
+        # Compute and assign final optimized parameters
+        with torch.no_grad():
+            r0_opt = torch.nn.functional.softplus(raw_r0) + 1e-6
+            L0_opt = torch.nn.functional.softplus(raw_L0) + 1e-6
+            fractR0_opt = torch.nn.functional.softmax(raw_cn2, dim=0)
+            if optimize_noise:
+                noise_opt = torch.nn.functional.softplus(raw_noise) + 1e-8
+            else:
+                noise_opt = None
+
+        self.r0 = r0_opt.item()
+        self.L0 = L0_opt.item()
+        self.fractionalR0 = fractR0_opt.detach().cpu().numpy()
+        if optimize_noise:
+            self.noise_var = noise_opt.detach().cpu().numpy()
+        else:
+            self.noise_var = None
+
+        self.logger.info(f"Optimization completed. Best Loss: {best_loss:.6e}")
+        self.logger.info(f"Optimized parameters: r0={self.r0:.4f}, L0={self.L0:.4f}, Cn2={self.fractionalR0}")
+        if optimize_noise:
+            self.logger.info(f"Optimized noise variance per WFS: {self.noise_var}")
+
+        # Clean up local references and release CUDA memory cache
+        if torch.cuda.is_available():
+            del raw_r0, raw_L0, raw_cn2, optimizer, scheduler, cov_theo, cov_meas, separations_torch, best_params
+            if optimize_noise:
+                del raw_noise
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        return {
+            'r0': self.r0,
+            'L0': self.L0,
+            'fractionalR0': self.fractionalR0,
+            'noise_var': self.noise_var
+        }
+
+
+    def build_reconstructor(self, r0=None, L0=None, fractionalR0=None, noise_var=None, regularization=1e-9):
+        """
+        Build the tomographic reconstructor R_tomo = C_ts (C_ss + C_nn)^-1
+        
+        Parameters
+        ----------
+        r0: float, optional
+            Fried parameter. If None, uses self.r0.
+        L0: float, optional
+            Outer scale. If None, uses self.L0.
+        fractionalR0: array-like, optional
+            Fractional Cn2 profile. If None, uses self.fractionalR0.
+        noise_var: array-like, optional
+            Noise variance per sensed WFS. If None, uses self.noise_var.
+            If self.noise_var is None, uses zero noise.
+        regularization: float, optional
+            Diagonal regularization added to C_ss.
+        """
+        if r0 is None:
+            r0 = self.r0
+        if L0 is None:
+            L0 = self.L0
+        if fractionalR0 is None:
+            fractionalR0 = self.fractionalR0
+        if noise_var is None:
+            noise_var = self.noise_var
+
+        if r0 is None or L0 is None or fractionalR0 is None:
+            raise ValueError("r0, L0, and fractionalR0 must be estimated or provided.")
+
+        dtype = torch.float64
+        constants = self.prepare_vk_constants_torch(dtype)
+
+        # 1. Build C_ss (sensed-sensed covariance matrix) using all subapertures
+        subaps_sensed = [np.arange(wfs['coordinates_per_layer'].shape[1]) for wfs in self.measWFSparams]
+        
+        self.logger.info("LearnEstimator::build_reconstructor - Computing sensed-sensed separations...")
+        separations_ss_np = self.compute_separations_array(
+            subaps_sensed, subaps_sensed,
+            self.measWFSmidpoint_X, self.measWFSmidpoint_Y,
+            self.measWFSmidpoint_X, self.measWFSmidpoint_Y
+        )
+        separations_ss = self.separations_to_torch(separations_ss_np, dtype)
+
+        self.logger.info("LearnEstimator::build_reconstructor - Computing C_ss covariance matrix...")
+        if noise_var is not None:
+            noise_var_torch = torch.as_tensor(noise_var, dtype=dtype, device=self.device)
+        else:
+            noise_var_torch = None
+
+        Css = self.compute_covariance_matrix_torch(
+            separations_ss, r0, L0, fractionalR0,
+            self.measWFSparams, self.measWFSparams,
+            constants, dtype=dtype, noise_var=noise_var_torch
+        )
+
+        # Apply diagonal regularization
+        if regularization > 0:
+            diag_idx = torch.arange(Css.shape[0], device=self.device)
+            Css[diag_idx, diag_idx] = Css[diag_idx, diag_idx] + regularization
+
+        # 2. Build C_ts (target-sensed covariance matrix) using all subapertures
+        subaps_target = [np.arange(wfs['coordinates_per_layer'].shape[1]) for wfs in self.targetWFSparams]
+
+        self.logger.info("LearnEstimator::build_reconstructor - Computing target-sensed separations...")
+        separations_ts_np = self.compute_separations_array(
+            subaps_target, subaps_sensed,
+            self.targetWFSmidpoint_X, self.targetWFSmidpoint_Y,
+            self.measWFSmidpoint_X, self.measWFSmidpoint_Y
+        )
+        separations_ts = self.separations_to_torch(separations_ts_np, dtype)
+
+        self.logger.info("LearnEstimator::build_reconstructor - Computing C_ts covariance matrix...")
+        Cts = self.compute_covariance_matrix_torch(
+            separations_ts, r0, L0, fractionalR0,
+            self.targetWFSparams, self.measWFSparams,
+            constants, dtype=dtype, noise_var=None
+        )
+
+        # 3. Solve R_tomo = C_ts @ Css^-1 using a stable solver
+        self.logger.info("LearnEstimator::build_reconstructor - Solving reconstructor R_tomo...")
+        try:
+            L_factor = torch.linalg.cholesky(Css)
+            Rtomo_T = torch.cholesky_solve(Cts.T.contiguous(), L_factor, upper=False)
+            Rtomo = Rtomo_T.T
+        except RuntimeError as e:
+            self.logger.warning(f"Cholesky solve failed: {e}. Falling back to torch.linalg.solve.")
+            Rtomo_T = torch.linalg.solve(Css, Cts.T.contiguous())
+            Rtomo = Rtomo_T.T
+
+        # Clean up CUDA memory cache
+        del Css, Cts, separations_ss, separations_ts
+        if noise_var_torch is not None:
+            del noise_var_torch
+        if torch.cuda.is_available():
+            import gc
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        return Rtomo.cpu().numpy()
 
 
     def setup_logging(self, logging_level=logging.WARNING):
