@@ -575,23 +575,6 @@ class Controller:
                 offset = self.discarded_modes[i]
                 dm_cmd.append(self.modal_basis[i][:, offset : offset + n_modes] @ modal_cmd[-1])
 
-        # Debug Tomography prints for first 10 steps
-        if self.reconstructionMethod == 'tomography':
-            if not hasattr(self, 'debug_count'):
-                self.debug_count = 0
-            if self.debug_count < 10:
-                self.logger.info(f"[Debug Tomo Iter {self.debug_count}]")
-                self.logger.info(f"  global_res (sensed slopes): shape={global_res.shape}, mean={global_res.mean().item():.6f}, std={global_res.std().item():.6f}")
-                if self.operationType == 'polc':
-                    self.logger.info(f"  total_pred (DM pred): shape={total_pred.shape}, mean={total_pred.mean().item():.6f}, std={total_pred.std().item():.6f}")
-                    self.logger.info(f"  global_slopes (OL slopes): shape={global_slopes.shape}, mean={global_slopes.mean().item():.6f}, std={global_slopes.std().item():.6f}")
-                    if hasattr(self, 'im_target_per_dm'):
-                        self.logger.info(f"  target_res (Target residual): shape={target_res.shape}, mean={target_res.mean().item():.6f}, std={target_res.std().item():.6f}")
-                self.logger.info(f"  target_slopes (projected): shape={target_slopes.shape}, mean={target_slopes.mean().item():.6f}, std={target_slopes.std().item():.6f}")
-                for dm_idx in range(len(self.reconstructor)):
-                    self.logger.info(f"  DM {dm_idx} modal_error (step): mean={modal_error[dm_idx].mean().item():.6f}, std={modal_error[dm_idx].std().item():.6f}")
-                    self.logger.info(f"  DM {dm_idx} modal_cmd (integrated): mean={modal_cmd[dm_idx].mean().item():.6f}, std={modal_cmd[dm_idx].std().item():.6f}")
-            self.debug_count += 1
         # Update history buffers for the next iteration
         if self.controllerType == 'leaky':
             self.command_previous = modal_cmd.copy()
