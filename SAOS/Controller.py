@@ -336,9 +336,9 @@ class Controller:
                 if im_target_tensor.ndim == 1:
                     im_target_tensor = im_target_tensor.unsqueeze(0)
                     
-                if reconstructionMethod == 'inversion' or reconstructionMethod == 'tomography':
+                if reconstructionMethod == 'inversion':
                     temp_reconstructor = torch.linalg.pinv(im_target_tensor, self.rcond[i])
-                elif reconstructionMethod == 'tikhonov':
+                elif reconstructionMethod == 'tikhonov' or reconstructionMethod == 'tomography':
                     # (D.T@D + alfa*I)@D.T --> implemented through SVD to improve the stability of the inversion and the automation of alfa
                     H = im_target_tensor
                     U, S, Vh = torch.linalg.svd(H, full_matrices=False)
