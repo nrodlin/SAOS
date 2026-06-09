@@ -544,14 +544,23 @@ class Controller:
             # target_slopes will have shape [N_target_slopes, 1]
             target_slopes = self.R_tomo @ global_slopes
 
+            # Compute target residual slopes (how much of the target turbulence is left uncorrected by the DMs)
+            if hasattr(self, 'im_target_per_dm'):
+                target_dm_pred = torch.zeros_like(target_slopes)
+                for i in range(len(self.reconstructor)):
+                    target_dm_pred += self.im_target_per_dm[i] @ self.command_history[-1][i]
+                target_res = target_slopes - target_dm_pred
+            else:
+                # Fallback if target IMs were not stored (though they should be)
+                target_res = target_slopes
+                
             dm_cmd = []
             for i in range(len(self.reconstructor)):
                 n_modes = self.reconstructor[i].shape[0]
                 
-                cmd_delayed = self.command_history[-1][i]
-                # Subtract cmd_delayed to implement the canonical POLC feedback loop.
-                # This cancels out the accumulated DM shape contribution, resulting in stable closed-loop eigenvalues.
-                modal_error.append(self.reconstructor[i] @ target_slopes - cmd_delayed)
+                # We apply the integral controller directly on the target residual,
+                # so the DMs cooperate to drive the target residual to zero!
+                modal_error.append(self.reconstructor[i] @ target_res)
                 
                 if self.controllerType == 'leaky':
                     modal_cmd.append(self.gain[i]*modal_error[-1] + self.decay[i] * self.command_previous[i])
@@ -576,6 +585,8 @@ class Controller:
                 if self.operationType == 'polc':
                     self.logger.info(f"  total_pred (DM pred): shape={total_pred.shape}, mean={total_pred.mean().item():.6f}, std={total_pred.std().item():.6f}")
                     self.logger.info(f"  global_slopes (OL slopes): shape={global_slopes.shape}, mean={global_slopes.mean().item():.6f}, std={global_slopes.std().item():.6f}")
+                    if hasattr(self, 'im_target_per_dm'):
+                        self.logger.info(f"  target_res (Target residual): shape={target_res.shape}, mean={target_res.mean().item():.6f}, std={target_res.std().item():.6f}")
                 self.logger.info(f"  target_slopes (projected): shape={target_slopes.shape}, mean={target_slopes.mean().item():.6f}, std={target_slopes.std().item():.6f}")
                 for dm_idx in range(len(self.reconstructor)):
                     self.logger.info(f"  DM {dm_idx} modal_error (step): mean={modal_error[dm_idx].mean().item():.6f}, std={modal_error[dm_idx].std().item():.6f}")
