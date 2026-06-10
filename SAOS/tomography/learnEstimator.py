@@ -899,49 +899,79 @@ class LearnEstimator:
             
             scale_ts = 1.0 / (2.0 * d_target[:, None] * d_meas[None, :])
 
-            Cts = self.compute_covariance_matrix_chunked_torch(
-                A_row_t, a_row_t, A_row_s, a_row_s, r0_torch, L0_torch, fractionalCn2_torch,
-                scale_ts, constants, noise_var=None,
-                Vx=windSpeedX_torch, Vy=windSpeedY_torch, dt=dt, chunk_size=chunk_size, device=calc_device, label="Cts"
-            )
+            # Pre-allocate output matrix on CPU
+            N_target = A_row_t.shape[1]
+            N_sensed = A_row_s.shape[1]
+            Rtomo_np = np.zeros((N_target, N_sensed), dtype=np.float64)
 
-            # 3. Solve R_tomo = C_ts @ Css^-1 using a stable solver
-            self.logger.info("LearnEstimator::build_reconstructor - Solving reconstructor R_tomo...")
+            # 3. Solve R_tomo = C_ts @ Css^-1 using a stable solver chunk-by-chunk
+            self.logger.info("LearnEstimator::build_reconstructor - Factoring Css...")
+            cholesky_success = False
             try:
                 L_factor = torch.linalg.cholesky(Css)
+                cholesky_success = True
                 # Css is no longer needed after Cholesky factorization, free it
                 del Css
                 import gc
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-
-                Rtomo_T = torch.cholesky_solve(Cts.T.contiguous(), L_factor, upper=False)
-                Rtomo = Rtomo_T.T
-                del L_factor, Cts
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
             except RuntimeError as e:
-                self.logger.warning(f"Cholesky solve failed: {e}. Falling back to torch.linalg.solve.")
-                Rtomo_T = torch.linalg.solve(Css, Cts.T.contiguous())
-                Rtomo = Rtomo_T.T
-                del Css, Cts
+                self.logger.warning(f"Cholesky factorization of Css failed: {e}. Falling back to torch.linalg.solve chunk-by-chunk.")
+                cholesky_success = False
+
+            # Solve in chunks along target directions to save memory
+            self.logger.info(f"LearnEstimator::build_reconstructor - Solving reconstructor R_tomo in chunks (chunk_size={chunk_size})...")
+            for i in range(0, N_target, chunk_size):
+                end_idx = min(i + chunk_size, N_target)
+                
+                # Slice target coordinates and scale for this chunk
+                A_row_t_chunk = A_row_t[:, i:end_idx, :]
+                a_row_t_chunk = a_row_t[:, i:end_idx, :]
+                scale_ts_chunk = scale_ts[i:end_idx, :]
+                
+                # Compute Cts chunk: shape (chunk_rows, N_sensed)
+                Cts_chunk = self.compute_covariance_matrix_chunked_torch(
+                    A_row_t_chunk, a_row_t_chunk, A_row_s, a_row_s, r0_torch, L0_torch, fractionalCn2_torch,
+                    scale_ts_chunk, constants, noise_var=None,
+                    Vx=windSpeedX_torch, Vy=windSpeedY_torch, dt=dt, chunk_size=chunk_size, device=calc_device, label="Cts_chunk"
+                )
+                
+                # Solve for Rtomo_chunk
+                if cholesky_success:
+                    Rtomo_chunk_T = torch.cholesky_solve(Cts_chunk.T.contiguous(), L_factor, upper=False)
+                    Rtomo_chunk = Rtomo_chunk_T.T
+                else:
+                    Rtomo_chunk_T = torch.linalg.solve(Css, Cts_chunk.T.contiguous())
+                    Rtomo_chunk = Rtomo_chunk_T.T
+                
+                # Store in numpy array on CPU
+                Rtomo_np[i:end_idx, :] = Rtomo_chunk.cpu().numpy()
+                
+                # Free memory for this chunk
+                del Cts_chunk, Rtomo_chunk_T, Rtomo_chunk
                 import gc
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-            # Clean up CUDA memory cache
+            # Clean up the solver matrices
+            if cholesky_success:
+                del L_factor
+            else:
+                del Css
+
+            # Clean up other tensors
             if noise_var_torch is not None:
                 del noise_var_torch
             if windSpeedX_torch is not None:
                 del windSpeedX_torch
             if windSpeedY_torch is not None:
                 del windSpeedY_torch
+            del r0_torch, L0_torch, fractionalCn2_torch
+            import gc
+            gc.collect()
             if torch.cuda.is_available():
-                import gc
-                gc.collect()
                 torch.cuda.empty_cache()
 
             if permute_for_controller:
@@ -966,9 +996,9 @@ class LearnEstimator:
                     perm_t.extend(list(range(x_starts_t[i], x_starts_t[i] + n_subs_t[i])) + 
                                   list(range(y_starts_t[i], y_starts_t[i] + n_subs_t[i])))
 
-                Rtomo = Rtomo[perm_t, :][:, perm_s]
+                Rtomo_np = Rtomo_np[perm_t, :][:, perm_s]
 
-            return Rtomo.cpu().numpy()
+            return Rtomo_np
 
         except (torch.OutOfMemoryError, RuntimeError) as e:
             if calc_device != 'cpu' and torch.cuda.is_available():
