@@ -921,9 +921,12 @@ class LearnEstimator:
                 cholesky_success = False
 
             # Solve in chunks along target directions to save memory
-            self.logger.info(f"LearnEstimator::build_reconstructor - Solving reconstructor R_tomo in chunks (chunk_size={chunk_size})...")
-            for i in range(0, N_target, chunk_size):
-                end_idx = min(i + chunk_size, N_target)
+            # chunk_size (default 100) is used for the inner covariance chunks to limit memory usage
+            # solve_chunk_size (e.g. 2000) is used for the outer solve loop to minimize solve/python/GC overhead
+            solve_chunk_size = 2000
+            self.logger.info(f"LearnEstimator::build_reconstructor - Solving reconstructor R_tomo in chunks (solve_chunk_size={solve_chunk_size}, cov_chunk_size={chunk_size})...")
+            for i in range(0, N_target, solve_chunk_size):
+                end_idx = min(i + solve_chunk_size, N_target)
                 
                 # Slice target coordinates and scale for this chunk
                 A_row_t_chunk = A_row_t[:, i:end_idx, :]
@@ -948,12 +951,8 @@ class LearnEstimator:
                 # Store in numpy array on CPU
                 Rtomo_np[i:end_idx, :] = Rtomo_chunk.cpu().numpy()
                 
-                # Free memory for this chunk
+                # Free memory for this chunk (Python ref counting immediately frees PyTorch tensors)
                 del Cts_chunk, Rtomo_chunk_T, Rtomo_chunk
-                import gc
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
 
             # Clean up the solver matrices
             if cholesky_success:
