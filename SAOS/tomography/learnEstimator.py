@@ -433,6 +433,42 @@ class LearnEstimator:
               lr_patience=20, lr_factor=0.5, optimize_noise=True, initial_noise=1e-2,
               lp_indices=None, wind_delay_frames=10, max_iters_wind=150, lr_wind=1e-1,
               patience_wind=50):
+        orig_device = self.device
+        try:
+            return self._learn_internal(
+                atm_guess, data_path, output_path, selSubaps, selSamples,
+                lr, max_iters, patience, min_delta,
+                lr_patience, lr_factor, optimize_noise, initial_noise,
+                lp_indices, wind_delay_frames, max_iters_wind, lr_wind,
+                patience_wind
+            )
+        except (torch.OutOfMemoryError, RuntimeError) as e:
+            if ("out of memory" in str(e).lower() or isinstance(e, torch.OutOfMemoryError)) and self.device == "cuda":
+                self.logger.warning(f"CUDA Out Of Memory during learn on GPU: {e}. Falling back to CPU...")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                import gc
+                gc.collect()
+                self.device = "cpu"
+                try:
+                    res = self._learn_internal(
+                        atm_guess, data_path, output_path, selSubaps, selSamples,
+                        lr, max_iters, patience, min_delta,
+                        lr_patience, lr_factor, optimize_noise, initial_noise,
+                        lp_indices, wind_delay_frames, max_iters_wind, lr_wind,
+                        patience_wind
+                    )
+                    return res
+                finally:
+                    self.device = orig_device
+            else:
+                raise e
+
+    def _learn_internal(self, atm_guess, data_path, output_path, selSubaps=0.1, selSamples=0.1,
+              lr=1e-2, max_iters=150, patience=50, min_delta=1e-9,
+              lr_patience=20, lr_factor=0.5, optimize_noise=True, initial_noise=1e-2,
+              lp_indices=None, wind_delay_frames=10, max_iters_wind=150, lr_wind=1e-1,
+              patience_wind=50):
         self.logger.info('LearnEstimator::learn - loading initial params.')
         # Extract initial params
         initial_r0 = atm_guess['r0']
