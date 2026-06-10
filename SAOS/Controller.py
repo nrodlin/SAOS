@@ -281,7 +281,8 @@ class Controller:
                             R_tomo_np = np.array(f['Rtomo'])
                         else:
                             raise KeyError("Neither 'R_tomo' nor 'Rtomo' dataset found in the HDF5 file.")
-                    self.R_tomo = torch.as_tensor(R_tomo_np, dtype=torch.float64, device=self.device)
+                    # Keep R_tomo on CPU to avoid CUDA OOM (for M19_T19 it occupies 12 GB, which exceeds RTX 2080 VRAM)
+                    self.R_tomo = torch.as_tensor(R_tomo_np, dtype=torch.float64, device='cpu')
                     self.logger.info(f"Loaded tomographic reconstructor from {self.R_tomo_path}")
                 except Exception as e:
                     self.logger.error(f"Failed to load R_tomo from {self.R_tomo_path}: {e}")
@@ -542,7 +543,10 @@ class Controller:
             
             # Project measured slopes to target slopes using R_tomo
             # target_slopes will have shape [N_target_slopes, 1]
-            target_slopes = self.R_tomo @ global_slopes
+            if self.R_tomo.device != global_slopes.device:
+                target_slopes = (self.R_tomo @ global_slopes.to(self.R_tomo.device)).to(global_slopes.device)
+            else:
+                target_slopes = self.R_tomo @ global_slopes
 
             # Compute target residual slopes (how much of the target turbulence is left uncorrected by the DMs)
             if hasattr(self, 'im_target_per_dm'):
