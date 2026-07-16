@@ -97,6 +97,52 @@ class Savepoint:
         self.logger.info(f'Savepoint::__init__ - Saving path (not yet created): {self.file_path}')
 
 
+    def _resolve_setting(self, setting_value, lp, lp_index):
+        """
+        Resolves the setting for a specific lightpath index, returning either:
+        - An integer (decimation factor)
+        - A dict with 'short' and/or 'long' keys mapped to integers (decimation factors)
+        - Or 0 (disabled)
+        """
+        if isinstance(setting_value, dict):
+            # Check if it is a direct configuration for short/long exposure: {'short': X, 'long': Y}
+            is_direct_config = any(k in setting_value for k in ('short', 'long'))
+            
+            # Check if the dictionary contains a key associated with the LightPath index
+            has_lp_key = False
+            if lp_index is not None:
+                has_lp_key = (lp_index in setting_value)
+                
+            if has_lp_key:
+                # It is a mapping from LightPath index to configuration value
+                lp_val = setting_value[lp_index]
+                return self._resolve_setting(lp_val, lp, lp_index)
+            
+            elif is_direct_config:
+                # It is a direct configuration of frame types {'short': X, 'long': Y}
+                resolved_dict = {}
+                for k in ('short', 'long'):
+                    val = setting_value.get(k, 0)
+                    resolved_dict[k] = self._resolve_setting(val, lp, lp_index)
+                return resolved_dict
+            
+            else:
+                # Generic dictionary without specific keys, look for a 'default' fallback
+                if 'default' in setting_value:
+                    return self._resolve_setting(setting_value['default'], lp, lp_index)
+                return 0
+                
+        elif isinstance(setting_value, (list, tuple)):
+            if lp_index is not None and lp_index < len(setting_value):
+                lp_val = setting_value[lp_index]
+                return self._resolve_setting(lp_val, lp, lp_index)
+            return 0
+        else:
+            # Scalar (int, float, bool)
+            if setting_value is None:
+                return 0
+            return int(setting_value)
+
     def initialize_hdf5_file(self, f, group_name, data_group, iteration):
         """
         Initialize the HDF5 file with the structure for saving light path data.
@@ -114,6 +160,13 @@ class Savepoint:
         """
         group = f.create_group(group_name)
 
+        lp_index = None
+        if group_name.startswith('LightPath_'):
+            try:
+                lp_index = int(group_name.split('_')[-1])
+            except ValueError:
+                pass
+
         if self.atm and group_name.find('Atmosphere')>=0:
             for i in range(data_group.nLayer):
                 layer_name = 'layer_' + str(i+1)
@@ -122,8 +175,25 @@ class Savepoint:
         
         if self.dm and group_name.find('DeformableMirror')>=0:
             self.custom_create_dataset('dm_layer', group, iteration, data_group.dm_layer.cmd_1D, mask=data_group.validAct[None, ...])
+
+        # Resolve setting values for this light path
+        atm_per_dir_setting = self._resolve_setting(self.atm_per_dir, data_group, lp_index)
+        dm_per_dir_setting = self._resolve_setting(self.dm_per_dir, data_group, lp_index)
+        slopes_setting = self._resolve_setting(self.slopes, data_group, lp_index)
+        error_setting = self._resolve_setting(self.error, data_group, lp_index)
+        wfs_setting = self._resolve_setting(self.wfs, data_group, lp_index)
+        sci_setting = self._resolve_setting(self.sci, data_group, lp_index)
+        wfs_frame_setting = self._resolve_setting(self.wfs_frame, data_group, lp_index)
+        sci_frame_setting = self._resolve_setting(self.sci_frame, data_group, lp_index)
+
+        if isinstance(sci_frame_setting, dict):
+            short_rate = sci_frame_setting.get('short', 0)
+            long_rate = sci_frame_setting.get('long', 0)
+        else:
+            short_rate = sci_frame_setting
+            long_rate = sci_frame_setting
                 
-        if self.atm_per_dir and group_name.find('LightPath')>=0:
+        if atm_per_dir_setting and group_name.find('LightPath')>=0:
             # Pupil mask to compute statistics
             mask = data_group.tel.pupil[None, ...]
             # Create group and add the datasets with the statistics
@@ -132,7 +202,7 @@ class Savepoint:
             atm_phase_grp = group.create_group('atm_phase')
             self.custom_create_dataset('phase', atm_phase_grp, iteration, data_group.atmosphere_phase, mask)
         
-        if self.dm_per_dir and group_name.find('LightPath')>=0:
+        if dm_per_dir_setting and group_name.find('LightPath')>=0:
             for i in range(len(data_group.dm)):
                 # Pupil mask to compute statistics --> we force the data to be 3D to stadarize night and solar cases
                 mask = data_group.tel.pupil[None, ...]
@@ -142,19 +212,19 @@ class Savepoint:
                 dm_phase_grp = group.create_group('dm_phase_' + str(i))
                 self.custom_create_dataset('phase', dm_phase_grp, iteration, data_group.dm_phase[i], mask)
 
-        if self.slopes and group_name.find('LightPath')>=0 and (data_group.wfs is not None):
+        if slopes_setting and group_name.find('LightPath')>=0 and (data_group.wfs is not None):
             # Create group and add the datasets with the statistics ( mask is not needed)
             slopes1d_grp = group.create_group('slopes_1D')
             self.custom_create_dataset('slopes_1D', slopes1d_grp, iteration, data_group.slopes_1D, mask=None)
             slopes2d_grp = group.create_group('slopes_2D')
             self.custom_create_dataset('slopes_2D', slopes2d_grp, iteration, data_group.slopes_2D, mask=None)
 
-        if self.error and group_name.find('LightPath')>=0 and (data_group.wfs is not None):
+        if error_setting and group_name.find('LightPath')>=0 and (data_group.wfs is not None):
             # Create group and add the datasets with the statistics ( mask is not needed)
             error_grp = group.create_group('error')
             self.custom_create_dataset('slopes_1D', error_grp, iteration, data_group.get_wavefront_error(), mask=None)            
 
-        if self.wfs and group_name.find('LightPath')>=0 and (data_group.wfs is not None):
+        if wfs_setting and group_name.find('LightPath')>=0 and (data_group.wfs is not None):
             # Pupil mask to compute statistics
             mask = data_group.tel.pupil[None, ...]
             # Create group and add the datasets with the statistics
@@ -163,7 +233,7 @@ class Savepoint:
             wfs_phase_grp = group.create_group('wfs_phase')
             self.custom_create_dataset('phase', wfs_phase_grp, iteration, data_group.wfs_phase, mask)
 
-        if self.sci and group_name.find('LightPath')>=0 and (data_group.sci is not None):
+        if sci_setting and group_name.find('LightPath')>=0 and (data_group.sci is not None):
             # Pupil mask to compute statistics
             mask = data_group.tel.pupil[None, ...]
             # Create group and add the datasets with the statistics
@@ -172,19 +242,42 @@ class Savepoint:
             sci_phase_grp = group.create_group('sci_phase')
             self.custom_create_dataset('phase', sci_phase_grp, iteration, data_group.sci_phase, mask)
 
-        if self.wfs_frame and group_name.find('LightPath')>=0 and (data_group.wfs is not None):
+        if wfs_frame_setting and group_name.find('LightPath')>=0 and (data_group.wfs is not None):
             # Create group and add the datasets with the statistics ( mask is not needed)
             wfs_frame_grp = group.create_group('wfs_frame')
             self.custom_create_dataset('wfs_frame', wfs_frame_grp, iteration, data_group.wfs_frame, mask=None)
 
-        if self.sci_frame and group_name.find('LightPath')>=0 and (data_group.sci is not None):
+        if (short_rate or long_rate) and group_name.find('LightPath')>=0 and (data_group.sci is not None):
             # Create group and add the datasets with the statistics ( mask is not needed)
-            if data_group.sci_frame is not None:
+            if short_rate and data_group.sci_frame is not None:
                 sci_frame_grp = group.create_group('sci_frame_shortExp')
                 self.custom_create_dataset('sci_frame', sci_frame_grp, iteration, data_group.sci_frame, None, data_group)
-            if data_group.long_exposure_frame is not None:
+            if long_rate and data_group.long_exposure_frame is not None:
                 sci_frame_grp = group.create_group('sci_frame_longExp')
                 self.custom_create_dataset('sci_frame', sci_frame_grp, iteration, data_group.long_exposure_frame, None, data_group)
+
+    def _get_lp_index_from_group(self, group):
+        """
+        Extract the LightPath, Atmosphere, or DM index from the HDF5 group name.
+        """
+        parts = group.name.split('/')
+        for part in parts:
+            if part.startswith('LightPath_'):
+                try:
+                    return int(part.split('_')[-1])
+                except ValueError:
+                    pass
+            elif part.startswith('Atmosphere_'):
+                try:
+                    return int(part.split('_')[-1])
+                except ValueError:
+                    pass
+            elif part.startswith('DeformableMirror_'):
+                try:
+                    return int(part.split('_')[-1])
+                except ValueError:
+                    pass
+        return None
 
     def custom_create_dataset(self, data_type, group, iteration, data, mask, lp=None):
         """
@@ -209,7 +302,11 @@ class Savepoint:
         if np.ndim(data) == 2:
             data = data[None, ...]
 
-        group.create_dataset('data', data=data[None, ...], maxshape=(None,) + data.shape, chunks=True)        
+        lp_index = self._get_lp_index_from_group(group)
+        only_metrics_resolved = bool(self._resolve_setting(self.only_metrics, lp, lp_index))
+
+        if not only_metrics_resolved:
+            group.create_dataset('data', data=data[None, ...], maxshape=(None,) + data.shape, chunks=True)        
         group.create_dataset('iteration', data=np.array([iteration]), maxshape=(None,), chunks=True)
 
         stats = self.compute_stats(data, mask, data_type, lp)
@@ -351,9 +448,12 @@ class Savepoint:
         else:
             mask = data_object.tel.pupil[None, ...]
         
+        lp_index = self._get_lp_index_from_group(group)
+        only_metrics_resolved = bool(self._resolve_setting(self.only_metrics, data_object, lp_index))
+
         new_data = self.compute_stats(data, mask, data_type, lp=data_object)
-        # Add the keys for the data and the iteration, apart from the stadistics
-        if not self.only_metrics:
+        # Add the keys for the data and the iteration, apart from the statistics
+        if not only_metrics_resolved:
             new_data['data'] = data
         new_data['iteration'] = np.array([iteration])
 
@@ -385,23 +485,27 @@ class Savepoint:
             # First, check atmosphere and DM flags
             if tag == 'atmosphere' and self.atm:
                 for i in range(len(data_object)):
-                    group_name = 'Atmosphere_' + str(i)
-                    if group_name not in f:
-                        self.initialize_hdf5_file(f, group_name, data_object[i], iteration)
-                    else:
-                        group = f[group_name]
-                        for j in range(data_object[i].nLayer):
-                            layer_name = 'layer_' + str(j+1)
-                            grp = group[layer_name]
-                            self.append_to_dataset('atmosphere_layered', grp, iteration, getattr(data_object[i], layer_name).screen.scrn, None)                        
+                    atm_setting = self._resolve_setting(self.atm, data_object[i], i)
+                    if atm_setting:
+                        group_name = 'Atmosphere_' + str(i)
+                        if group_name not in f:
+                            self.initialize_hdf5_file(f, group_name, data_object[i], iteration)
+                        else:
+                            group = f[group_name]
+                            for j in range(data_object[i].nLayer):
+                                layer_name = 'layer_' + str(j+1)
+                                grp = group[layer_name]
+                                self.append_to_dataset('atmosphere_layered', grp, iteration, getattr(data_object[i], layer_name).screen.scrn, None)                        
             if tag == 'deformableMirror' and self.dm:
                 for i in range(len(data_object)):
-                    group_name = 'DeformableMirror_' + str(i)
-                    if group_name not in f:
-                        self.initialize_hdf5_file(f, group_name, data_object[i], iteration)
-                    else:
-                        grp = f[group_name]
-                        self.append_to_dataset('dm_layer', grp, iteration, data_object[i].dm_layer.cmd_1D, data_object[i])                        
+                    dm_setting = self._resolve_setting(self.dm, data_object[i], i)
+                    if dm_setting:
+                        group_name = 'DeformableMirror_' + str(i)
+                        if group_name not in f:
+                            self.initialize_hdf5_file(f, group_name, data_object[i], iteration)
+                        else:
+                            grp = f[group_name]
+                            self.append_to_dataset('dm_layer', grp, iteration, data_object[i].dm_layer.cmd_1D, data_object[i])                        
 
             if tag == 'lightpath':
                 light_path = data_object
@@ -413,15 +517,32 @@ class Savepoint:
                     else:
                         group = f[f'LightPath_{index}']
 
+                        # Resolve settings for this specific light path
+                        atm_per_dir_setting = self._resolve_setting(self.atm_per_dir, lp, index)
+                        dm_per_dir_setting = self._resolve_setting(self.dm_per_dir, lp, index)
+                        slopes_setting = self._resolve_setting(self.slopes, lp, index)
+                        error_setting = self._resolve_setting(self.error, lp, index)
+                        wfs_setting = self._resolve_setting(self.wfs, lp, index)
+                        sci_setting = self._resolve_setting(self.sci, lp, index)
+                        wfs_frame_setting = self._resolve_setting(self.wfs_frame, lp, index)
+                        sci_frame_setting = self._resolve_setting(self.sci_frame, lp, index)
+
+                        if isinstance(sci_frame_setting, dict):
+                            short_rate = sci_frame_setting.get('short', 0)
+                            long_rate = sci_frame_setting.get('long', 0)
+                        else:
+                            short_rate = sci_frame_setting
+                            long_rate = sci_frame_setting
+
                         # Atmosphere OPD
-                        if self.atm_per_dir and ((iteration+1)%self.atm_per_dir) == 0:
+                        if atm_per_dir_setting and ((iteration+1)%atm_per_dir_setting) == 0:
                             grp = group['atm_opd']
                             self.append_to_dataset('opd', grp, iteration, lp.atmosphere_opd, lp)
                             grp = group['atm_phase']
                             self.append_to_dataset('phase', grp, iteration, lp.atmosphere_phase, lp)
 
                         # DM
-                        if self.dm_per_dir and ((iteration+1)%self.dm_per_dir) == 0:
+                        if dm_per_dir_setting and ((iteration+1)%dm_per_dir_setting) == 0:
                             for i in range(len(lp.dm)):
                                 grp = group['dm_opd_' + str(i)]
                                 self.append_to_dataset('opd', grp, iteration, lp.dm_opd[i], lp)
@@ -429,46 +550,46 @@ class Savepoint:
                                 self.append_to_dataset('phase', grp, iteration, lp.dm_phase[i], lp)
 
                         # Slopes
-                        if self.slopes and ((iteration+1)%self.slopes) == 0 and (lp.wfs is not None):
+                        if slopes_setting and ((iteration+1)%slopes_setting) == 0 and (lp.wfs is not None):
                             grp = group['slopes_1D']
                             self.append_to_dataset('slopes_1D', grp, iteration, lp.slopes_1D, lp)
                             grp = group['slopes_2D']
                             self.append_to_dataset('slopes_2D', grp, iteration, lp.slopes_2D, lp)
 
                         # Error
-                        if self.error and ((iteration+1)%self.error) == 0 and (lp.wfs is not None):
+                        if error_setting and ((iteration+1)%error_setting) == 0 and (lp.wfs is not None):
                             grp = group['error']
                             self.append_to_dataset('slopes_1D', grp, iteration, lp.get_wavefront_error(), lp)
 
                         # WFS
-                        if self.wfs and ((iteration+1)%self.wfs) == 0 and (lp.wfs is not None):
+                        if wfs_setting and ((iteration+1)%wfs_setting) == 0 and (lp.wfs is not None):
                             grp = group['wfs_opd']
                             self.append_to_dataset('opd', grp, iteration, lp.wfs_opd, lp)
                             grp = group['wfs_phase']
                             self.append_to_dataset('phase', grp, iteration, lp.wfs_phase, lp)
 
                         # Science
-                        if self.sci and ((iteration+1)%self.sci) == 0 and (lp.sci is not None):
+                        if sci_setting and ((iteration+1)%sci_setting) == 0 and (lp.sci is not None):
                             grp = group['sci_opd']
                             self.append_to_dataset('opd', grp, iteration, lp.sci_opd, lp)
                             grp = group['sci_phase']
                             self.append_to_dataset('phase', grp, iteration, lp.sci_phase, lp)
 
                         # WFS Frame
-                        if self.wfs_frame and ((iteration+1)%self.wfs_frame) == 0 and (lp.wfs is not None):
+                        if wfs_frame_setting and ((iteration+1)%wfs_frame_setting) == 0 and (lp.wfs is not None):
                             grp = group['wfs_frame']
                             self.append_to_dataset('wfs_frame', grp, iteration, lp.wfs_frame, lp)
 
                         # Science Frame
-                        if self.sci_frame and ((iteration+1)%self.sci_frame) == 0 and (lp.sci is not None):
-                            if lp.sci_frame is not None:
+                        if (short_rate or long_rate) and (lp.sci is not None):
+                            if short_rate and ((iteration+1)%short_rate) == 0 and lp.sci_frame is not None:
                                 if 'sci_frame_shortExp' in group.keys():
                                     grp = group['sci_frame_shortExp']
                                     self.append_to_dataset('sci_frame', grp, iteration, lp.sci_frame, lp)
                                 else:
                                     sci_frame_grp = group.create_group('sci_frame_shortExp')
                                     self.custom_create_dataset('sci_frame', sci_frame_grp, iteration, lp.sci_frame, None, lp)
-                            if lp.long_exposure_frame is not None:
+                            if long_rate and ((iteration+1)%long_rate) == 0 and lp.long_exposure_frame is not None:
                                 if 'sci_frame_longExp' in group.keys():
                                     grp = group['sci_frame_longExp']
                                     self.append_to_dataset('sci_frame', grp, iteration, lp.long_exposure_frame, lp)
