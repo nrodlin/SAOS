@@ -21,7 +21,8 @@ This module contains the `Savepoint` class, used for to save the data of adaptiv
 """
 
 class Savepoint:
-    def __init__(self, file_path=None, atm=0, atm_per_dir=0, dm=0, dm_per_dir=0, slopes=0, error= 0, wfs=0, wfs_frame=0, sci=0, sci_frame=0, only_metrics=False, logger=None):
+    def __init__(self, file_path=None, atm=0, atm_per_dir=0, dm=0, dm_per_dir=0, slopes=0, error= 0, wfs=0, wfs_frame=0, sci=0, sci_frame=0, 
+                 only_metrics=False, only_long_exp=False, logger=None):
         """
         Initialize the Savepoint object for saving simulation data.
 
@@ -62,6 +63,8 @@ class Savepoint:
         only_metrics : bool
             If True, only the metrics of the buffers are saved. If false, the data
             is included as well.
+        only_long_exp : bool
+            If True, only the long exposure frame is saved. By default, False.
         logger : logging.Logger, optional
             External logger to use. If None, initializes internal logging.        
         """
@@ -83,6 +86,7 @@ class Savepoint:
         self.wfs = wfs
         self.wfs_frame = wfs_frame
         self.sci = sci
+        self.only_long_exp = only_long_exp
         self.sci_frame = sci_frame
         self.only_metrics = only_metrics
 
