@@ -444,7 +444,7 @@ class CorrelatingShackHartmann:
         t2 = time.time()        
         phase_rescaled_valids = torch.nn.functional.interpolate(phase_reshaped[self.valid_subapertures_1D, :, :, :], 
                                                                 size=(npix_sun, npix_sun), 
-                                                                mode='bilinear', align_corners=True).squeeze(1).contiguous().float()
+                                                                mode='bilinear', align_corners=True).contiguous().float()
         t3 = time.time()
         # Generate an array of phase, filling the valid subapertures  
         rows = torch.where(square_pupil_torch.any(dim=1))[0]

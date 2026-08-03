@@ -132,42 +132,45 @@ class ExtendedSource(Source):
         # Last step, define the 2D filter that will be used to combine the subDirs. 
         # Taken from the WideField module of DASP (Durham Adaptive Optics Simulator, Alaister Basedn et al.)
         filt_width = np.round((self.subDirs_coordinates[2,0,0])/self.img_PS).astype(int)
-        self.filter_2D = np.zeros((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
+        if self.nSubDirs == 1:
+            self.filter_2D = np.ones((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
+        else:
+            self.filter_2D = np.zeros((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
 
-        lin = 1 - np.abs(np.arange(filt_width) - (filt_width - 1) / 2) / ((filt_width - 1) / 2)
-        filter_2D_template = np.tile(lin, (filt_width, 1))
-        filter_2D_template = filter_2D_template * lin[:, np.newaxis]
-        
-        subDir_size = filt_width
+            lin = 1 - np.abs(np.arange(filt_width) - (filt_width - 1) / 2) / ((filt_width - 1) / 2)
+            filter_2D_template = np.tile(lin, (filt_width, 1))
+            filter_2D_template = filter_2D_template * lin[:, np.newaxis]
+            
+            subDir_size = filt_width
 
-        for dirX in range(self.nSubDirs):
-            for dirY in range(self.nSubDirs):
-                self.filter_2D[:,:,dirX,dirY] = np.copy(filter_2D_template)
+            for dirX in range(self.nSubDirs):
+                for dirY in range(self.nSubDirs):
+                    self.filter_2D[:,:,dirX,dirY] = np.copy(filter_2D_template)
 
-                if dirX == 0: # top, add top left and right to match the external contributions to the filter
-                    # top
-                    self.filter_2D[0:subDir_size//2,:,dirX,dirY] += filter_2D_template[-(subDir_size//2):,:] # add bottom
-                if dirX == (self.nSubDirs-1): # bottom, add top to match the external contributions to the filter
-                    # bottom
-                    self.filter_2D[-(subDir_size//2):,:,dirX,dirY] += filter_2D_template[0:subDir_size//2,:] # add top
-                if dirY == 0: # left, add right match the external contributions to the filter
-                    # left
-                    self.filter_2D[:,0:subDir_size//2,dirX,dirY] += filter_2D_template[:,-(subDir_size//2):] # add right
-                if dirY == (self.nSubDirs-1): # right, add left match the external contributions to the filter
-                    # right
-                    self.filter_2D[:,-(subDir_size//2):,dirX,dirY] += filter_2D_template[:,0:subDir_size//2] # add left
+                    if dirX == 0: # top, add top left and right to match the external contributions to the filter
+                        # top
+                        self.filter_2D[0:subDir_size//2,:,dirX,dirY] += filter_2D_template[-(subDir_size//2):,:] # add bottom
+                    if dirX == (self.nSubDirs-1): # bottom, add top to match the external contributions to the filter
+                        # bottom
+                        self.filter_2D[-(subDir_size//2):,:,dirX,dirY] += filter_2D_template[0:subDir_size//2,:] # add top
+                    if dirY == 0: # left, add right match the external contributions to the filter
+                        # left
+                        self.filter_2D[:,0:subDir_size//2,dirX,dirY] += filter_2D_template[:,-(subDir_size//2):] # add right
+                    if dirY == (self.nSubDirs-1): # right, add left match the external contributions to the filter
+                        # right
+                        self.filter_2D[:,-(subDir_size//2):,dirX,dirY] += filter_2D_template[:,0:subDir_size//2] # add left
 
-                # Corner cases:
+                    # Corner cases:
 
-                if (dirX == 0 and dirY == 0): # top-left
-                    self.filter_2D[0:subDir_size//2,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
-                if (dirX == 0 and dirY == (self.nSubDirs-1)): # top-right
-                    self.filter_2D[0:subDir_size//2,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
-                if (dirX == (self.nSubDirs-1) and dirY == 0): # bottom-left
-                    self.filter_2D[-(subDir_size//2):,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
-                if (dirX == (self.nSubDirs-1) and dirY == (self.nSubDirs-1)): # bottom-right
-                    self.filter_2D[-(subDir_size//2):,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
-                       
+                    if (dirX == 0 and dirY == 0): # top-left
+                        self.filter_2D[0:subDir_size//2,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
+                    if (dirX == 0 and dirY == (self.nSubDirs-1)): # top-right
+                        self.filter_2D[0:subDir_size//2,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
+                    if (dirX == (self.nSubDirs-1) and dirY == 0): # bottom-left
+                        self.filter_2D[-(subDir_size//2):,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
+                    if (dirX == (self.nSubDirs-1) and dirY == (self.nSubDirs-1)): # bottom-right
+                        self.filter_2D[-(subDir_size//2):,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
+                        
         self.is_initialized = True
         
     PHOTOMETRY_BANDS = {
