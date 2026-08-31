@@ -357,6 +357,10 @@ class DeformableMirror:
         L = torch.linalg.cholesky(Phi)
         del Phi
 
+        # Computation: D_eval = torch.cdist(output_points_torch, input_points_torch)
+        # phi_eval = torch.exp(-(epsilon * D_eval) ** 2)
+        # But we do this in place using the same variable to reduce the memory consumption
+
         phi_eval = torch.cdist(output_points_torch, input_points_torch)
         phi_eval.mul_(epsilon).square_().neg_().exp_()
 
