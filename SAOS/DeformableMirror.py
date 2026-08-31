@@ -352,12 +352,13 @@ class DeformableMirror:
 
         eucl_distance = torch.cdist(input_points_torch, input_points_torch) 
         Phi = torch.exp(-(epsilon * eucl_distance) ** 2)
+        del eucl_distance
 
         L = torch.linalg.cholesky(Phi)
+        del Phi
 
-        D_eval = torch.cdist(output_points_torch, input_points_torch)
-
-        phi_eval = torch.exp(-(epsilon * D_eval) ** 2)
+        phi_eval = torch.cdist(output_points_torch, input_points_torch)
+        phi_eval.mul_(epsilon).square_().neg_().exp_()
 
         return L, phi_eval
 

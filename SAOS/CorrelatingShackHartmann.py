@@ -452,34 +452,37 @@ class CorrelatingShackHartmann:
 
         row_start, row_end = rows[0].item(), rows[-1].item() + 1
         col_start, col_end = cols[0].item(), cols[-1].item() + 1
-        # Allocate full tensor
-        cube_em = torch.zeros((self.nSubap**2, input_phase_torch.shape[0], nFFT, nFFT), dtype=torch.complex64, device=self.device)
+        n_valids = phase_rescaled_valids.shape[0]
         sub_mask = square_pupil_torch[row_start:row_end, col_start:col_end].float()
-        # Exponential
-        exp_block = torch.polar(sub_mask, phase_rescaled_valids)
-
-        cube_em[self.valid_subapertures_1D,:, row_start:row_end, col_start:col_end] = exp_block
-        # Apply light scaling
-        t4 = time.time()
-        # Get the PSF
         psf = torch.zeros((self.nSubap**2, input_phase_torch.shape[0], npix_sun, npix_sun), dtype=torch.float32, device=self.device)
 
-        fft_res = torch.fft.fft2(cube_em[self.valid_subapertures_1D, :, :, :], dim=(-2, -1), norm='backward').contiguous()  # same as dividing by nFFT²
+        valid_indices = np.where(self.valid_subapertures_1D)[0]
+        chunk_size = 512
+        for start_idx in range(0, n_valids, chunk_size):
+            end_idx = min(start_idx + chunk_size, n_valids)
+            chunk_valids = phase_rescaled_valids[start_idx:end_idx]
+            chunk_len = end_idx - start_idx
 
-        # Shift zero frequency to center
-        fft_res = torch.fft.fftshift(fft_res, dim=(-2, -1))
+            cube_em = torch.zeros((chunk_len, input_phase_torch.shape[0], nFFT, nFFT), dtype=torch.complex64, device=self.device)
+            exp_block = torch.polar(sub_mask, chunk_valids)
+            cube_em[:, :, row_start:row_end, col_start:col_end] = exp_block
 
-        # Compute normalized intensity
-        fft_res = torch.sqrt(fft_res.real**2 + fft_res.imag **2)**2
+            fft_res = torch.fft.fft2(cube_em, dim=(-2, -1), norm='backward')
+            del cube_em
 
-        # Normalize energy
-        norma = torch.sum(fft_res[:, :, row_start:row_end, col_start:col_end], dim=(-2, -1), keepdim=True)
+            fft_res = torch.fft.fftshift(fft_res, dim=(-2, -1))
+            intensity = fft_res.real.square().add_(fft_res.imag.square())
+            del fft_res
 
-        fft_res = fft_res / norma
-           
-        # Crop to desired region
-        psf[self.valid_subapertures_1D, :, :, :] = fft_res[:, :, row_start:row_end, col_start:col_end]
-        t5 = time.time()
+            norma = torch.sum(intensity[:, :, row_start:row_end, col_start:col_end], dim=(-2, -1), keepdim=True)
+            intensity = intensity / norma
+
+            valids_sub_idx = valid_indices[start_idx:end_idx]
+            psf[valids_sub_idx, :, :, :] = intensity[:, :, row_start:row_end, col_start:col_end]
+            del intensity
+
+        t4 = time.time()
+        t5 = t4
         
         self.logger.debug(f'CorrelatingShackHartmann::get_psf - Time taken for each step: '
                          f'Rescale input phase: {t1-t0} [s], Reshape into subaps: {t2-t1} [s], Interpolate to npix_sun: {t3-t2} [s], '
