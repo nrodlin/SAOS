@@ -11,7 +11,7 @@ All docstrings follow the **NumPy** format.
 | [Layer](layer.md) | `LayerClass` | Single turbulent atmospheric layer |
 | [Atmosphere](atmosphere.md) | `Atmosphere` | Multi-layer Von Kármán atmospheric model |
 | [Light Path](light_path.md) | `LightPath` | Single line-of-sight propagation pipeline |
-| [Deformable Mirror](deformable_mirror.md) | `DeformableMirror` | DM model (Cartesian & hexagonal geometry) |
+| [Deformable Mirror](deformable_mirror.md) | `DeformableMirror` | DM model (Cartesian, radial & custom geometry) |
 | [Misregistration](misregistration.md) | `MisRegistration` | DM-WFS misalignment model |
 | [NCPA](ncpa.md) | `NCPA` | Non-Common Path Aberrations |
 | [SHWFS](shwfs.md) | `ShackHartmann` | Classical Shack-Hartmann WFS |
