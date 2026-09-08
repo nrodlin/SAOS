@@ -165,10 +165,12 @@ class Detector:
 
         if self.darkCalibration > 0:
             self.shotNoise = 0 # Disable shot noise to avoid crash in the Poisson of lam=0
+            self.calibrating  = True
             for _ in range(self.darkCalibration):
                 self.dark_calibration_frame += self.integrate(np.zeros_like(self.frame, dtype=float), 0)
             self.dark_calibration_frame = self.dark_calibration_frame // self.darkCalibration
             self.shotNoise = shotNoise
+            self.calibrating = False
         else:
             self.dark_calibration_frame = np.zeros_like(self.frame)
 
@@ -278,7 +280,7 @@ class Detector:
        
         # Apply dark calibration
 
-        if self.darkCalibration:
+        if self.darkCalibration and not self.calibrating:
             quantized_saturated_frame -= self.dark_calibration_frame
 
         # 11: Set precision 

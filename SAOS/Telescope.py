@@ -75,6 +75,8 @@ class Telescope:
 
         self.set_pupil()                                                # set the pupil
 
+        self.area_eff                    = (self.pupil.sum() / (self.resolution**2)) * (self.D**2) # Collecting area in meters
+
         self.isInitialized               = True
 
     def set_pupil(self):
@@ -172,7 +174,9 @@ class Telescope:
             
         else:
             self.logger.warning('Telescope::apply_spider - Thickness is <=0, returning default pupil.')
-
+        
+        self.area_eff                    = (self.pupil.sum() / (self.resolution**2)) * (self.D**2) # Collecting area in meters
+        
         return 
         
     def print_properties(self):

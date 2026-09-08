@@ -301,9 +301,9 @@ class LightPath:
                         longExp /= total_energy
                     # Check if the user wants to add noise
                     if self.sci.cam.noiseFlag:
-                        longExp = self.sci.apply_noise(longExp, self.src.nPhoton * self.sci.integrationTime)
+                        longExp = self.sci.apply_noise(longExp, self.src.flux * self.sci.integrationTime * self.tel.area_eff)
                     else:
-                        longExp = longExp * self.src.nPhoton * self.sci.integrationTime * self.sci.lightRatio
+                        longExp = longExp * self.src.flux * self.sci.integrationTime * self.tel.area_eff * self.sci.lightRatio
                     # Save the frame 
                     self.long_exposure_frame = np.squeeze(longExp).copy()
                     # Reset the cumulative frame

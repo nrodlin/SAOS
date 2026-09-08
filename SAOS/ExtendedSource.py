@@ -8,6 +8,8 @@ from SAOS.Source import Source
 import numpy as np
 from importlib.resources import files
 import h5py
+import pvlib
+import scipy as sp
 
 import logging
 import logging.handlers
@@ -76,7 +78,6 @@ class ExtendedSource(Source):
         self.optBand       = optBand                               # optical band
         self.wavelength    = tmp[0]                                # wavelength in m
         self.bandwidth     = tmp[1]                                # optical bandwidth
-        self.nPhoton       =  tmp[2]                               # photon per m2 per s
         self.fluxMap       = []                                    # 2D flux map of the source
         self.tag           = 'sun'                                 # tag of the object
         self.altitude      = altitude                              # altitude of the source object in m    
@@ -87,6 +88,9 @@ class ExtendedSource(Source):
         self.nSubDirs      = nSubDirs                              # Number of sub-directions taken from the sun image to build the inner aberration of the pupil in the image
         self.patch_padding = patch_padding                         # Padding outside the subaperture FoV in arcsec.
         self.subDir_margin = subDir_margin                         # Extra margin to the subDirs size to avoid border effects [arcsec]
+
+        self.flux          = self.computeFlux(self.fov, self.wavelength, self.bandwidth) # flux [photons/m²/s]
+
 
         self.type     = 'SUN'
 
@@ -123,57 +127,57 @@ class ExtendedSource(Source):
                                             magnitude=1, 
                                             coordinates=[self.subDirs_coordinates[0,dirX,dirY], self.subDirs_coordinates[1,dirX,dirY]],
                                             logger=self.logger))
-                self.subDirs_stars[-1].nPhoton = np.round(self.nPhoton/(self.nSubDirs*self.nSubDirs))
+                self.subDirs_stars[-1].flux = np.round(self.flux/(self.nSubDirs*self.nSubDirs))
         
         # Last step, define the 2D filter that will be used to combine the subDirs. 
         # Taken from the WideField module of DASP (Durham Adaptive Optics Simulator, Alaister Basedn et al.)
         filt_width = np.round((self.subDirs_coordinates[2,0,0])/self.img_PS).astype(int)
-        self.filter_2D = np.zeros((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
+        if self.nSubDirs == 1:
+            self.filter_2D = np.ones((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
+        else:
+            self.filter_2D = np.zeros((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
 
-        lin = 1 - np.abs(np.arange(filt_width) - (filt_width - 1) / 2) / ((filt_width - 1) / 2)
-        filter_2D_template = np.tile(lin, (filt_width, 1))
-        filter_2D_template = filter_2D_template * lin[:, np.newaxis]
-        
-        subDir_size = filt_width
+            lin = 1 - np.abs(np.arange(filt_width) - (filt_width - 1) / 2) / ((filt_width - 1) / 2)
+            filter_2D_template = np.tile(lin, (filt_width, 1))
+            filter_2D_template = filter_2D_template * lin[:, np.newaxis]
+            
+            subDir_size = filt_width
 
-        for dirX in range(self.nSubDirs):
-            for dirY in range(self.nSubDirs):
-                self.filter_2D[:,:,dirX,dirY] = np.copy(filter_2D_template)
+            for dirX in range(self.nSubDirs):
+                for dirY in range(self.nSubDirs):
+                    self.filter_2D[:,:,dirX,dirY] = np.copy(filter_2D_template)
 
-                if dirX == 0: # top, add top left and right to match the external contributions to the filter
-                    # top
-                    self.filter_2D[0:subDir_size//2,:,dirX,dirY] += filter_2D_template[-(subDir_size//2):,:] # add bottom
-                if dirX == (self.nSubDirs-1): # bottom, add top to match the external contributions to the filter
-                    # bottom
-                    self.filter_2D[-(subDir_size//2):,:,dirX,dirY] += filter_2D_template[0:subDir_size//2,:] # add top
-                if dirY == 0: # left, add right match the external contributions to the filter
-                    # left
-                    self.filter_2D[:,0:subDir_size//2,dirX,dirY] += filter_2D_template[:,-(subDir_size//2):] # add right
-                if dirY == (self.nSubDirs-1): # right, add left match the external contributions to the filter
-                    # right
-                    self.filter_2D[:,-(subDir_size//2):,dirX,dirY] += filter_2D_template[:,0:subDir_size//2] # add left
+                    if dirX == 0: # top, add top left and right to match the external contributions to the filter
+                        # top
+                        self.filter_2D[0:subDir_size//2,:,dirX,dirY] += filter_2D_template[-(subDir_size//2):,:] # add bottom
+                    if dirX == (self.nSubDirs-1): # bottom, add top to match the external contributions to the filter
+                        # bottom
+                        self.filter_2D[-(subDir_size//2):,:,dirX,dirY] += filter_2D_template[0:subDir_size//2,:] # add top
+                    if dirY == 0: # left, add right match the external contributions to the filter
+                        # left
+                        self.filter_2D[:,0:subDir_size//2,dirX,dirY] += filter_2D_template[:,-(subDir_size//2):] # add right
+                    if dirY == (self.nSubDirs-1): # right, add left match the external contributions to the filter
+                        # right
+                        self.filter_2D[:,-(subDir_size//2):,dirX,dirY] += filter_2D_template[:,0:subDir_size//2] # add left
 
-                # Corner cases:
+                    # Corner cases:
 
-                if (dirX == 0 and dirY == 0): # top-left
-                    self.filter_2D[0:subDir_size//2,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
-                if (dirX == 0 and dirY == (self.nSubDirs-1)): # top-right
-                    self.filter_2D[0:subDir_size//2,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
-                if (dirX == (self.nSubDirs-1) and dirY == 0): # bottom-left
-                    self.filter_2D[-(subDir_size//2):,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
-                if (dirX == (self.nSubDirs-1) and dirY == (self.nSubDirs-1)): # bottom-right
-                    self.filter_2D[-(subDir_size//2):,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
-                       
+                    if (dirX == 0 and dirY == 0): # top-left
+                        self.filter_2D[0:subDir_size//2,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
+                    if (dirX == 0 and dirY == (self.nSubDirs-1)): # top-right
+                        self.filter_2D[0:subDir_size//2,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
+                    if (dirX == (self.nSubDirs-1) and dirY == 0): # bottom-left
+                        self.filter_2D[-(subDir_size//2):,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
+                    if (dirX == (self.nSubDirs-1) and dirY == (self.nSubDirs-1)): # bottom-right
+                        self.filter_2D[-(subDir_size//2):,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
+                        
         self.is_initialized = True
         
-    # Source: Serpone, Nick & Horikoshi, Satoshi & Emeline, Alexei. (2010). 
-    # Microwaves in advanced oxidation processes for environmental applications. A brief review. 
-    # Journal of Photochemistry and Photobiology C-photochemistry Reviews - J PHOTOCHEM PHOTOBIOL C-PHOTO. 11. 114-131. 10.1016/j.jphotochemrev.2010.07.003. 
     PHOTOMETRY_BANDS = {
-        'V':  [0.500e-6, 0.0, 1.14e11],
-        'V1': [0.525e-6, 0.0, 1.14e11],
-        'R':  [0.680e-6, 0.0, 1.14e11],
-        'IR': [1.300e-6, 0.0, 1.14e11],
+        'V':  [0.500e-6, 10e-9],
+        'V1': [0.525e-6, 10e-9],
+        'R':  [0.680e-6, 10e-9],
+        'IR': [1.300e-6, 10e-9],
     }
         
     def photometry(self, arg):
@@ -188,7 +192,7 @@ class ExtendedSource(Source):
         Returns
         -------
         list
-            [wavelength, bandwidth, zero point flux]
+            [wavelength, bandwidth]
         """
         self.logger.debug('ExtendedSource::photometry')
         
@@ -197,10 +201,45 @@ class ExtendedSource(Source):
             raise ValueError('The photometry object takes a string as an input.')
             
         if arg in self.PHOTOMETRY_BANDS:
-            return self.PHOTOMETRY_BANDS[arg]
+            band_info = self.PHOTOMETRY_BANDS[arg]
+            return band_info
         else:
             self.logger.error(f"ExtendedSource::photometry - Wrong name for the photometry object. Available bands: {', '.join(self.PHOTOMETRY_BANDS.keys())}")
             raise ValueError(f"Wrong name for the photometry object. Available bands: {', '.join(self.PHOTOMETRY_BANDS.keys())}")
+    
+    def computeFlux(self, fov, wavelength, bandwidth):
+        """
+        Return photons.
+
+        Parameters
+        ----------
+        fov : float
+            Field of View observed in arcsec
+        wavelength : float
+            Wavelength observed at the sun in [m]
+        bandwidth : float
+            Wavelength filter bandwidth [m]
+
+        Returns
+        -------
+        flux [photons/m²/s]
+        """        
+
+        am15 = pvlib.spectrum.get_reference_spectra(standard="ASTM G173-03")
+
+        wavelengths_nm = am15.index.values
+
+        wavelength_nm = wavelength * 1e9
+        bandwidth_nm = bandwidth * 1e9
+
+        E_lambda = np.interp(wavelength_nm, wavelengths_nm, am15["direct"].values)  # W m^-2 nm^-1
+
+        omega_fov = (fov / 206265.0)**2
+        omega_sun = np.pi * (960.0 / 206265.0)**2
+
+        flux = (bandwidth_nm * E_lambda * (omega_fov / omega_sun) * wavelength / (sp.constants.h * sp.constants.c))
+
+        return flux
 
     def print_properties(self):
         """
@@ -215,7 +254,7 @@ class ExtendedSource(Source):
         self.logger.info('{: ^8s}'.format('') +'{: ^10s}'.format('[m]')+ '{: ^8s}'.format('[arcsec]')+ '{: ^10s}'.format('[deg]')+ '{: ^10s}'.format('[m]')+ '{: ^10s}'.format('[phot/m2/s]') )
 
         self.logger.info('-------------------------------------------------------------------')        
-        self.logger.info('{: ^8s}'.format(self.type) +'{: ^10s}'.format(str(self.wavelength))+ '{: ^8s}'.format(str(self.coordinates[0]))+ '{: ^10s}'.format(str(self.coordinates[1]))+'{: ^10s}'.format(str(np.round(self.altitude,2)))+'{: ^10s}'.format(str(np.round(self.nPhoton,1))) )
+        self.logger.info('{: ^8s}'.format(self.type) +'{: ^10s}'.format(str(self.wavelength))+ '{: ^8s}'.format(str(self.coordinates[0]))+ '{: ^10s}'.format(str(self.coordinates[1]))+'{: ^10s}'.format(str(np.round(self.altitude,2)))+'{: ^10s}'.format(str(np.round(self.flux,1))) )
 
     def load_sun_img(self):
         """

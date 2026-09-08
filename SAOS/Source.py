@@ -144,9 +144,9 @@ class Source:
         self.phase      = []                                    # phase of the source 
         self.phase_no_pupil      = []                           # phase of the source (no pupil)
         self.fluxMap    = []                                    # 2D flux map of the source
-        self.nPhoton    = self.zeroPoint*10**(-0.4*magnitude)   # number of photon per m2 per s
+        self.flux       = self.zeroPoint*10**(-0.4*magnitude)   # flux [photons/m²/s]
         self.tag        = 'source'                              # tag of the object
-        self.altitude = altitude                                # altitude of the source object in m    
+        self.altitude   = altitude                              # altitude of the source object in m    
         self.coordinates = coordinates                          # polar coordinates [r,theta] 
         self.laser_coordinates = laser_coordinates              # Laser Launch Telescope coordinates in [m] 
         self.chromatic_shift = chromatic_shift                             # shift in arcsec to be applied to the atmospheric phase screens (one value for each layer) to simulate a chromatic effect
@@ -204,7 +204,7 @@ class Source:
         self.logger.info('{: ^8s}'.format('') +'{: ^10s}'.format('[m]')+ '{: ^8s}'.format('[arcsec]')+ '{: ^10s}'.format('[deg]')+ '{: ^10s}'.format('[m]')+ '{: ^10s}'.format('') + '{: ^10s}'.format('[phot/m2/s]') )
 
         self.logger.info('-------------------------------------------------------------------')        
-        self.logger.info('{: ^8s}'.format(self.type) +'{: ^10s}'.format(str(self.wavelength))+ '{: ^8s}'.format(str(self.coordinates[0]))+ '{: ^10s}'.format(str(self.coordinates[1]))+'{: ^10s}'.format(str(np.round(self.altitude,2)))+ '{: ^10s}'.format(str(self.magnitude))+'{: ^10s}'.format(str(np.round(self.nPhoton,1))) )
+        self.logger.info('{: ^8s}'.format(self.type) +'{: ^10s}'.format(str(self.wavelength))+ '{: ^8s}'.format(str(self.coordinates[0]))+ '{: ^10s}'.format(str(self.coordinates[1]))+'{: ^10s}'.format(str(np.round(self.altitude,2)))+ '{: ^10s}'.format(str(self.magnitude))+'{: ^10s}'.format(str(np.round(self.flux,1))) )
 
     def setup_logging(self, logging_level=logging.WARNING):
         #

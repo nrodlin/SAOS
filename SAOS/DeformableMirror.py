@@ -109,8 +109,8 @@ class DeformableMirror:
                 Maximum mechanical stroke peak-to-valley in [m]. By default 100e-6 [m].
             dynamicModel : str, optional
                 Path to the h5 file containing the state-space model of the Deformable Mirror.
-            projector : np.ndarray, optional
-                Projector matrix used only when typeDM is 'custom'. Transforms the input coefficients into the custom modal basis.
+            normalize_IFs : bool, optional
+                Whether to apply Partition of Unity normalization to custom influence functions. By default True.
         """
         # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
         if logger is None:
@@ -171,7 +171,7 @@ class DeformableMirror:
         
         self.typeDM = typeDM
         
-        # Compute scaling for the RBF Interpolation based on Gaussian function
+        # Compute scaling (epsilon) for the Gaussian influence functions based on mechanical coupling
         self.epsilon = np.sqrt(-1*np.log(self.mechCoupling))/self.pitch
 
         # High resolution meshgrid
@@ -180,17 +180,21 @@ class DeformableMirror:
 
         self.high_res_coords = np.array([X.flatten(), Y.flatten()]).T
         
-        if self.typeDM == 'custom' and modes is not None and kwargs.get('projector') is not None:
-            self.logger.info('DeformableMirror::__init__ - Using custom modes and projector for shape generation.')
-            self.modes = torch.as_tensor(modes, device=self.device, dtype=torch.float64)
-            self.projector = torch.as_tensor(kwargs.get('projector'), device=self.device, dtype=torch.float64)
-            self.L_interp = None
-            self.phi_eval = None
+        if modes is not None:
+            self.logger.info('DeformableMirror::__init__ - Using custom influence functions for shape generation.')
+            custom_IF = torch.as_tensor(modes, device=self.device, dtype=torch.float64)
+            if custom_IF.ndim == 3:
+                custom_IF = custom_IF.reshape(-1, custom_IF.shape[-1])
+            
+            # Normalize custom influence functions using Partition of Unity if requested
+            if kwargs.get('normalize_IFs', True):
+                norm_factor = custom_IF.sum(dim=1, keepdim=True)
+                self.influence_functions = custom_IF / (norm_factor + 1e-12)
+            else:
+                self.influence_functions = custom_IF
         else:
-            self.modes = None
-            self.projector = None
-            # Compute the interpolator for the shape fitting
-            self.L_interp, self.phi_eval = self.precomputeGaussianRBFInterpolant(self.coordinates[self.validAct], self.high_res_coords, self.epsilon)
+            # Compute the normalized influence functions using Partition of Unity
+            self.influence_functions = self.precomputeInfluenceFunctions(self.coordinates[self.validAct], self.high_res_coords, self.epsilon)
 
         # Load dynamic model, if specified
         if self.dynamic_model_path != '':
@@ -323,43 +327,36 @@ class DeformableMirror:
 
         return coordinates, validAct.flatten(), nValidAct
 
-    # Generates a Gaussian RBF Interpolant to compute the high resolution function imposing the mirror mechanics
-
-    def precomputeGaussianRBFInterpolant(self, input_points, output_points, epsilon):
+    def precomputeInfluenceFunctions(self, input_points, output_points, epsilon):
         """
-        Generates a distribution of radial points approximated by hexagons, 
-        and a logic mask filtering the points that are within the limits of
-        the external pupil diameter.
+        Precompute normalized Gaussian influence functions using Partition of Unity.
 
         Parameters
         ----------
         input_points : np.ndarray
-            Coordinates of the mirror actuators
+            2D coordinates of valid mirror actuators [nValidAct, 2].
         output_points : np.ndarray
-            Coordinates of the high resolution output grid
+            2D coordinates of the high-resolution output grid [D_px^2, 2].
         epsilon : float
-            Radial scaling factor for the Gaussian fitting
+            Radial scaling factor for the Gaussian fitting derived from pitch and mechanical coupling.
+
         Returns
         -------
-        L : torch.Tensor
-            Triangular Cholesky descomposition matrix
-        phi_eval : torch.Tensor
-            Inteprolator based on output - input Euclidean distance
+        influence_functions : torch.Tensor
+            Normalized influence function matrix [D_px^2, nValidAct] with partition of unity.
         """
-
         input_points_torch  = torch.as_tensor(input_points,  device=self.device, dtype=torch.float64)
         output_points_torch = torch.as_tensor(output_points, device=self.device, dtype=torch.float64)
 
-        eucl_distance = torch.cdist(input_points_torch, input_points_torch) 
-        Phi = torch.exp(-(epsilon * eucl_distance) ** 2)
+        r = torch.cdist(output_points_torch, input_points_torch)
 
-        L = torch.linalg.cholesky(Phi)
+        influence_functions = torch.exp(-(epsilon * r)**2)
 
-        D_eval = torch.cdist(output_points_torch, input_points_torch)
+        # Partition of unity normalization across actuators for each pixel
+        norm_factor = influence_functions.sum(dim=1, keepdim=True)
+        influence_functions.div_(norm_factor + 1e-12)
 
-        phi_eval = torch.exp(-(epsilon * D_eval) ** 2)
-
-        return L, phi_eval
+        return influence_functions
 
     # The DM can be considered as an atmospheric layers with discrete points actuated, which are then connected with their influence functions, 
     # shaping a continuous 2D surface. 
@@ -599,18 +596,17 @@ class DeformableMirror:
 
         return dyn_cmd 
 
-    # The shape of the mirror is controlled through a set of modes that by default are zonal --> defining a typical DM. 
-    # If a modal DM is defined, then the coefficients correspond to those of the modal basis.
-    # Please notice that in this context, the modes do not refer to the AO control modal base but the intrinsic mechanical behaviour of the DM.
-    # The shape of the mirror is computed as the matricial product of modes x coeffs -> modes [dm_layer.D_px, nValidActs], coefs [nValidActs, 1]    
+    # The shape of the mirror is computed as the matrix product of influence functions x commands -> influence_functions [D_px^2, nValidActs], coefs [nValidActs, 1]
     def updateDMShape(self, val, dynamicResponse=True):
         """
-        Update the OPD map from the current coefficients or 2D grid.
+        Update the mirror OPD map from the actuator command vector.
 
         Parameters
         ----------
-        val : np.ndarray
-            Either a coefficient vector or a 2D shape map.
+        val : torch.Tensor, np.ndarray, or list
+            1D actuator command vector of length nValidAct or nActs^2.
+        dynamicResponse : bool, optional
+            Whether to apply the DM dynamic model (if configured). Default is True.
 
         Returns
         -------
@@ -619,43 +615,42 @@ class DeformableMirror:
         """
         self.logger.debug('DeformableMirror::updateDMShape') 
 
-        if isinstance(val, torch.Tensor):
-            if val.squeeze().ndim > 1:
-                self.logger.error(f'DeformableMirror::updateDMShape - Shape of the command is not supported. Expected 1D array.')                
-                raise ValueError('Shape of the command is not supported. Expected 1D array.')
-            if val.shape[0] == self.validAct.shape[0]:
-                # Command received is 1D, without filtering the unused actuators
-                val = val[self.validAct]
-            elif val.shape[0] == self.nValidAct:
-                # Command received is 1D, only valid actuators
-                val = val
-            else:
-                self.logger.error(f'DeformableMirror::updateDMShape - Size of the command is not correct: {val.shape}.')
-                raise ValueError('Size of the command is not correct.')
+        if isinstance(val, (np.ndarray, list)):
+            val = torch.as_tensor(val, device=self.device, dtype=torch.float64)
+        elif isinstance(val, torch.Tensor):
+            val = val.to(device=self.device, dtype=torch.float64)
         else:
-            raise TypeError('Expected Torch Tensor.')
+            raise TypeError('Expected Torch Tensor or numpy array.')
+
+        if val.squeeze().ndim > 1:
+            self.logger.error(f'DeformableMirror::updateDMShape - Shape of the command is not supported. Expected 1D array.')                
+            raise ValueError('Shape of the command is not supported. Expected 1D array.')
+        if val.shape[0] == self.validAct.shape[0]:
+            # Command received is 1D, without filtering the unused actuators
+            val = val[self.validAct]
+        elif val.shape[0] == self.nValidAct:
+            # Command received is 1D, only valid actuators
+            val = val
+        else:
+            self.logger.error(f'DeformableMirror::updateDMShape - Size of the command is not correct: {val.shape}.')
+            raise ValueError('Size of the command is not correct.')
         
         # Ensure dimensions nValidAct,1
         if val.ndim == 1:
             val = val.unsqueeze(1)
         # Fill the layer 1D command
         temp = np.zeros_like(self.validAct, dtype=np.float32)
-        temp[self.validAct] = val.cpu().numpy().squeeze()
+        temp[self.validAct] = val.detach().cpu().numpy().squeeze()
         
         self.dm_layer.cmd_1D = temp.copy()
 
-        # Compute the shape of the mirror using the RBF interpolator and aplying the dynamics, if specified
+        # Compute the shape of the mirror using the influence functions and applying the dynamics, if specified
         if (self.dyn_A is not None) and (dynamicResponse is True):
             coefs_torch = self.applyDynamics(val)
         else:
             coefs_torch           = val
 
-        if hasattr(self, 'typeDM') and self.typeDM == 'custom' and self.modes is not None and self.projector is not None:
-            projected_coefs = self.projector @ coefs_torch
-            opd_highres = (self.modes @ projected_coefs).squeeze()
-        else:
-            W = torch.cholesky_solve(coefs_torch, self.L_interp)
-            opd_highres = (self.phi_eval @ W).squeeze(1)
+        opd_highres = (self.influence_functions @ coefs_torch).squeeze(1)
 
         self.dm_layer.OPD     = opd_highres.cpu().numpy().reshape(self.dm_layer.D_px, self.dm_layer.D_px)
 
@@ -726,5 +721,6 @@ class DeformableMirror:
     # If the logger is external, then the queue is stop outside of the class scope and we shall
     # avoid to attempt its destruction
     def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()
+        if hasattr(self, 'external_logger_flag') and not self.external_logger_flag:
+            if hasattr(self, 'queue_listerner') and self.queue_listerner is not None:
+                self.queue_listerner.stop()
