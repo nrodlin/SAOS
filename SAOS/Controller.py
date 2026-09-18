@@ -309,7 +309,11 @@ class Controller:
                     interaction_matrix_per_DM.append(im)
                     
             if len(interaction_matrix_per_DM) == 0:
-                nModes = modal_basis[i].shape[1]
+                nModes = modal_basis[i].shape[1] - discarded_modes[i]
+                if self.nModes is not None:
+                    n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
+                    if n_m is not None:
+                        nModes = min(nModes, n_m)
                 self.im_per_dm.append(torch.zeros((0, nModes), dtype=torch.float64, device=self.device))
             else:
                 im_measured_tensor = torch.as_tensor(np.vstack(interaction_matrix_per_DM), dtype=torch.float64, device=self.device).squeeze()
@@ -330,7 +334,11 @@ class Controller:
             # Compute the reconstructor
             if len(im_target_list) == 0:
                 self.logger.warning(f'Controller - DM {i} has no associated WFS in the target mask. Setting reconstructor to zero.')
-                nModes = modal_basis[i].shape[1]
+                nModes = modal_basis[i].shape[1] - discarded_modes[i]
+                if self.nModes is not None:
+                    n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
+                    if n_m is not None:
+                        nModes = min(nModes, n_m)
                 temp_reconstructor = torch.zeros((nModes, 0), dtype=torch.float64, device=self.device)
             else:
                 im_target_tensor = torch.as_tensor(np.vstack(im_target_list), dtype=torch.float64, device=self.device).squeeze()
