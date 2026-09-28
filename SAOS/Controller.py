@@ -84,6 +84,7 @@ class Controller:
         self.R_tomo_path = kwargs.get('R_tomo_path', None)
 
         self.nModes = kwargs.get('nModes', None)
+        self.joint_reconstruction = kwargs.get('joint_reconstruction', True)
 
         # Run the initialization of the reconstructor
         self.reconstructor, self.modal_basis, self.mask, self.t_mask, self.discarded_modes = self.initializeReconstructor(self.reconstructionMethod, interactionMatrix)                
@@ -291,11 +292,16 @@ class Controller:
                 self.logger.error("R_tomo_path must be provided for tomography reconstruction method.")
                 raise ValueError("R_tomo_path must be provided for tomography reconstruction method.")
 
-        # Now, define the reconstruction matrices for each DM
+        # Check if joint reconstruction across multiple DMs should be performed
+        joint_reconstruction = getattr(self, 'joint_reconstruction', True)
 
+        # Define the reconstruction matrices for each DM
         reconstructor = []
         self.im_per_dm = []
-                
+        im_target_tensors = []
+        n_modes_target = []
+        all_dms_have_target = True
+
         for i in range(nDMs):
             # 1. Measured IM for POLC
             interaction_matrix_per_DM = []
@@ -305,16 +311,17 @@ class Controller:
                     im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
                     if self.nModes is not None:
                         n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
-                        im = im[:, :n_m]
+                        if n_m is not None:
+                            im = im[:, :n_m]
                     interaction_matrix_per_DM.append(im)
                     
             if len(interaction_matrix_per_DM) == 0:
-                nModes = modal_basis[i].shape[1] - discarded_modes[i]
+                nModes_i = modal_basis[i].shape[1] - discarded_modes[i]
                 if self.nModes is not None:
                     n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
                     if n_m is not None:
-                        nModes = min(nModes, n_m)
-                self.im_per_dm.append(torch.zeros((0, nModes), dtype=torch.float64, device=self.device))
+                        nModes_i = min(nModes_i, n_m)
+                self.im_per_dm.append(torch.zeros((0, nModes_i), dtype=torch.float64, device=self.device))
             else:
                 im_measured_tensor = torch.as_tensor(np.vstack(interaction_matrix_per_DM), dtype=torch.float64, device=self.device).squeeze()
                 if im_measured_tensor.ndim == 1:
@@ -328,36 +335,80 @@ class Controller:
                     im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
                     if self.nModes is not None:
                         n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
-                        im = im[:, :n_m]
+                        if n_m is not None:
+                            im = im[:, :n_m]
                     im_target_list.append(im)
 
-            # Compute the reconstructor
             if len(im_target_list) == 0:
-                self.logger.warning(f'Controller - DM {i} has no associated WFS in the target mask. Setting reconstructor to zero.')
-                nModes = modal_basis[i].shape[1] - discarded_modes[i]
+                all_dms_have_target = False
+                nModes_i = modal_basis[i].shape[1] - discarded_modes[i]
                 if self.nModes is not None:
                     n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
                     if n_m is not None:
-                        nModes = min(nModes, n_m)
-                temp_reconstructor = torch.zeros((nModes, 0), dtype=torch.float64, device=self.device)
+                        nModes_i = min(nModes_i, n_m)
+                im_target_tensors.append(torch.zeros((0, nModes_i), dtype=torch.float64, device=self.device))
+                n_modes_target.append(nModes_i)
             else:
                 im_target_tensor = torch.as_tensor(np.vstack(im_target_list), dtype=torch.float64, device=self.device).squeeze()
                 if im_target_tensor.ndim == 1:
                     im_target_tensor = im_target_tensor.unsqueeze(0)
-                    
+                im_target_tensors.append(im_target_tensor)
+                n_modes_target.append(im_target_tensor.shape[1])
+
+        # Compute Reconstructors: Joint (if nDMs > 1) or DM-by-DM
+        if nDMs > 1 and joint_reconstruction and all_dms_have_target and reconstructionMethod in {'inversion', 'tikhonov'}:
+            n_rows = [t.shape[0] for t in im_target_tensors]
+            if len(set(n_rows)) == 1 and n_rows[0] > 0:
+                H_global = torch.cat(im_target_tensors, dim=1)
                 if reconstructionMethod == 'inversion':
-                    temp_reconstructor = torch.linalg.pinv(im_target_tensor, self.rcond[i])
-                elif reconstructionMethod == 'tikhonov' or reconstructionMethod == 'tomography':
-                    # (D.T@D + alfa*I)@D.T --> implemented through SVD to improve the stability of the inversion and the automation of alfa
-                    H = im_target_tensor
+                    rcond_val = min(self.rcond) if isinstance(self.rcond, (list, tuple)) else self.rcond
+                    R_joint = torch.linalg.pinv(H_global, rcond_val)
+                elif reconstructionMethod == 'tikhonov':
+                    H = H_global
                     U, S, Vh = torch.linalg.svd(H, full_matrices=False)
-                    alfa = self.beta[i] * torch.max(S)**2
+                    beta_val = min(self.beta) if isinstance(self.beta, (list, tuple)) else self.beta
+                    alfa = beta_val * torch.max(S)**2
                     S_reg = S / (S**2 + alfa)
-                    temp_reconstructor = Vh.T @ torch.diag(S_reg) @ U.T
+                    R_joint = Vh.T @ torch.diag(S_reg) @ U.T
+                
+                offset = 0
+                for i in range(nDMs):
+                    n_m = n_modes_target[i]
+                    reconstructor.append(R_joint[offset : offset + n_m, :])
+                    offset += n_m
+            else:
+                for i in range(nDMs):
+                    if im_target_tensors[i].shape[0] == 0:
+                        self.logger.warning(f'Controller - DM {i} has no associated WFS in the target mask. Setting reconstructor to zero.')
+                        reconstructor.append(torch.zeros((n_modes_target[i], 0), dtype=torch.float64, device=self.device))
+                    else:
+                        if reconstructionMethod == 'inversion':
+                            temp_reconstructor = torch.linalg.pinv(im_target_tensors[i], self.rcond[i])
+                        elif reconstructionMethod == 'tikhonov' or reconstructionMethod == 'tomography':
+                            H = im_target_tensors[i]
+                            U, S, Vh = torch.linalg.svd(H, full_matrices=False)
+                            alfa = self.beta[i] * torch.max(S)**2
+                            S_reg = S / (S**2 + alfa)
+                            temp_reconstructor = Vh.T @ torch.diag(S_reg) @ U.T
+                        reconstructor.append(temp_reconstructor)
+        else:
+            for i in range(nDMs):
+                if im_target_tensors[i].shape[0] == 0:
+                    self.logger.warning(f'Controller - DM {i} has no associated WFS in the target mask. Setting reconstructor to zero.')
+                    reconstructor.append(torch.zeros((n_modes_target[i], 0), dtype=torch.float64, device=self.device))
                 else:
-                    self.logger.error('Controller::initializeReconstructor - Unknown reconstructor')
-                    raise ValueError('Unknown reconstructor method.')
-            reconstructor.append(temp_reconstructor)
+                    if reconstructionMethod == 'inversion':
+                        temp_reconstructor = torch.linalg.pinv(im_target_tensors[i], self.rcond[i])
+                    elif reconstructionMethod == 'tikhonov' or reconstructionMethod == 'tomography':
+                        H = im_target_tensors[i]
+                        U, S, Vh = torch.linalg.svd(H, full_matrices=False)
+                        alfa = self.beta[i] * torch.max(S)**2
+                        S_reg = S / (S**2 + alfa)
+                        temp_reconstructor = Vh.T @ torch.diag(S_reg) @ U.T
+                    else:
+                        self.logger.error('Controller::initializeReconstructor - Unknown reconstructor')
+                        raise ValueError('Unknown reconstructor method.')
+                    reconstructor.append(temp_reconstructor)
 
         self.logger.info(f'Controller::initializeReconstructor - Reconstruction took {time.time()-t0}[s]')
 
