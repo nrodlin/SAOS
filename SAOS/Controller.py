@@ -328,79 +328,99 @@ class Controller:
                     im_measured_tensor = im_measured_tensor.unsqueeze(0)
                 self.im_per_dm.append(im_measured_tensor)
 
-            # 2. Target IM for Reconstructor
-            im_target_list = []
-            for j in range(nLPs):
-                if t_mask[i,j]:
-                    im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
-                    if self.nModes is not None:
-                        n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
-                        if n_m is not None:
-                            im = im[:, :n_m]
-                    im_target_list.append(im)
+        # Identify active WFS LightPaths (excluding science cameras with no sensor)
+        self.active_wfs_lps = []
+        for j in range(nLPs):
+            if any(interactionMatrix.interaction_matrix_warehouse[i][j]['IM'] is not None for i in range(nDMs)):
+                self.active_wfs_lps.append(j)
 
-            if len(im_target_list) == 0:
-                all_dms_have_target = False
-                nModes_i = modal_basis[i].shape[1] - discarded_modes[i]
-                if self.nModes is not None:
-                    n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
-                    if n_m is not None:
-                        nModes_i = min(nModes_i, n_m)
-                im_target_tensors.append(torch.zeros((0, nModes_i), dtype=torch.float64, device=self.device))
-                n_modes_target.append(nModes_i)
-            else:
-                im_target_tensor = torch.as_tensor(np.vstack(im_target_list), dtype=torch.float64, device=self.device).squeeze()
-                if im_target_tensor.ndim == 1:
-                    im_target_tensor = im_target_tensor.unsqueeze(0)
-                im_target_tensors.append(im_target_tensor)
-                n_modes_target.append(im_target_tensor.shape[1])
+        # Mode dimensions per DM
+        n_modes_target = []
+        for i in range(nDMs):
+            n_m = modal_basis[i].shape[1] - discarded_modes[i]
+            if self.nModes is not None:
+                user_n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
+                if user_n_m is not None:
+                    n_m = min(n_m, user_n_m)
+            n_modes_target.append(n_m)
 
-        # Compute Reconstructors: Joint (if nDMs > 1) or DM-by-DM
-        if nDMs > 1 and joint_reconstruction and all_dms_have_target and reconstructionMethod in {'inversion', 'tikhonov'}:
-            n_rows = [t.shape[0] for t in im_target_tensors]
-            if len(set(n_rows)) == 1 and n_rows[0] > 0:
-                H_global = torch.cat(im_target_tensors, dim=1)
-                if reconstructionMethod == 'inversion':
-                    rcond_val = min(self.rcond) if isinstance(self.rcond, (list, tuple)) else self.rcond
-                    R_joint = torch.linalg.pinv(H_global, rcond_val)
-                elif reconstructionMethod == 'tikhonov':
-                    H = H_global
-                    U, S, Vh = torch.linalg.svd(H, full_matrices=False)
-                    beta_val = min(self.beta) if isinstance(self.beta, (list, tuple)) else self.beta
-                    alfa = beta_val * torch.max(S)**2
-                    S_reg = S / (S**2 + alfa)
-                    R_joint = Vh.T @ torch.diag(S_reg) @ U.T
-                
-                offset = 0
+        # Slope dimensions per active WFS
+        n_slopes_per_wfs = {}
+        for j in self.active_wfs_lps:
+            first_im = next(interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
+                            for i in range(nDMs)
+                            if interactionMatrix.interaction_matrix_warehouse[i][j]['IM'] is not None)
+            n_slopes_per_wfs[j] = first_im.shape[0]
+
+        # Compute Reconstructors: 2D Block Matrix (default) or Independent DM-by-DM
+        if joint_reconstruction and len(self.active_wfs_lps) > 0 and reconstructionMethod in {'inversion', 'tikhonov'}:
+            # Build 2D block matrix of shape (sum(N_slopes_wfs), sum(N_modes_dms))
+            blocks_2d = []
+            for j in self.active_wfs_lps:
+                row_blocks = []
+                n_s = n_slopes_per_wfs[j]
                 for i in range(nDMs):
                     n_m = n_modes_target[i]
-                    reconstructor.append(R_joint[offset : offset + n_m, :])
-                    offset += n_m
-            else:
-                for i in range(nDMs):
-                    if im_target_tensors[i].shape[0] == 0:
-                        self.logger.warning(f'Controller - DM {i} has no associated WFS in the target mask. Setting reconstructor to zero.')
-                        reconstructor.append(torch.zeros((n_modes_target[i], 0), dtype=torch.float64, device=self.device))
+                    im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
+                    if t_mask[i, j] and (im is not None):
+                        block_im = im[:, :n_m]
+                        row_blocks.append(torch.as_tensor(block_im, dtype=torch.float64, device=self.device))
                     else:
-                        if reconstructionMethod == 'inversion':
-                            temp_reconstructor = torch.linalg.pinv(im_target_tensors[i], self.rcond[i])
-                        elif reconstructionMethod == 'tikhonov' or reconstructionMethod == 'tomography':
-                            H = im_target_tensors[i]
-                            U, S, Vh = torch.linalg.svd(H, full_matrices=False)
-                            alfa = self.beta[i] * torch.max(S)**2
-                            S_reg = S / (S**2 + alfa)
-                            temp_reconstructor = Vh.T @ torch.diag(S_reg) @ U.T
-                        reconstructor.append(temp_reconstructor)
-        else:
+                        row_blocks.append(torch.zeros((n_s, n_m), dtype=torch.float64, device=self.device))
+                blocks_2d.append(row_blocks)
+
+            row_tensors = [torch.cat(row, dim=1) for row in blocks_2d]
+            H_global = torch.cat(row_tensors, dim=0)
+
+            if reconstructionMethod == 'inversion':
+                rcond_val = min(self.rcond) if isinstance(self.rcond, (list, tuple)) else self.rcond
+                R_global = torch.linalg.pinv(H_global, rcond=rcond_val)
+            elif reconstructionMethod == 'tikhonov':
+                gamma_parts = []
+                for i in range(nDMs):
+                    offset_i = sum(n_modes_target[:i])
+                    n_m = n_modes_target[i]
+                    dm_cols = H_global[:, offset_i : offset_i + n_m]
+                    s_vals = torch.linalg.svdvals(dm_cols)
+                    s_max = s_vals[0] if len(s_vals) > 0 and s_vals[0] > 0 else torch.tensor(1.0, dtype=torch.float64, device=self.device)
+                    beta_val = self.beta[i] if isinstance(self.beta, (list, tuple)) else self.beta
+                    alfa_i = beta_val * (s_max ** 2)
+                    gamma_parts.append(alfa_i * torch.ones(n_m, dtype=torch.float64, device=self.device))
+
+                Gamma = torch.cat(gamma_parts)
+                reg_matrix = H_global.T @ H_global + torch.diag(Gamma)
+                R_global = torch.linalg.solve(reg_matrix, H_global.T)
+
+            # Slice reconstructor blocks for each DM
+            offset = 0
             for i in range(nDMs):
-                if im_target_tensors[i].shape[0] == 0:
+                n_m = n_modes_target[i]
+                reconstructor.append(R_global[offset : offset + n_m, :])
+                offset += n_m
+        else:
+            # Independent DM-by-DM reconstruction
+            for i in range(nDMs):
+                im_target_list = []
+                for j in range(nLPs):
+                    if t_mask[i, j]:
+                        im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
+                        if self.nModes is not None:
+                            n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
+                            if n_m is not None:
+                                im = im[:, :n_m]
+                        im_target_list.append(im)
+
+                if len(im_target_list) == 0:
                     self.logger.warning(f'Controller - DM {i} has no associated WFS in the target mask. Setting reconstructor to zero.')
                     reconstructor.append(torch.zeros((n_modes_target[i], 0), dtype=torch.float64, device=self.device))
                 else:
+                    im_target_tensor = torch.as_tensor(np.vstack(im_target_list), dtype=torch.float64, device=self.device).squeeze()
+                    if im_target_tensor.ndim == 1:
+                        im_target_tensor = im_target_tensor.unsqueeze(0)
                     if reconstructionMethod == 'inversion':
-                        temp_reconstructor = torch.linalg.pinv(im_target_tensors[i], self.rcond[i])
+                        temp_reconstructor = torch.linalg.pinv(im_target_tensor, self.rcond[i])
                     elif reconstructionMethod == 'tikhonov' or reconstructionMethod == 'tomography':
-                        H = im_target_tensors[i]
+                        H = im_target_tensor
                         U, S, Vh = torch.linalg.svd(H, full_matrices=False)
                         alfa = self.beta[i] * torch.max(S)**2
                         S_reg = S / (S**2 + alfa)
@@ -519,6 +539,20 @@ class Controller:
         
         self.slopes_res = error_res
 
+        # Extract global residual slopes from active WFS lightpaths
+        active_wfs = getattr(self, 'active_wfs_lps', None)
+        if active_wfs is not None and len(active_wfs) > 0:
+            global_slopes_list = []
+            for j in active_wfs:
+                if j < len(lightPaths) and hasattr(lightPaths[j], 'get_wavefront_error'):
+                    global_slopes_list.append(lightPaths[j].get_wavefront_error())
+            if len(global_slopes_list) > 0:
+                global_slopes = (-1) * torch.as_tensor(np.hstack(global_slopes_list).T, dtype=torch.float64, device=self.device).unsqueeze(1)
+            else:
+                global_slopes = torch.zeros((0, 1), dtype=torch.float64, device=self.device)
+        else:
+            global_slopes = error_res[0] if len(error_res) > 0 else torch.zeros((0, 1), dtype=torch.float64, device=self.device)
+
         if self.operationType == 'open':
             dm_cmd = []
             modal_cmd = []
@@ -562,7 +596,13 @@ class Controller:
 
         if self.reconstructionMethod == 'inversion' or self.reconstructionMethod == 'tikhonov':
             for i in range(len(self.reconstructor)):
-                modal_error.append(self.reconstructor[i]@error[i])
+                if self.reconstructor[i].shape[1] == global_slopes.shape[0]:
+                    modal_error.append(self.reconstructor[i] @ global_slopes)
+                elif self.reconstructor[i].shape[1] == error[i].shape[0]:
+                    modal_error.append(self.reconstructor[i] @ error[i])
+                else:
+                    raise ValueError(f"Shape mismatch: reconstructor[{i}] has shape {self.reconstructor[i].shape}, "
+                                     f"but global_slopes has shape {global_slopes.shape} and error[{i}] has shape {error[i].shape}")
 
                 if self.controllerType == 'leaky':
                     modal_cmd.append(self.gain[i]*modal_error[i] + self.decay[i] * self.command_previous[i])
