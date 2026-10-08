@@ -390,8 +390,11 @@ class Savepoint:
                 else:
                     dict_stats['contrast'] = np.array([0.0])
                 
+                # Normalize by the mean intensity so that MFGS is independent of the frame units (C would dominate otherwise)
+                squeezed_data = np.squeeze(data).astype(np.float64)
+                if mean_intensity != 0:
+                    squeezed_data = squeezed_data / mean_intensity
                 # Get median filtered image
-                squeezed_data = np.squeeze(data)
                 med = signal.medfilt(squeezed_data, kernel_size=3)
                 # Create Gradient filters
                 kx = np.array(([-3, 0, 3], [-10, 0, 10], [-3, 0, 3]))
