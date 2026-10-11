@@ -98,22 +98,26 @@ class MisRegistration:
     
     def apply_misreg(self, input_buffer):
 
+        # The DM OPD is not null at the border of the array (the pupil fills it), so the borders are extended with the
+        # nearest value: a constant (zero) border distorts the pupil edge for any non-null misregistration, even 1e-9 deg
         temp_buffer = np.copy(input_buffer)
         if self.radialScaling != 1:
             # Apply magnification
             scalingMatrix = cv2.getRotationMatrix2D((input_buffer.shape[1]/2,input_buffer.shape[0]/2), 0, self.radialScaling)
-            temp_buffer = cv2.warpAffine(input_buffer, scalingMatrix, (input_buffer.shape[1], input_buffer.shape[0]))
+            temp_buffer = cv2.warpAffine(input_buffer, scalingMatrix, (input_buffer.shape[1], input_buffer.shape[0]),
+                                         flags=cv2.INTER_LINEAR,
+                                         borderMode=cv2.BORDER_REPLICATE)
 
         if self.rotation != 0:
-            # Apply rotation
-            temp_buffer = sp.ndimage.rotate(temp_buffer, self.rotation, reshape=False)
+            # Apply rotation: cubic spline (order 3), sub-nm round-trip error on the DM OPD
+            temp_buffer = sp.ndimage.rotate(temp_buffer, self.rotation, reshape=False, order=3, mode='nearest')
 
         # Apply shift
         if self.shiftX != 0 or self.shiftY != 0:
             translationMatrix = np.float32([[1, 0, self.shiftX/self.spatialSampling], [0, 1, self.shiftY/self.spatialSampling]])
-            temp_buffer = cv2.warpAffine(temp_buffer, translationMatrix, (temp_buffer.shape[0], temp_buffer.shape[1]), 
+            temp_buffer = cv2.warpAffine(temp_buffer, translationMatrix, (temp_buffer.shape[1], temp_buffer.shape[0]),
                                         flags=cv2.INTER_LINEAR, 
-                                        borderMode=cv2.BORDER_CONSTANT)
+                                        borderMode=cv2.BORDER_REPLICATE)
 
         return temp_buffer
     

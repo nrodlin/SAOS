@@ -228,15 +228,13 @@ class Detector:
         # 2: Scale by the number of photons
         photons_frame = np.round(norm_frame * photons) # [photons]
 
-        # 3: Photon noise
+        # 3-4: Photon to electron conversion and shot noise. The detected electrons are a binomial thinning (QE) of the
+        # Poisson photon stream, i.e. Poisson(QE * photons). Applying QE after the Poisson draw would underestimate the
+        # shot noise by sqrt(QE)
         if self.shotNoise:
-            photon_noisy_frame = self.randomGenerator.poisson(photons_frame) # [photons]
+            electron_noisy_frame = self.randomGenerator.poisson(self.quantumEfficiency * photons_frame).astype(np.float64) # [e-]
         else:
-            photon_noisy_frame = photons_frame
-        
-        # 4: Convert from photons to electrons
-
-        electron_noisy_frame = self.quantumEfficiency * photon_noisy_frame # [e-]
+            electron_noisy_frame = self.quantumEfficiency * photons_frame # [e-]
 
         # 5: Dark current noise
         dark_current_map = np.ones_like(input_frame) * self.darkCurrent * self.integrationTime
