@@ -180,6 +180,7 @@ class DeformableMirror:
 
         self.high_res_coords = np.array([X.flatten(), Y.flatten()]).T
         
+        self.custom_IFs = modes is not None
         if modes is not None:
             self.logger.info('DeformableMirror::__init__ - Using custom influence functions for shape generation.')
             custom_IF = torch.as_tensor(modes, device=self.device, dtype=torch.float64)
@@ -659,6 +660,37 @@ class DeformableMirror:
 
         return True
     
+    def set_actuator_misregistration(self, shiftX=0.0, shiftY=0.0, rotation=0.0, radialScaling=1.0):
+        """
+        Exact static misregistration of a DM with analytic (Gaussian, Partition of Unity) influence functions: the actuator coordinates
+        are transformed, x' = s R(rotation) x + (shiftX, shiftY), the Gaussian width is scaled by s, and the influence functions are
+        recomputed on them, so the DM shape is generated already misregistered (no interpolation of the OPD map). Use it instead of misReg.set_params; the OPD-map
+        misregistration (misReg) must stay null. The new shape applies from the next updateDMShape.
+
+        Parameters
+        ----------
+        shiftX, shiftY : float
+            Shift [m] in the DM plane.
+        rotation : float
+            Rotation [deg] around the centre, same sense as misReg (clockwise for a positive angle with x right and y up).
+        Note: the shifts are in metres of the DM grid (step D_fov/(D_px-1)); misReg converts them with telescope.pixelSize = D/resolution,
+        so its shifts are 1/(resolution-1) larger (0.5 % at 200 px).
+        radialScaling : float
+            Magnification (1 = none).
+        """
+        if getattr(self, 'custom_IFs', False):
+            raise NotImplementedError('DeformableMirror::set_actuator_misregistration - only for analytic influence functions.')
+        # Same sense of rotation as the OPD-map misregistration (MisRegistration.apply_misreg, scipy.ndimage.rotate): a positive angle
+        # turns the DM clockwise in the (x right, y up) DM coordinates
+        th = -np.deg2rad(rotation)
+        rot = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]])
+        coords = radialScaling * (self.coordinates[self.validAct] @ rot.T) + np.array([shiftX, shiftY])
+        # A magnification of the DM image scales the influence functions too (their width ~ 1/epsilon), not only the actuator positions:
+        # the shape is then exactly the unmisregistered one evaluated at T^-1(x), including the Partition of Unity normalisation
+        self.influence_functions = self.precomputeInfluenceFunctions(coords, self.high_res_coords, self.epsilon / radialScaling)
+        self.logger.info(f'DeformableMirror::set_actuator_misregistration - shift ({shiftX:.3e}, {shiftY:.3e}) m, rotation {rotation} deg, '
+                         f'scaling {radialScaling}: influence functions recomputed.')
+
     def updateMisreg(self, elapsedTime):
         """
         Update the mis-registration params by the temporal factor.
