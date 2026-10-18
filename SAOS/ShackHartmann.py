@@ -59,7 +59,8 @@ class ShackHartmann:
         src : Source
             Source object (NGS or LGS).
         lightRatio : float
-            Threshold ratio to select valid subapertures based on flux.
+            Fraction of the source photons that reaches the WFS (photon budget). The valid subapertures are selected with
+            validSubapThreshold.
         plate_scale : float
             Plate scale of the WFS in [arcsec/px].
         fieldOfView : float
@@ -81,6 +82,10 @@ class ShackHartmann:
         **kwargs : dict, optional
             Additional keyword arguments.
 
+            validSubapThreshold : float, optional
+                Minimum fraction of the subaperture area inside the pupil to be a valid subaperture. Default 0.5. The partially
+                illuminated subapertures are imaged through their illuminated part only (the field amplitude is the pupil), so the
+                phase outside the pupil is never used.
             fullWellCapacity : int, optional
                 Detector parameter. Full Well Capacity of pixels [e-]. Default, 60ke-
             nBits : int, optional
@@ -193,14 +198,10 @@ class ShackHartmann:
                 
         self.logger.info('ShackHartmann::__init__ - Selecting valid subapertures based on flux considerations..')
 
-        self.valid_subapertures = np.zeros((self.nSubap, self.nSubap)).astype(bool)
-
-        for i in range(self.nSubap):
-            for j in range(self.nSubap):
-                tmp_pupil = np.sum(self.pupil_interpolation_mask[i*self.npix_phase:(i+1)*self.npix_phase, 
-                                                   j*self.npix_phase:(j+1)*self.npix_phase]) / (self.npix_phase**2)
-                if tmp_pupil == 1: # Criteria: there are phase points at every point of the phase
-                    self.valid_subapertures[i, j] = True
+        # Fraction of each subaperture inside the pupil: valid if it reaches validSubapThreshold
+        self.validSubapThreshold = kwargs.get('validSubapThreshold', 0.5)
+        self.subaperture_illumination = self.pupil_interpolation_mask.reshape(self.nSubap, self.npix_phase, self.nSubap, self.npix_phase).mean(axis=(1, 3))
+        self.valid_subapertures = self.subaperture_illumination >= self.validSubapThreshold
 
         self.valid_subapertures_1D = np.reshape(self.valid_subapertures,[self.nSubap**2])
 
@@ -212,6 +213,23 @@ class ShackHartmann:
         self.nValidSubaperture = int(np.sum(self.valid_subapertures))
         
         self.nSignal = 2*self.nValidSubaperture     
+
+        # Field amplitude of every subaperture: the pupil sampled as the phase in get_psf (same interpolations), so a partially
+        # illuminated subaperture is imaged through its illuminated part only, with its fraction of the energy (sum of |amplitude|^2).
+        # It also gives the normalized interpolation of the phase, interp(pupil * phase) / interp(pupil), which keeps the phase of the
+        # edge points free of the zeros outside the pupil
+        self.pupil_torch = torch.from_numpy(telescope.pupil.astype(float)).contiguous().to(self.device)
+        self.subap_amplitude = torch.nn.functional.interpolate(self.split_subapertures(self.pupil_torch).unsqueeze(1),
+                                                               size=(self.npix_lenslet, self.npix_lenslet), mode='bilinear', align_corners=True).squeeze(1).contiguous().float()
+        self.subap_amplitude_inv = torch.where(self.subap_amplitude > 0, 1 / self.subap_amplitude.clamp_min(1e-12), 0.0)
+
+        # Detector pixels of every valid subaperture image (create_full_frame, get_subaps)
+        center_offset = self.guardPx + (self.npix_lenslet // 2) - self.npix_subap//2
+        init_x = center_offset + self.validLenslets_x * (self.guardPx + self.npix_lenslet)
+        init_y = center_offset + self.validLenslets_y * (self.guardPx + self.npix_lenslet)
+        pix = np.arange(self.npix_subap)
+        self.subap_rows = (init_x[:, None] + pix[None, :])[:, :, None]
+        self.subap_cols = (init_y[:, None] + pix[None, :])[:, None, :]
 
         # LGS spot   
         if src.type == 'LGS':
@@ -348,6 +366,49 @@ class ShackHartmann:
     # by the complex phase to obtain the PSF per subaperture, as an array of dimensions (nSubap**2, n_pix_lenslet_init, n_pix_lenslet_init)
     # The subapertures are sorted from left to right, top to bottom.
 
+    def split_subapertures(self, field):
+        """
+        Resample a pupil-plane map to the subaperture grid and split it into subapertures, each one with its border row and column
+        (shared with the neighbour) so that the later interpolation to the subaperture sampling covers the whole subaperture.
+
+        Parameters
+        ----------
+        field : torch.Tensor
+            Pupil-plane map [resolution, resolution] (phase, or the pupil).
+
+        Returns
+        -------
+        torch.Tensor
+            Subaperture maps [nSubap**2, npix_phase+1, npix_phase+1], sorted from left to right, top to bottom.
+        """
+        field_rescaled = torch.nn.functional.interpolate(field.unsqueeze(0).unsqueeze(0), 
+                                                            size=(self.nSubap*self.npix_phase, self.nSubap*self.npix_phase), 
+                                                            mode='bilinear', align_corners=True).squeeze().contiguous()
+
+        H, W = field_rescaled.shape
+
+        # Build row indices
+        row_ids = torch.arange(H)
+        insert_rows = (row_ids % self.npix_phase == 0) & (row_ids < H - 2) & (row_ids > 0) | (row_ids == (H - self.npix_phase -1))
+        extra_rows = row_ids[insert_rows]
+        row_idx = torch.cat([row_ids, extra_rows]).sort().values
+        row_idx[-self.npix_phase-2:-self.npix_phase] = row_idx[-self.npix_phase-2:-self.npix_phase].flip(0)
+
+        # Build column indices
+        col_ids = torch.arange(H)
+        insert_cols = (col_ids % self.npix_phase == 0) & (col_ids < H - 2) & (col_ids > 0) | (col_ids == (H - self.npix_phase -1))
+        extra_cols = col_ids[insert_cols]
+        col_idx = torch.cat([col_ids, extra_cols]).sort().values
+        col_idx[-self.npix_phase-2:-self.npix_phase] = col_idx[-self.npix_phase-2:-self.npix_phase].flip(0)
+
+        # Apply advanced indexing
+        field_reshaped = field_rescaled[row_idx][:, col_idx].view(self.nSubap, self.npix_phase+1, 
+                                                                  self.nSubap, self.npix_phase+1).permute(0, 2, 1, 3).reshape(self.nSubap * self.nSubap, 
+                                                                                                                              self.npix_phase+1, self.npix_phase+1)
+
+
+        return field_reshaped
+
     def get_psf(self, phase, fwhm):
         """
         Get the electromagnetic field per subaperture based on input phase.
@@ -379,42 +440,20 @@ class ShackHartmann:
 
         t0 = time.time()
         # Rescale the phase
-        input_phase_torch = torch.from_numpy(phase).contiguous().detach().to(self.device)
+        input_phase_torch = torch.from_numpy(phase).contiguous().detach().to(self.device) * self.pupil_torch   # no phase outside the pupil
         square_pupil_torch = torch.from_numpy(square_pupil).contiguous().detach().to(self.device)
 
-        phase_rescaled = torch.nn.functional.interpolate(input_phase_torch.unsqueeze(0).unsqueeze(0), 
-                                                            size=(self.nSubap*self.npix_phase, self.nSubap*self.npix_phase), 
-                                                            mode='bilinear', align_corners=True).squeeze().contiguous()
         t1 = time.time()
         # Reshape the subapertures to a grid of subapertures. The sensor can be zeropadded, so the phase is filling the central part of the subaperture
-        phase_reshaped = torch.empty((self.nSubap**2, self.npix_phase+1, self.npix_phase+1), dtype=torch.float32).contiguous()
-
-        H, W = phase_rescaled.shape
-
-        # Build row indices
-        row_ids = torch.arange(H)
-        insert_rows = (row_ids % self.npix_phase == 0) & (row_ids < H - 2) & (row_ids > 0) | (row_ids == (H - self.npix_phase -1))
-        extra_rows = row_ids[insert_rows]
-        row_idx = torch.cat([row_ids, extra_rows]).sort().values
-        row_idx[-self.npix_phase-2:-self.npix_phase] = row_idx[-self.npix_phase-2:-self.npix_phase].flip(0)
-
-        # Build column indices
-        col_ids = torch.arange(H)
-        insert_cols = (col_ids % self.npix_phase == 0) & (col_ids < H - 2) & (col_ids > 0) | (col_ids == (H - self.npix_phase -1))
-        extra_cols = col_ids[insert_cols]
-        col_idx = torch.cat([col_ids, extra_cols]).sort().values
-        col_idx[-self.npix_phase-2:-self.npix_phase] = col_idx[-self.npix_phase-2:-self.npix_phase].flip(0)
-
-        # Apply advanced indexing
-        phase_reshaped = phase_rescaled[row_idx][:, col_idx].view(self.nSubap, self.npix_phase+1, 
-                                                                  self.nSubap, self.npix_phase+1).permute(0, 2, 1, 3).reshape(self.nSubap * self.nSubap, 
-                                                                                                                              self.npix_phase+1, self.npix_phase+1)
-
+        phase_reshaped = self.split_subapertures(input_phase_torch)
 
         t2 = time.time()        
         phase_rescaled_valids = torch.nn.functional.interpolate(phase_reshaped.unsqueeze(1), 
                                                                 size=(self.npix_lenslet, self.npix_lenslet), 
                                                                 mode='bilinear', align_corners=True).squeeze(1).contiguous().float()
+        # Normalized interpolation: the input phase is set to zero outside the pupil, so the interpolation above is
+        # interp(pupil * phase); dividing by interp(pupil) = subap_amplitude keeps only the points inside the pupil (zero amplitude outside)
+        phase_rescaled_valids = phase_rescaled_valids * self.subap_amplitude_inv
         t3 = time.time()
         # Generate an array of phase, filling the valid subapertures  
         rows = torch.where(square_pupil_torch.any(dim=1))[0]
@@ -424,9 +463,8 @@ class ShackHartmann:
         col_start, col_end = cols[0].item(), cols[-1].item() + 1
         # Allocate full tensor
         cube_em = torch.zeros((self.nSubap**2, nFFT, nFFT), dtype=torch.complex64, device=self.device)
-        sub_mask = square_pupil_torch[row_start:row_end, col_start:col_end].float()
-        # Exponential
-        exp_block = torch.polar(sub_mask, phase_rescaled_valids)
+        # Exponential: field of each subaperture, pupil amplitude and phase
+        exp_block = torch.polar(self.subap_amplitude, phase_rescaled_valids)
 
         cube_em[:, row_start:row_end, col_start:col_end] = exp_block
         # Apply light scaling
@@ -435,12 +473,12 @@ class ShackHartmann:
         # Get the PSF
         psf = torch.fft.fft2(cube_em, dim=(-2, -1), norm='forward')  # same as dividing by nFFT²
         t5 = time.time()
-        # Shift zero frequency to center
-        psf = torch.fft.fftshift(psf, dim=(-2, -1))
+        # Crop to desired region of the centred (fftshift) plane, taking its pixels directly
+        crop = torch.remainder(torch.arange(start, end, device=self.device) - nFFT // 2, nFFT)
+        psf = psf[:, crop][:, :, crop]
         # Compute normalized intensity
         psf = torch.sqrt(psf.real**2 + psf.imag **2)**2
-        # Crop to desired region
-        psf = psf[:, start:end, start:end].cpu().numpy()
+        psf = psf.cpu().numpy()
         
         self.logger.debug(f'ShackHartmann::get_psf - Time taken for each step: '
                          f'Rescale input phase: {t1-t0} [s], Reshape into subaps: {t2-t1} [s], Interpolate to npix_lenslet: {t3-t2} [s], '
@@ -464,26 +502,10 @@ class ShackHartmann:
         self.logger.debug('shackHartmann::create_full_frame')
 
         ideal_frame = np.zeros((self.camera_size, self.camera_size), dtype =float)
-        
-        index_valid = 0
-
-        center_offset_x = self.guardPx + (self.npix_lenslet // 2) - self.npix_subap//2
-        center_offset_y = self.guardPx + (self.npix_lenslet // 2) - self.npix_subap//2
 
         subap_offset = (self.npix_lenslet - self.npix_subap) // 2
-        
-        for x in range(self.nSubap):
-            for y in range(self.nSubap):
-                if self.valid_subapertures[x,y]: 
+        ideal_frame[self.subap_rows, self.subap_cols] = subaps[:, subap_offset:subap_offset+self.npix_subap, subap_offset:subap_offset+self.npix_subap]
 
-                    init_x = center_offset_x + x * (self.guardPx + self.npix_lenslet)
-                    init_y = center_offset_y + y * (self.guardPx + self.npix_lenslet)
-
-                    ideal_frame[init_x:init_x+self.npix_subap, 
-                                init_y:init_y+self.npix_subap] = subaps[index_valid, subap_offset:subap_offset+self.npix_subap, subap_offset:subap_offset+self.npix_subap]                         
-                    
-                    index_valid += 1
-        
         return ideal_frame
 
     def get_subaps(self, noisy_frame):
@@ -502,23 +524,7 @@ class ShackHartmann:
         """
         self.logger.debug('shackHartmann::get_subaps')
 
-        index_valid = 0
-
-        center_offset_x = self.guardPx + (self.npix_lenslet // 2) - self.npix_subap//2
-        center_offset_y = self.guardPx + (self.npix_lenslet // 2) - self.npix_subap//2
-
-        subaps = np.zeros((self.nValidSubaperture, self.npix_subap, self.npix_subap))
-        
-        for x in range(self.nSubap):
-            for y in range(self.nSubap):
-                if self.valid_subapertures[x,y]: 
-
-                    init_x = center_offset_x + x * (self.guardPx + self.npix_lenslet)
-                    init_y = center_offset_y + y * (self.guardPx + self.npix_lenslet)
-
-                    subaps[index_valid, :, :] = noisy_frame[init_x:init_x+self.npix_subap, init_y:init_y+self.npix_subap]                         
-                    
-                    index_valid += 1
+        subaps = np.asarray(noisy_frame, dtype=float)[self.subap_rows, self.subap_cols]
 
         return subaps
             
