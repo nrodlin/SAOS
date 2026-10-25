@@ -224,9 +224,9 @@ def ft_sh_phase_screen(atm, N, delta, l0= 1e-10, seed=None):
             + 1j*randomState.normal(size=(3,3)) )
                         * np.sqrt(PSD_phi)*del_f )
         SH = np.zeros((N,N),dtype="complex")
-        # loop over frequencies on this grid
-        for i in range(0,2):
-            for j in range(0,2):
+        # loop over the 3x3 frequencies on this grid (the central one has zero PSD)
+        for i in range(0,3):
+            for j in range(0,3):
 
                 SH += cn[i,j] * np.exp(1j*2*np.pi*(fx[i,j]*x+fy[i,j]*y))
 

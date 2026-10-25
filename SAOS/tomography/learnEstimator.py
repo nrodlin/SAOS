@@ -432,7 +432,16 @@ class LearnEstimator:
               lr=1e-2, max_iters=150, patience=50, min_delta=1e-9,
               lr_patience=20, lr_factor=0.5, optimize_noise=True, initial_noise=1e-2,
               lp_indices=None, wind_delay_frames=10, max_iters_wind=150, lr_wind=1e-1,
-              patience_wind=50):
+              patience_wind=50, estimate_wind=True):
+        """
+        Estimate the atmospheric parameters from open-loop (or pseudo-open-loop) telemetry.
+
+        Phase 1 fits r0, L0, the Cn2 fractions and the noise variance to the instantaneous slope covariance.
+        Phase 2 (only if estimate_wind) fits the wind velocity of every layer to time-delayed covariances, which is
+        what makes the reconstructor predictive. With estimate_wind=False Phase 2 is skipped (no delayed telemetry is
+        loaded), windSpeedX/Y are left as None and build_reconstructor() then computes a non-predictive (L&A)
+        reconstructor.
+        """
         orig_device = self.device
         try:
             return self._learn_internal(
@@ -440,7 +449,7 @@ class LearnEstimator:
                 lr, max_iters, patience, min_delta,
                 lr_patience, lr_factor, optimize_noise, initial_noise,
                 lp_indices, wind_delay_frames, max_iters_wind, lr_wind,
-                patience_wind
+                patience_wind, estimate_wind
             )
         except (torch.OutOfMemoryError, RuntimeError) as e:
             if ("out of memory" in str(e).lower() or isinstance(e, torch.OutOfMemoryError)) and self.device == "cuda":
@@ -456,7 +465,7 @@ class LearnEstimator:
                         lr, max_iters, patience, min_delta,
                         lr_patience, lr_factor, optimize_noise, initial_noise,
                         lp_indices, wind_delay_frames, max_iters_wind, lr_wind,
-                        patience_wind
+                        patience_wind, estimate_wind
                     )
                     return res
                 finally:
@@ -468,7 +477,7 @@ class LearnEstimator:
               lr=1e-2, max_iters=150, patience=50, min_delta=1e-9,
               lr_patience=20, lr_factor=0.5, optimize_noise=True, initial_noise=1e-2,
               lp_indices=None, wind_delay_frames=10, max_iters_wind=150, lr_wind=1e-1,
-              patience_wind=50):
+              patience_wind=50, estimate_wind=True):
         self.logger.info('LearnEstimator::learn - loading initial params.')
         # Extract initial params
         initial_r0 = atm_guess['r0']
@@ -658,6 +667,27 @@ class LearnEstimator:
         if optimize_noise:
             self.logger.info(f"Optimized noise variance per WFS (Phase 1): {self.noise_var}")
 
+        if not estimate_wind:
+            # Non-predictive Learn: no wind, so build_reconstructor() does not shift the target covariance
+            self.windSpeedX = None
+            self.windSpeedY = None
+            self.logger.info("LearnEstimator::learn - Wind estimation disabled: Phase 2 skipped (non-predictive reconstructor).")
+            del raw_r0, raw_L0, raw_cn2, optimizer, scheduler, cov_theo, cov_meas, diff_stack_torch, best_params
+            if optimize_noise:
+                del raw_noise
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            return {
+                'r0': self.r0,
+                'L0': self.L0,
+                'fractionalCn2': self.fractionalCn2,
+                'noise_var': self.noise_var,
+                'windSpeedX': None,
+                'windSpeedY': None
+            }
+
         # Phase 2: Wind Velocity Estimation (Vx, Vy)
         self.logger.info("LearnEstimator::learn - Starting Phase 2: Wind Speed Estimation...")
         
@@ -794,11 +824,12 @@ class LearnEstimator:
         regularization: float, optional
             Diagonal regularization added to C_ss.
         windSpeedX: array-like, optional
-            Wind speed along X for delay compensation. If None, uses self.windSpeedX.
+            Wind speed along X for delay compensation. If None, uses self.windSpeedX. If that is also None (learn() with
+            estimate_wind=False), the reconstructor is non-predictive (L&A).
         windSpeedY: array-like, optional
             Wind speed along Y for delay compensation. If None, uses self.windSpeedY.
         dt: float, optional
-            Time delay in seconds. If None, computes from target LP delay.
+            Time delay in seconds. If None, computes from target LP delay. Ignored without wind speeds.
         chunk_size: int, optional
             Chunk size along the rows for memory-efficient computation.
         device: str or torch.device, optional

@@ -434,6 +434,54 @@ class Controller:
 
         return reconstructor, modal_basis, mask, t_mask, discarded_modes
     
+    def set_tomography_targets(self, im_target_per_dm, joint=True, release_R_tomo=True):
+        """
+        Reconstructor of the tomographic (L&A) control law from the interaction matrices of the DMs seen by the target
+        (virtual) WFSs, and precomputation of the matrices used online.
+
+        Parameters
+        ----------
+        im_target_per_dm : list
+            One array per DM, [N_target_slopes, n_modes_i], rows in the order of the target slopes of R_tomo.
+        joint : bool, optional
+            True: one Tikhonov reconstructor of the stacked matrix [D_1 ... D_n], so that the DMs share the fit of the
+            target slopes (L&A control matrix C_z = (D_z^T D_z + alpha)^-1 D_z^T, regularisation beta_i * s_max(D_i)^2 per
+            DM as in the joint tikhonov reconstructor). False: one reconstructor per DM (every DM fits the whole target).
+        release_R_tomo : bool, optional
+            Free R_tomo once the products are computed (it is not used online any more).
+
+        The tomography control law of computeControlAction() needs modal_error_i = R_i (R_tomo s_pol - sum_j D_j c_j),
+        which is evaluated as M1_i s_pol - M2_i c with M1_i = R_i R_tomo [n_modes_i x N_meas_slopes] and
+        M2_i = R_i [D_1 ... D_n]: two small products per iteration instead of R_tomo [N_target x N_meas] on the CPU.
+        """
+        if not hasattr(self, 'R_tomo') or self.R_tomo is None:
+            raise ValueError('Controller::set_tomography_targets - R_tomo is not loaded.')
+        nDMs = len(im_target_per_dm)
+        D = [torch.as_tensor(np.asarray(im), dtype=torch.float64, device='cpu') for im in im_target_per_dm]
+        n_modes = [d.shape[1] for d in D]
+        D_all = torch.cat(D, dim=1)
+        if joint:
+            gamma = []
+            for i in range(nDMs):
+                s_max = torch.linalg.svdvals(D[i])[0]
+                gamma.append(self.beta[i] * s_max ** 2 * torch.ones(n_modes[i], dtype=torch.float64))
+            R_all = torch.linalg.solve(D_all.T @ D_all + torch.diag(torch.cat(gamma)), D_all.T)
+            R = list(torch.split(R_all, n_modes, dim=0))
+        else:
+            R = []
+            for i in range(nDMs):
+                U, S, Vh = torch.linalg.svd(D[i], full_matrices=False)
+                alfa = self.beta[i] * torch.max(S) ** 2
+                R.append(Vh.T @ torch.diag(S / (S ** 2 + alfa)) @ U.T)
+        self.reconstructor = [r.to(self.device) for r in R]
+        self.im_target_per_dm = [d.to(self.device) for d in D]
+        self.tomo_M1 = [(r @ self.R_tomo).to(self.device) for r in R]
+        self.tomo_M2 = [(r @ D_all).to(self.device) for r in R]
+        if release_R_tomo:
+            self.R_tomo = None
+        self.logger.info(f"Controller::set_tomography_targets - {'joint' if joint else 'per-DM'} target reconstructor, "
+                         f"online matrices {[tuple(m.shape) for m in self.tomo_M1]}")
+
     def initializeController(self, controllerType, reconstructor):
         """
         Initialize the control state (history buffers) based on the controller type.
@@ -640,31 +688,41 @@ class Controller:
             else:
                 global_slopes = global_res
             
-            # Project measured slopes to target slopes using R_tomo
-            # target_slopes will have shape [N_target_slopes, 1]
-            if self.R_tomo.device != global_slopes.device:
-                target_slopes = (self.R_tomo @ global_slopes.to(self.R_tomo.device)).to(global_slopes.device)
+            if getattr(self, 'tomo_M1', None) is not None:
+                # Precomputed by set_tomography_targets(): R_i (R_tomo s_pol - sum_j D_j c_j) = M1_i s_pol - M2_i c
+                c_prev = torch.cat([self.command_history[-1][i] for i in range(len(self.reconstructor))], dim=0)
+                tomo_error = [self.tomo_M1[i] @ global_slopes - self.tomo_M2[i] @ c_prev for i in range(len(self.reconstructor))]
             else:
-                target_slopes = self.R_tomo @ global_slopes
+                # Project measured slopes to target slopes using R_tomo
+                # target_slopes will have shape [N_target_slopes, 1]
+                if self.R_tomo.device != global_slopes.device:
+                    target_slopes = (self.R_tomo @ global_slopes.to(self.R_tomo.device)).to(global_slopes.device)
+                else:
+                    target_slopes = self.R_tomo @ global_slopes
 
-            # Compute target residual slopes (how much of the target turbulence is left uncorrected by the DMs)
-            if hasattr(self, 'im_target_per_dm'):
-                target_dm_pred = torch.zeros_like(target_slopes)
-                for i in range(len(self.reconstructor)):
-                    target_dm_pred += self.im_target_per_dm[i] @ self.command_history[-1][i]
-                target_res = target_slopes - target_dm_pred
-            else:
-                # Fallback if target IMs were not stored (though they should be)
-                target_res = target_slopes
-                
+                # Compute target residual slopes (how much of the target turbulence is left uncorrected by the DMs)
+                if hasattr(self, 'im_target_per_dm'):
+                    target_dm_pred = torch.zeros_like(target_slopes)
+                    for i in range(len(self.reconstructor)):
+                        target_dm_pred += self.im_target_per_dm[i] @ self.command_history[-1][i]
+                    target_res = target_slopes - target_dm_pred
+                else:
+                    # Without the target IMs the open-loop target slopes would be integrated: the leaky law then
+                    # converges to gain/(1-decay) times the required command
+                    if not getattr(self, '_warned_no_target_im', False):
+                        self.logger.warning('Controller - tomography without target IMs: integrating open-loop target slopes.')
+                        self._warned_no_target_im = True
+                    target_res = target_slopes
+                tomo_error = [self.reconstructor[i] @ target_res for i in range(len(self.reconstructor))]
+
             dm_cmd = []
             for i in range(len(self.reconstructor)):
                 n_modes = self.reconstructor[i].shape[0]
-                
+
                 # We apply the integral controller directly on the target residual,
                 # so the DMs cooperate to drive the target residual to zero!
-                modal_error.append(self.reconstructor[i] @ target_res)
-                
+                modal_error.append(tomo_error[i])
+
                 if self.controllerType == 'leaky':
                     modal_cmd.append(self.gain[i]*modal_error[-1] + self.decay[i] * self.command_previous[i])
                 elif self.controllerType == 'forwardPI':

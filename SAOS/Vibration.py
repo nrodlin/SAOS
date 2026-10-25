@@ -48,10 +48,11 @@ class Vibration:
         self.x_mode = np.tile(x, (x.shape[0],1)) * telescope.pupil
         self.y_mode = self.x_mode.T
         
-        # Compute modal amplitude (um)
+        # Compute modal amplitude [m]: the modes span [-1, 1] over the pupil (D/2 in metres), so a tilt of theta [rad]
+        # on sky is an OPD of theta * D/2 at the edge
 
-        self.x_vibrations_stroke = telescope.D * (self.x_vibrations_arcsec / 206265)
-        self.y_vibrations_stroke = telescope.D * (self.y_vibrations_arcsec / 206265)
+        self.x_vibrations_stroke = telescope.D / 2 * (self.x_vibrations_arcsec / 206265)
+        self.y_vibrations_stroke = telescope.D / 2 * (self.y_vibrations_arcsec / 206265)
 
 
     def load(self, filename): 
