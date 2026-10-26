@@ -1,0 +1,16 @@
+# Tolerances of tests/test_modal_basis.py. The bases are deterministic: tolerances are numerical, not statistical.
+basis:
+  rank_rel_sv: 1.0e-10        # singular values above 1e-10 s_max count for the rank (double precision, QR-orthogonalised bases)
+  piston_fraction: 1.0e-10    # |mean| / rms per mode; piston-free modes measure ~1e-16
+  gram_offdiag: 1.0e-10       # DH/KL off-diagonal Gram ~3e-16 (2026-10-26)
+zernike:
+  shape_correlation: 0.999    # correlation with the analytic shape on 97 actuators; measured 1 - 1e-15 for exact polynomials
+  radial_abs: 1.0e-6          # |R| <= 1; Jacobi evaluator ~1e-13 at n = 49, naive sum 2e-6 at n = 30, 1e-2 at n = 40, 59 at n = 50
+  radial_abs_low_orders: 1.0e-5  # n <= 30 (DMs up to ~22x22 actuators): naive sum 1.8e-6 at n = 30 (cancellation starts)
+  basis_column_abs: 0.01      # modes normalised to max |Z| = 1
+kl:
+  span: 1.0e-8              # KL modes inside the Zernike span (float64 QR / eigh)
+  eig_rel: 1.0e-8           # variance of the SAOS modes vs independent generalised eigenvalues; covariance diagonality
+  subspace: 1.0e-6          # spectral norm of the projector difference per eigenvalue cluster (cluster gaps > 1e-6 relative)
+dh:
+  subspace: 1.0e-8          # spectral norm of the projector difference, independent Bessel functions (float64)

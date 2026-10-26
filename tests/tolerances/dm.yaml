@@ -1,0 +1,18 @@
+# Tolerances of tests/test_dm.py (deterministic: numerical tolerances). Measured 2026-10-26 on 64 px, 11x11 DM.
+linearity:
+  rel: 1.0e-10              # linear algebra in float64: measured <= 1e-13
+model:
+  rel: 1.0e-10              # SAOS vs the independent re-implementation of the documented model (float64; SAOS adds 1e-12 to the normalisation)
+fitting:                    # mechCoupling 0.6 (default), 11x11 actuators over 4 m
+  ratio_atol: 1.0e-8        # SAOS residual/target ratio minus the independent-model ratio (numerical precision)
+geometry:
+  metapupil_rel: 1.0e-6     # 206624 vs 206265 gives -1.7e-3 relative on the field term
+  grid_step_rel: 1.0e-3     # EST 20 km: -4.0e-3; ground D/N vs D/(N-1): -1.6e-2 at N = 64
+dynamics:
+  rel: 1.0e-12              # torch float64 vs scipy dlsim
+footprint:
+  rel: 0.01                 # relative L2 error of the footprint-induced OPD change; an ideal fractional-shift (bilinear) implementation gives 7e-4 (2026-10-26)
+misregistration:
+  exact: 1.0e-10            # independent model of the documented transformation; numerical precision
+  centroid_m: 8.0e-3        # 2 % of the pitch: bias of the half-maximum-region centroid estimator (independent model: up to 6.4 mm)
+  convention: 1.0e-9        # integer shifts and +-90 deg: map interpolation exact

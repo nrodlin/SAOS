@@ -1,0 +1,11 @@
+[Unit]
+Description=SAOS nightly validation (tier nightly on origin/develop)
+
+[Service]
+Type=oneshot
+# Interpreter of the pyenv environment with SAOS dependencies and pytest
+Environment=SAOS_CI_PYTHON=%h/.pyenv/versions/saos/bin/python
+# Clone used to fetch origin/develop (edit if the repository lives elsewhere)
+Environment=SAOS_CI_REPO=%h/code/SAOS
+ExecStart=%h/code/SAOS/ci/nightly.sh
+Nice=10

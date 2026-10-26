@@ -1,0 +1,8 @@
+# Tolerances of tests/test_savepoint.py.
+# Calibrated on 2026-10-26 (develop a243eb4, CPU), fixed seeds. Map/slope statistics and the HDF5 round trip are exact
+# (rtol 1e-12 or equality, written in the tests).
+strehl:
+  known_phase_rtol: 0.03    # peak-pixel SR vs |<exp(i phi)>|^2, high-order phase without tilt, Nyquist frames
+  tilt_rtol: 0.02           # SR of a shifted perfect PSF must stay 1
+  convention_rtol: 0.002    # interpolation grid of the sub-pixel peak (1/32 px) vs the 16x oversampled reference peak
+frame_atol: 1.0e-6          # saved science frame vs independent FFT frame, max abs diff / peak (n_pix = res: same computation, float precision)

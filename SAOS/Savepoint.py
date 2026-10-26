@@ -20,6 +20,39 @@ Savepoint Module
 This module contains the `Savepoint` class, used for to save the data of adaptive optics simulations.
 """
 
+
+def peak_subpixel(img, half_width=1.0, step=1.0 / 32):
+    """
+    Peak value of a band-limited image: maximum of its Fourier (sinc) interpolation on a grid of `step` pixels within
+    +-half_width pixels of the brightest pixel. Exact for images sampled at Nyquist or better (diffraction-limited PSFs
+    with lambda/D >= 2 px); for undersampled images it is an interpolation estimate.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        2D image.
+    half_width : float
+        Half size of the search region around the brightest pixel [px].
+    step : float
+        Sampling of the search grid [px].
+
+    Returns
+    -------
+    float
+        Interpolated peak value (same units as img).
+    """
+    img = np.asarray(img, dtype=float)
+    n0, n1 = img.shape
+    r0, c0 = np.unravel_index(np.argmax(img), img.shape)
+    F = np.fft.fft2(img)
+    off = np.arange(-half_width, half_width + step / 2, step)
+    # Local inverse DFT: I(y, x) = 1/(n0 n1) sum_k,l F[k, l] exp(2 pi i (k y / n0 + l x / n1)), k, l integer frequencies
+    Ey = np.exp(2j * np.pi * np.outer(r0 + off, np.fft.fftfreq(n0) * n0) / n0)
+    Ex = np.exp(2j * np.pi * np.outer(np.fft.fftfreq(n1) * n1, c0 + off) / n1)
+    local = np.real(Ey @ F @ Ex) / (n0 * n1)
+    return float(max(local.max(), img[r0, c0]))
+
+
 class Savepoint:
     def __init__(self, file_path=None, atm=0, atm_per_dir=0, dm=0, dm_per_dir=0, slopes=0, error= 0, wfs=0, wfs_frame=0, sci=0, sci_frame=0, 
                  only_metrics=False, only_long_exp=False, logger=None):
@@ -334,7 +367,16 @@ class Savepoint:
         lp : LightPath
             LightPath object containing simulation modules, required to get the ideal PSF
             and compute the Strehl ratio.
-        
+
+        Notes
+        -----
+        Strehl ratio of point-source frames ('strehl'): measured SR, as an instrument would estimate it,
+        SR = (peak / energy in the field) / (ideal peak / ideal energy in the field). The normalisation uses the energy
+        recorded inside the camera field (the observational convention), so with small fields the aberrated halo that
+        leaves the field raises the SR slightly. The peaks are the maxima of the band-limited (Fourier) interpolation of
+        the frames (see peak_subpixel), so the SR does not depend on where the PSF peak falls with respect to the pixel
+        grid; this is exact for frames sampled at Nyquist or better.
+
         Returns
         -------
         dict
@@ -416,11 +458,13 @@ class Savepoint:
             else:
                  ideal_psf = lp.sci.fake_src_dict[str(int(lp.src.wavelength*1e9))]
                  
-                 if np.sum(data) == 0:
+                 frame = np.squeeze(np.asarray(data, dtype=float))
+                 if np.sum(frame) == 0:
                      i_peak_norm = 0
                  else:
-                     i_peak_norm = np.max(data) / np.sum(data)
-                 i_peak_ideal_norm = np.max(ideal_psf) / np.sum(ideal_psf)
+                     i_peak_norm = peak_subpixel(frame) / np.sum(frame)
+                 ideal = np.squeeze(np.asarray(ideal_psf, dtype=float))
+                 i_peak_ideal_norm = peak_subpixel(ideal) / np.sum(ideal)
 
                  dict_stats['strehl'] = np.array([i_peak_norm / i_peak_ideal_norm ])
 

@@ -169,8 +169,40 @@ class InteractionMatrixHandler:
             self.modal_basis.append(modal_basis_dict.copy())
             for j in range(len(tmp)):
                 self.modal_basis[-1][self.modal_list[j]] = tmp[j]
+                self.check_basis_rank(tmp[j], self.modal_list[j], i)
 
         return True
+
+    def check_basis_rank(self, basis, name, dm_index, rtol=1e-8):
+        """
+        Warn when a modal basis is numerically rank deficient (linearly dependent modes reduce the degrees of freedom
+        that the interaction matrix and the reconstructor can control).
+
+        Parameters
+        ----------
+        basis : np.ndarray
+            Modal basis, one mode per column.
+        name : str
+            Name of the basis (for the message).
+        dm_index : int
+            Index of the DM in the scanned list (for the message).
+        rtol : float
+            Singular values below rtol * s_max count as zero.
+
+        Returns
+        -------
+        int
+            Numerical rank of the basis.
+        """
+        if basis is None:
+            return 0
+        B = np.asarray(basis, dtype=float)
+        s = np.linalg.svd(B, compute_uv=False)
+        rank = int(np.sum(s > rtol * s[0])) if s.size and s[0] > 0 else 0
+        if rank < B.shape[1]:
+            self.logger.warning(f'InteractionMatrixHandler::check_basis_rank - Basis {name} of DM {dm_index} has rank {rank} '
+                                f'for {B.shape[1]} modes: {B.shape[1] - rank} modes are linearly dependent.')
+        return rank
 
     # This method measures the interaction matrix according to the im_boolean_matrix generated during initialization.
     # After measuring the IM, computes the reconstruction matrix as well using pseudo-inversion. 

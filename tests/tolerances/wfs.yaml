@@ -1,0 +1,27 @@
+# Tolerances of tests/test_wfs.py (ShackHartmann, point source, 6x6 subapertures, 2 px per lambda/d unless stated).
+# Policy: tolerances cover only the numerical precision of the independent reference (convergence shown by
+# test_reference_converged) or estimator statistics (~3.5 sigma); they never absorb a measured SAOS discrepancy.
+tilt_axes:
+  cross_max: 1.0e-3     # |cross slope| / direct slope; float32 FFT precision
+  isotropy: 1.0e-4      # x vs y response (same code path); float32 precision
+  uniformity: 1.0e-3    # std/mean of the slopes of a pure tilt, square pupil; float32 precision
+  angle_deg: 0.1        # slope angle of a 30 deg tilt
+scale_atol: 0.01        # slope / ideal centroid (N = 15 and 30 cells across the subaperture): reference sampled with N cells differs from the continuum by 0.7 % (N = 15) / 0.2 % (N = 31) at the largest shift
+absolute:
+  rtol: 5.0e-3          # absolute slopes (31 px window, N = 31): relative precision; midpoint sampling of the phase with N = 31 cells differs from the continuum by <= 0.2 % (test_reference_converged)
+  atol: 1.0e-3          # px, float32 FFT / centroid precision
+geometry:
+  offset_atol: 0.05     # px, subaperture centre offset recovered from defocus (fit precision of the linear regime)
+  pitch_atol: 0.05      # px, residual of the affine fit of the defocus slopes against the pupil-grid centres
+centring_atol: 0.05     # zero-tilt spot CoG vs window centre [px]
+symmetry:
+  asym_max: 0.005       # odd symmetry with all pixels, odd window
+  continuity_atol: 0.002  # gain at 0.002 px vs 0.05 px, all pixels
+  brightest_atol: 0.02  # same with use_brightest=50 (tie-break discontinuity)
+quadratic:
+  rel_max: 2.0e-3       # identities between defocus/astigmatism slopes, relative to the largest slope (c = 5e-4, float32)
+fwhm_atol: 0.02         # spot FWHM / 0.886 lambda/d (band-limited interpolation of the sampled sinc^2)
+photon_noise:
+  ratio_atol: 0.053     # var/(M2/N): 120 frames x 36 subap x 2 axes = 8640 samples -> sigma(var)/var = sqrt(2/8640) = 1.5 %; 3.5 sigma
+reference_ratio_max: 0.1  # rms(noisy - clean reference) / single-frame noise rms
+energy_atol: 2.0e-3     # energy / expected transmitted energy: float32 FFT and exact Fourier-sum reference

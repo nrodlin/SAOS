@@ -355,10 +355,14 @@ class ExtendedSource(Source):
                 dirx_c = (subDir_size/2) + dirX * (subDir_size/2) - (self.fov+self.patch_padding)/2
                 diry_c = (subDir_size/2) + dirY * (subDir_size/2) - (self.fov+self.patch_padding)/2
 
-                # Now, change to polar, moving the origin towards the telescope axis
-
-                subDir_loc[0, dirX, dirY] = np.sqrt((dirx_c+tel_x)**2 + (diry_c+tel_y)**2)
-                subDir_loc[1, dirX, dirY] = np.rad2deg(np.arctan2((diry_c+tel_y), (dirx_c+tel_x)))
+                # Now, change to polar, moving the origin towards the telescope axis.
+                # dirX indexes the image rows and dirY the columns (the patch is cut at [row, col] and ScienceCam places it
+                # back at the same [row, col]). The sky frame of the atmosphere and the DMs is x = column, y = row, so the
+                # sky offset of this patch is x = diry_c (column) and y = dirx_c (row).
+                sky_x = diry_c + tel_x
+                sky_y = dirx_c + tel_y
+                subDir_loc[0, dirX, dirY] = np.sqrt(sky_x**2 + sky_y**2)
+                subDir_loc[1, dirX, dirY] = np.rad2deg(np.arctan2(sky_y, sky_x))
                 subDir_loc[2, dirX, dirY] = subDir_size
         
         return subDir_loc, subDir_imgs

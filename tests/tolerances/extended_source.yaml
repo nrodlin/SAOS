@@ -1,0 +1,36 @@
+# Tolerances of tests/test_extended_source.py.
+# Setup: EST pupil 4.149 m / 1.3 m obstruction, telescope resolution 450 px, ExtendedSource 3x3 sub-directions (FoV 9.975",
+# padding 5", margin 4"), ScienceCam 0.0128"/px (patch PSFs computed on 898 px), windows of 79 px (1.0" half-width),
+# single frozen layer with r0 0.6 m, L0 25 m at 0 m (B3) and 15 km (B4). Calibrated on 2026-10-26 (develop, GPU).
+# Differences are max |window - reference| / peak of the reference, windows normalised to unit sum.
+seed: 11                          # atmosphere realisation of the module fixtures
+
+b1:                               # no atmosphere, deterministic
+  pos_atol_px: 0.1                # specified by the owner; measured 0.025 (Fourier-upsampled peak estimator)
+  fwhm_rtol: 0.005                # measured -0.10% (450 px pupil resampled to 898 px, SCI-SCALE ~ -0.1%)
+  psf_atol: 0.006                 # measured 0.08-0.23% (pupil pixelation + bilinear resampling); 2.6x margin
+b2:
+  offset_atol_px: 0.09            # precision of the offset estimator on exact sub-pixel windows of the same screens (8 seeds, max over 9 directions):
+                                  # mean 0.0557, sd 0.0095 (max 0.072) + 3.5 sd = 0.089 px
+b3:                               # ground layer, 8 seeds: max over the 18 stars per seed
+  ref_atol: 0.012                 # extended vs independent PSF of the screen: 0.0059-0.0091 (mean 0.0082, sd 0.0012) + 3.5 sd
+  ngs_atol: 0.008                 # extended vs NGS: 0.0030-0.0065 (mean 0.0040, sd 0.0011) + 3.5 sd (898 vs 779 px resampling)
+b4:                               # layer at 15 km, expected from the screen with exact sub-pixel offsets; reference alone
+  orientation_min_sep: 0.05      # discriminating power of the orientation test (selection, not a tolerance): stars where E and E_t differ by > 5% of the peak
+  ref_atol: 0.0011                # numerical precision of the reference: expected star windows from the 1024 px FFT / 4x4 pupil
+                                  # sub-pixels / bilinear phase on the 450 px grid vs the 2048 px FFT / 8x8 / cubic-sampled phase,
+                                  # max over the 18 stars, 8 seeds: mean 6.8e-4, sd 1.1e-4 (max 9.0e-4) + 3.5 sd = 1.06e-3
+b4_growth:                        # 8 seeds
+  floor: 0.014                    # ext vs NGS at patch centres (zero anisoplanatism): 0.0045-0.0091 (mean 0.0069, sd 0.0020) + 3.5 sd
+  ratio_min: 3.0                  # mean off-centre / mean centre difference: 6.6-17 measured; physical expectation >> 1
+  spearman_min: 0.70              # Spearman(difference, sigma^2): 0.757-0.840 (mean 0.808, sd 0.028) - 3.5 sd
+b5_uniform:
+  floor: 1.0e-10                  # float64 FFT floor; measured 2e-16 (std/mean) and 2e-15 (max deviation)
+b5_mosaic:
+  texture_seed: 3
+  max_atol: 0.005                 # measured 0.0021 (reference truncated at +-300 px, circular wrap of the 898 px patches)
+  rms_atol: 0.0015                # measured 0.0006
+b5_flux:
+  flux_rtol: 1.0e-9               # same formula with the same irradiance table; rounding of the sub-direction fluxes
+  frame_atol: 0.006               # measured 0.0025 of the peak (wings beyond +-300 px of the reference, resampling)
+  star_flux_rtol: 0.002           # flux within 1" of each star vs independent: measured < 1e-4

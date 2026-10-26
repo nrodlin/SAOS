@@ -47,7 +47,8 @@ def get_zernikes(coordinates, validActs, nModes, Noffset):
     theta = np.arctan2(coordinates[:,1], coordinates[:,0])
 
     for j in range(nModes):
-        Z, _ = Z_machine.Z_nm(j + Noffset, rho, theta, True, 'Standard')
+        # Jacobi form of the radial polynomial: the explicit factorial sum ('Standard') loses all precision above n ~ 40
+        Z, _ = Z_machine.Z_nm(j + Noffset, rho, theta, True, 'Jacobi')
         Z[~validActs] = 0.0
         
         # Remove piston
@@ -334,8 +335,9 @@ class ZernikeNaive(object):
         :param rho: radial coordinate (ideally it should come normalized to 1)
         :param theta: azimuth coordinate
         :param normalize_noll: True {Applies Noll coefficient}, False {Does nothing}
-        :param mode: whether to use 'Standard' (naive Zernike formula),
-                'Jacobi' (Jacobi-based recurrence) or 'ChongKintner' (Zernike-based recurrence)
+        :param mode: whether to use 'Standard' (naive Zernike formula, explicit factorial sum: catastrophic cancellation,
+                error ~1% at n = 40 and unusable above), 'Jacobi' (Jacobi-based recurrence, stable for any n, recommended)
+                or 'ChongKintner' (Zernike-based recurrence)
         """
         n, m = self.zernIndex(j)
 
@@ -418,7 +420,7 @@ class ZernikeNaive(object):
 
         return Z_series
 
-    def __call__(self, coef, rho, theta, normalize_noll=False, mode='Standard', print_option=None):
+    def __call__(self, coef, rho, theta, normalize_noll=False, mode='Jacobi', print_option=None):
         self.N_zern = coef.shape[0]
         # Compute the radial index 'n' needed to have at least N_zern
         self.n = get_limit_index(self.N_zern)

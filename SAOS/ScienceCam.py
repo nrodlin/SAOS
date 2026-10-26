@@ -152,6 +152,7 @@ class ScienceCam:
                             **camera_kwargs)
         
         self.fake_src_dict = {}
+        self._mft_cache = {}       # MFT kernels per (lambda/D in px, image size, pupil size)
 
     def get_frame(self, src, phase):
         """
@@ -293,66 +294,67 @@ class ScienceCam:
 
     def compute_psf(self, phase, fwhm, nPix=None):
         """
-        Compute the PSF from a given phase map using FFT.
+        Compute the PSF from a phase map with a matrix Fourier transform (MFT) evaluated directly at the camera pixels.
+
+        The pupil field P exp(i phase) is used on the native telescope grid (no resampling of the phase, which would
+        low-pass filter it and bias the Strehl ratio upwards). Pixel k of the image is at the angle
+        (k - nPix//2) * plate_scale, exactly, for any plate scale. Sign and orientation are those of an FFT: a phase that
+        grows along the columns moves the PSF towards larger column indices. The PSF is normalised so that its energy over
+        the whole image plane is 1 (Parseval); the returned crop of nPix x nPix pixels sums to the fraction of the energy
+        inside the field.
 
         Parameters
         ----------
         phase : np.ndarray
-            Phase input in radians.
+            Phase on the telescope pupil grid, in radians at the wavelength of the source.
         fwhm : float
-            Full width at half maximum in arcsec.
+            lambda/D expressed in camera pixels (lambda / D / plate_scale). Must be >= 1 (Nyquist: >= 2).
         nPix : int, optional
-            Image size in pixels. If None, uses camera's resolution.
+            Image size in pixels. If None, uses the camera size.
 
         Returns
         -------
         torch.Tensor
-            Normalized PSF.
+            PSF of nPix x nPix pixels.
         """
         if nPix is None:
             nPix = self.nPix
-        # Compute FFT image size
         if fwhm < 1:
             raise ValueError('FWHM must be greater than 2 to guarantee enough spatial sampling.')
-        nFFT = np.round(fwhm * nPix).astype(int)
 
-        # Rescaled phase and pupil
-        phase_torch = torch.from_numpy(phase).contiguous().to(self.device)
-        pupil_torch = torch.from_numpy(self.pupil).contiguous().to(self.device)
+        n = self.pupil.shape[0]
+        A = self._mft_kernel(fwhm, nPix, n)
+        phase_torch = torch.as_tensor(phase, dtype=torch.float64, device=self.device)
+        pupil_torch = torch.as_tensor(self.pupil, dtype=torch.float64, device=self.device)
+        field = torch.polar(pupil_torch, phase_torch)
 
-        phase_rescaled = torch.nn.functional.interpolate(phase_torch.unsqueeze(0).unsqueeze(0), size=(nPix, nPix), 
-                                                         mode='bilinear', align_corners=True).squeeze().contiguous()
-        pupil_rescaled = torch.nn.functional.interpolate(pupil_torch.unsqueeze(0).unsqueeze(0), size=(nPix, nPix), 
-                                                         mode='bilinear', align_corners=True).squeeze().contiguous()
-        # Fill Phase image, zeropadded to get to the dimensions of nFFT
-        # Define pupil
-        start = (nFFT - nPix) // 2
-        end = start + nPix
+        # E[k, l] = sum_{m, q} A[k, m] field[m, q] A[l, q]
+        E = A @ field @ A.transpose(0, 1)
+        psf = E.real ** 2 + E.imag ** 2
 
-        # Phase torch
-        exp_phase = torch.zeros((nFFT, nFFT), dtype=torch.complex128, device=self.device).contiguous()
-
-        exp_phase[start:end, start:end] = torch.polar(pupil_rescaled, phase_rescaled)
-
-        # Compute PSF
-        psf = torch.fft.fft2(exp_phase, dim=(0, 1), norm='backward').contiguous()  # same as dividing by nFFT²
-
-        # Shift zero frequency to center
-        psf = torch.fft.fftshift(psf, dim=(0, 1))
-
-        # Compute normalized intensity
-        psf = torch.sqrt(psf.real**2 + psf.imag**2)**2
-
-        # Normalize energy
-        norma = torch.sum(psf)
-        
+        # Energy over the whole image plane (Parseval): M^2 sum |field|^2, with M = lambda / (d plate_scale) = fwhm * n
+        norma = (fwhm * n) ** 2 * torch.sum(pupil_torch ** 2)
         if norma > 0:
             psf /= norma
         else:
             self.logger.warning('ScienceCam::compute_psf - Could not normalize PSF.')
 
-        return psf[start:end, start:end].contiguous()  # Crop the PSF to the original size
-    
+        return psf.contiguous()
+
+    def _mft_kernel(self, fwhm, nPix, n):
+        """
+        MFT matrix A[k, m] = exp(-2 pi i u_k x_m) with x_m = (m - (n-1)/2) (pupil samples centred on the pupil) and
+        u_k = (k - nPix//2) / (fwhm n) (cycles per pupil sample at the angle of image pixel k). Cached per (fwhm, nPix, n).
+        """
+        key = (round(float(fwhm), 12), int(nPix), int(n))
+        A = self._mft_cache.get(key)
+        if A is None:
+            x = torch.arange(n, dtype=torch.float64, device=self.device) - (n - 1) / 2
+            u = (torch.arange(nPix, dtype=torch.float64, device=self.device) - nPix // 2) / (fwhm * n)
+            A = torch.exp(-2j * np.pi * torch.outer(u, x))
+            self._mft_cache[key] = A
+        return A
+
     def compute_image(self, sci_object, coherence):
         """
         Compute the convolved image from an object and a PSF.
@@ -362,7 +364,7 @@ class ScienceCam:
         sci_object : np.ndarray
             Intensity map of the object.
         coherence : torch.Tensor
-            PSF to convolve with the object.
+            PSF to convolve with the object, same size, centred at pixel (N//2, N//2) as returned by compute_psf.
 
         Returns
         -------
@@ -374,10 +376,12 @@ class ScienceCam:
         # Compute FFT2
 
         object_fft    = torch.fft.fft2(object_torch, norm='backward', dim=(0,1))
-        coherence_fft = torch.fft.fft2(coherence, norm='backward', dim=(0,1))
+        # The PSF centre (pixel N//2, see compute_psf) is moved to the origin, so that the circular convolution does not shift
+        # the object, for odd and even N
+        coherence_fft = torch.fft.fft2(torch.fft.ifftshift(coherence, dim=(0,1)), norm='backward', dim=(0,1))
 
         # Convolute
-        image_complex = torch.fft.fftshift(torch.fft.ifft2(object_fft*coherence_fft, norm='forward', dim=(0,1)), dim=(0,1))
+        image_complex = torch.fft.ifft2(object_fft*coherence_fft, norm='forward', dim=(0,1))
         image = torch.sqrt(image_complex.real**2 + image_complex.imag**2)
 
         # Normalize energy

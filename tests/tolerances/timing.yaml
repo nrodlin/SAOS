@@ -1,0 +1,6 @@
+# Tolerances of tests/test_timing.py (integer frame counts: exact).
+latency:
+  zero_atol: 0.0            # response before the impulse arrives: exactly zero (baseline subtracted)
+  signal_min: 1.0e-12       # response after arrival must exceed this (command units, m)
+  model_rel: 1.0e-9         # DM OPD vs independent DM model of the same command (float64)
+  gain_atol: 0.05           # reference approximation: the gain statement ignores the edge droop of the Gaussian-actuator tilt (edge-annulus fit error 6.5 %, test_dm); measured 0.018

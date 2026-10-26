@@ -1,0 +1,20 @@
+# Tolerances of tests/test_perturbations.py (provisional values, calibrated 2026-10-26; see each entry).
+vibration:
+  shift_rtol: 0.005             # peak estimator (16x Fourier upsampling + parabola) on 1-2 px shifts; the file angle must be reproduced x1.00
+  shift_atol_px: 0.01           # absolute floor of the same estimator (a zero shift is exactly zero)
+  psd_rtol: 0.01                # band-integrated PSD of the camera peak series / file PSD (estimator error of a linear map)
+  index_rtol: 1.0e-9            # float64 arithmetic: which file sample is injected (scale calibrated at iteration 0)
+localseeing:
+  exact: 0.0                    # the OPD is copied: bit equality expected
+  resize_rtol: 1.0e-6           # 2x down-sampling by bilinear interpolation = 2x2 mean; cv2 float32 arithmetic inside
+spider:
+  sigma_mult: 3.5               # tolerance = 3.5 sigma of the independent lattice count over random sub-pixel offsets
+  n_lattice: 64                 # sub-pixel offsets used to measure sigma
+  angle_deg: 1.0                # PCA axis of a rasterised arm (measured on the independent mask: < 0.2 deg), margin for the grid
+ncpa:
+  float32_rtol: 1.0e-6          # the NCPA buffer is float32 (NCPA.py:28): relative to the maximum
+  resize_rtol: 1.0e-6
+  shift_rtol: 0.005             # same estimator as vibration.shift_rtol
+  exact: 0.0
+logging:
+  exit_timeout_s: 10            # a process that raised with logger=None must exit within this time

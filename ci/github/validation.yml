@@ -1,0 +1,42 @@
+# Template for a self-hosted GitHub Actions runner (option A in ci/README.md). Copy to .github/workflows/validation.yml
+# only after registering a runner with labels `saos` (and `gpu` for the nightly tier) on your machine; otherwise the
+# jobs stay queued. The repository is public: never trigger on pull_request / pull_request_target, so that code
+# from forks never runs on the runner.
+name: validation
+on:
+  push:
+    branches: [develop, master]
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: 'fast | nightly | heavy'
+        default: fast
+permissions:
+  contents: read
+concurrency:
+  group: saos-validation
+  cancel-in-progress: true
+jobs:
+  fast:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tier == 'fast')
+    runs-on: [self-hosted, saos]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/run_ci.sh fast -q
+  nightly:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.tier == 'nightly')
+    runs-on: [self-hosted, saos, gpu]
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/run_ci.sh nightly -q
+  heavy:
+    if: github.event_name == 'workflow_dispatch' && inputs.tier == 'heavy'
+    runs-on: [self-hosted, saos, gpu]
+    timeout-minutes: 130
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/run_ci.sh heavy -q

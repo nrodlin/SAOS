@@ -1,0 +1,26 @@
+# Tolerances of tests/test_im_controller.py (6x6 SH, 48 px, 7x7 DM, zernike basis).
+nonzero_min: 1000.0         # px/m: a poked DM gives IM entries ~1e6 px/m
+tilt:
+  direct: 1.0e-3            # regression: IM column vs direct WFS response
+forward_model:
+  abs_rel: 3.0e-3           # reference precision: 32 samples per subaperture side differ by 9e-4 from 64 (error ~ 1/m^2), 4e-3 at 16
+symmetry:
+  rel: 1.0e-3               # symmetric DM shape -> symmetric slope maps (float32 FFT pipeline round-off)
+linearity:
+  stroke: 0.01
+  push_pull: 0.01
+controller:
+  reconstructor: 1.0e-9     # R IM = I (pinv, rcond 1e-3 below the smallest singular value of the 12 modes)
+  difference_eq: 1.0e-12    # float64 recursion vs dlsim
+  closed_step: 1.0e-12
+  rejection_mag: 1.0e-9     # relative magnitude error at the injected bins (lock-in, integer periods, decayed transient)
+  rejection_phase: 1.0e-9
+reconstructor:
+  matrix: 1.0e-9           # float64 SVD / normal equations of the same prescribed matrix (rank deficiency amplifies round-off to <1e-12)
+joint:
+  same_matrix: 1.0e-9       # same linear algebra in float64
+  identity: 1.0e-3          # R_joint H = I with beta = 1e-9 (stacked ground DMs may be rank deficient)
+polc:
+  match: 1.0e-8             # POLC command vs the open-loop leaky filter
+  differs: 0.05             # POLC must differ from the closed-loop law by more than 5 % of the command
+  sign: 1.0e-8
