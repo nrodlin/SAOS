@@ -1,29 +1,42 @@
-from datetime import datetime
-import time
-import os
+"""
+Solar GLAO for the EST: 7 extended-source directions (on axis + ring of 6 at 15 arcsec) sensed by a
+correlating Shack-Hartmann, one radial ASM, and point-like evaluation sources at several field angles.
 
-import matplotlib.pyplot as plt
+Cache: the atmosphere, modal basis and interaction matrix are generated on the first run and
+reused afterwards. Together with the Savepoint output they live in
+~/simulations/tutorials/glaoExampleSun/ (delete the files there to regenerate).
+Usage: python tutorial/glaoExampleSun.py [--iterations N] [--dry-run]
+"""
+import os
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+import argparse
+import time
+import datetime
+import logging
 import numpy as np
-import torch
+import gc
+import matplotlib.pyplot as plt
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
 
 from joblib import Parallel, delayed
 
-import logging
-import datetime
-
 from SAOS.LoggingHelper import LoggingHelper
-from SAOS.Source import Source
-from SAOS.ExtendedSource import ExtendedSource
-from SAOS.Telescope import Telescope
 from SAOS.Atmosphere import Atmosphere
-from SAOS.DeformableMirror import DeformableMirror
-from SAOS.Vibration import Vibration
+from SAOS.Telescope import Telescope
+from SAOS.ExtendedSource import ExtendedSource
+from SAOS.Source import Source
 from SAOS.ShackHartmann import ShackHartmann
 from SAOS.CorrelatingShackHartmann import CorrelatingShackHartmann
+from SAOS.ScienceCam import ScienceCam
+from SAOS.DeformableMirror import DeformableMirror
+from SAOS.Vibration import Vibration
 from SAOS.LightPath import LightPath
 from SAOS.InteractionMatrixHandler import InteractionMatrixHandler
 from SAOS.Controller import Controller
-from SAOS.ScienceCam import ScienceCam
 from SAOS.Sharepoint import Sharepoint
 from SAOS.Savepoint import Savepoint
 
@@ -33,35 +46,33 @@ test_logger = LoggingHelper(logging.INFO)
 
 # Simulation settings:
 
-nIterations = 1000
+parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+parser.add_argument('--iterations', type=int, default=1000, help='Number of AO loop iterations (default: %(default)s)')
+parser.add_argument('--dry-run', action='store_true', help='Build every object up to the light paths and exit (no IM, no loop)')
+args = parser.parse_args()
+nIterations = args.iterations
 
 scienceFs = 56. # Hz
-
-generate_new_atm = False
-measure_new_IM = True
-load_modal_basis = False
 
 nModes = None # [nModesASM, nModesM7]
 im_stroke = [5e-7] # in meters
 
-# Loading files:
-load_filename_atm = os.path.join(os.path.expanduser("~"), 'simulations/phase_screens/glaoSun.h5')
-load_filename_modalBasis = os.path.join(os.path.expanduser("~"), 'simulations/modal_basis/glaoSun.h5')
-load_filename_IM = os.path.join(os.path.expanduser("~"), 'simulations/interaction_matrix/glaoSun.h5')
+# Cache directory: files that are expensive to compute are generated once and reused
+CACHE_DIR = os.path.join(os.path.expanduser("~"), 'simulations/tutorials', os.path.splitext(os.path.basename(__file__))[0])
+os.makedirs(CACHE_DIR, exist_ok=True)
 
-# Saving files
-date = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+atm_file = os.path.join(CACHE_DIR, 'atmosphere.h5')
+modalBasis_file = os.path.join(CACHE_DIR, 'modalBasis.h5')
+IM_file = os.path.join(CACHE_DIR, 'interactionMatrix.h5')
 
-save_filename_atm = os.path.join(os.path.expanduser("~"), 'simulations/phase_screens/' + date + '.h5')
-save_filename_modalBasis = os.path.join(os.path.expanduser("~"), 'simulations/modal_basis/' + date + '.h5')
-save_filename_IM = os.path.join(os.path.expanduser("~"), 'simulations/interaction_matrix/' + date + '.h5')
+date = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
 ## Define data sharepoint
 
 # sharepoint = Sharepoint(test_logger.logger, port=5574, atm=1, atm_per_dir=0, dm=1, dm_per_dir=0, slopes=1, wfs=1, wfs_frame=1, sci=1, sci_frame=1)
 
 ## Define the savingpoint
-savepoint = Savepoint(file_path='', atm=1, atm_per_dir=1, dm=1, dm_per_dir=1, slopes=1, wfs=1, wfs_frame=1, sci=1, sci_frame=1, only_metrics=1, logger=test_logger.logger)
+savepoint = Savepoint(file_path=os.path.join(CACHE_DIR, f'savepoint_{date}.h5'), atm=1, atm_per_dir=1, dm=1, dm_per_dir=1, slopes=1, wfs=1, wfs_frame=1, sci=1, sci_frame=1, only_metrics=1, logger=test_logger.logger)
 
 ## Define EST
 t0 = time.time()
@@ -98,11 +109,11 @@ atm = Atmosphere(r0 = 0.12,
                  zenith = 0,
                  logger=test_logger.logger)
 
-if generate_new_atm:
-    atm.initializeAtmosphere()
-    atm.save(save_filename_atm)
+if os.path.exists(atm_file):
+    atm.load(atm_file)
 else:
-    atm.load(load_filename_atm)
+    atm.initializeAtmosphere()
+    atm.save(atm_file)
 
 ## Sources:
 # On axis
@@ -130,6 +141,8 @@ ext_sci_ngs_30 = Source(magnitude=5, optBand='R4', coordinates=[30,0], logger=te
 
 ## Deformable mirrors:
 
+# No DM dynamics by default; to enable a dynamic model pass the path of a discrete model file,
+# e.g. 'dynamicModel': '<path to asm_discrete_model.h5>'
 asm_params = {'dynamicModel': '', 'validActThreshpercentage': 0.5}
 
 asm = DeformableMirror(telescope=est_tel,
@@ -156,11 +169,10 @@ dms = [asm]
 
 ## Vibration
 
-red_vibration_file = '/home/oopao/simulations/VibrationsSource/EST_vibration_1.h5'
-vis_vibration_file = '/home/oopao/simulations/VibrationsSource/EST_vibration_1.h5'
-
-red_vibrations = None #Vibration(est_tel, red_vibration_file, test_logger.logger)
-vis_vibrations = None #Vibration(est_tel, vis_vibration_file, test_logger.logger)
+# No vibrations by default. To enable them, pass a Vibration file (data in arcsec on sky), e.g.:
+# red_vibrations = Vibration(est_tel, '<path to vibration file>.h5', test_logger.logger)
+red_vibrations = None
+vis_vibrations = None
 
 ## Wavefront Sensor
 
@@ -217,22 +229,26 @@ for i in range(len(scao_light_path_list)):
 
 test_logger.logger.info(f'The Modules initialization took {time.time()-t0} [s]')
 
+if args.dry_run:
+    test_logger.logger.info('Dry run: every object up to the light paths was built; exiting before the IM and the loop.')
+    raise SystemExit(0)
+
 ## Interaction Matrix
 t0 = time.time()
 
 im_handler = InteractionMatrixHandler(test_logger.logger)
 im_handler.initialize_im_class(scao_light_path_list)
 
-if load_modal_basis:
-    im_handler.load_modalBasis(load_filename_modalBasis)
-if measure_new_IM:
-    im_handler.measure(modal_basis='dh', stroke=im_stroke, nModes=nModes)
-    im_handler.save_IM(save_filename_IM)
-
-    if not load_modal_basis:
-        im_handler.save_modalBasis(save_filename_modalBasis)
+basis_cached = os.path.exists(modalBasis_file)
+if basis_cached:
+    im_handler.load_modalBasis(modalBasis_file)
+if os.path.exists(IM_file):
+    im_handler.load_IM(IM_file)
 else:
-    im_handler.load_IM(load_filename_IM)
+    im_handler.measure(modal_basis='dh', stroke=im_stroke, nModes=nModes)
+    im_handler.save_IM(IM_file)
+    if not basis_cached:
+        im_handler.save_modalBasis(modalBasis_file)
 
 test_logger.logger.info(f'The IM creation took {time.time()-t0} [s]')
 
@@ -278,6 +294,10 @@ for i in range(nIterations):
 
 test_logger.logger.info('Simulation ended.')
 
-# Force destructor call for the qeue of logs
-
+# Force destructor
+del est_tel, atm, asm, red_wfs, controller, im_handler, scao_light_path_list, savepoint
 test_logger = None
+
+if HAS_TORCH:
+    torch.cuda.empty_cache()
+gc.collect()
