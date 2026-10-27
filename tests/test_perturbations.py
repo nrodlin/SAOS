@@ -508,7 +508,6 @@ def test_spider_psf_spikes_perpendicular_to_arms(logger, report, tolerances):
 # NCPA
 # ----------------------------------------------------------------------------------------------------------------------
 
-@known_issue('NCPA-LOAD', 'NCPA.load only assigns the OPD in the resize branch: a file of the same shape as the pupil is read and discarded', 'SAOS/NCPA.py:64-66')
 def test_ncpa_load_same_shape_round_trip(logger, tmp_path, report, tolerances):
     """A file with the pupil shape is returned by getPhase after load (float32 buffer: relative error <= 1e-6 of the maximum)."""
     tel = Telescope(resolution=32, diameter=1.0, samplingTime=1e-3, logger=logger)

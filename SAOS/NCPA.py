@@ -56,7 +56,10 @@ class NCPA:
 
         if (temp_opd.shape[0] != self.ncpa_opd.shape[0]) or (temp_opd.shape[1] != self.ncpa_opd.shape[1]):
             self.logger.warning('NCPA::Load - The dimensions of the NCPA do not match the telescope\'s pupil. Interpolating, may introduce artifacs.')
-            self.ncpa_opd = cv2.resize(temp_opd, (self.ncpa_opd.shape[0], self.ncpa_opd.shape[1]), interpolation=cv2.INTER_LINEAR)
+            # cv2.resize takes the output size as (width, height) = (columns, rows)
+            self.ncpa_opd = cv2.resize(temp_opd, (self.ncpa_opd.shape[1], self.ncpa_opd.shape[0]), interpolation=cv2.INTER_LINEAR)
+        else:
+            self.ncpa_opd = np.array(temp_opd, dtype=float)
 
         return True
     
