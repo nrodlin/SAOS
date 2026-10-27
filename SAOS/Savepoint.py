@@ -5,7 +5,12 @@ Created on May 15 2025
 import numpy as np
 import h5py
 import os
-from datetime import datetime
+import sys
+import json
+import getpass
+import platform
+import subprocess
+from datetime import datetime, timezone
 
 from scipy import ndimage, signal
 
@@ -52,9 +57,141 @@ def peak_subpixel(img, half_width=1.0, step=1.0 / 32):
     return float(max(local.max(), img[r0, c0]))
 
 
+_MAX_ATTR_SIZE = 10000                                     # larger arrays are not stored as metadata
+
+_RUN_INFO = None
+
+
+def _git_info(path):
+    """(commit, dirty) of the git repository holding path; (None, None) outside a repository or without git."""
+    try:
+        commit = subprocess.run(['git', '-C', path, 'rev-parse', 'HEAD'], capture_output=True, text=True, timeout=5)
+        if commit.returncode != 0:
+            return None, None
+        status = subprocess.run(['git', '-C', path, 'status', '--porcelain', '--untracked-files=no'], capture_output=True,
+                                text=True, timeout=5)
+        return commit.stdout.strip(), bool(status.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+
+
+def run_info():
+    """
+    Provenance of the running simulation: SAOS version and git commit, Python and library versions, host, user, command
+    line. Computed once per process.
+
+    Returns
+    -------
+    dict
+        Metadata (str, bool or None values).
+    """
+    global _RUN_INFO
+    if _RUN_INFO is None:
+        from . import __version__
+        commit, dirty = _git_info(os.path.dirname(os.path.abspath(__file__)))
+        info = dict(saos_version=__version__, saos_git_commit=commit, saos_git_dirty=dirty,
+                    python_version=sys.version.split()[0], gil_enabled=getattr(sys, '_is_gil_enabled', lambda: True)(),
+                    hostname=platform.node(), platform=platform.platform(), command_line=' '.join(sys.argv), cwd=os.getcwd())
+        try:
+            info['user'] = getpass.getuser()
+        except Exception:
+            info['user'] = None
+        for name in ('numpy', 'scipy', 'h5py', 'torch'):
+            module = sys.modules.get(name)
+            info[f'{name}_version'] = getattr(module, '__version__', None) if module is not None else None
+        torch = sys.modules.get('torch')
+        try:
+            info['cuda_device'] = torch.cuda.get_device_name(0) if (torch is not None and torch.cuda.is_available()) else None
+        except Exception:
+            info['cuda_device'] = None
+        _RUN_INFO = info
+    return dict(_RUN_INFO)
+
+
+def _attr_value(value):
+    """Value storable as an HDF5 attribute (scalars, strings, small numeric arrays; dicts and mixed lists as JSON), or None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return str(value)                                   # np.str_ has no HDF5 conversion
+    if isinstance(value, (bool, int, float, np.integer, np.floating, np.bool_)):
+        return value
+    if isinstance(value, dict):
+        return json.dumps(value, default=str)
+    if isinstance(value, (list, tuple, np.ndarray)):
+        try:
+            arr = np.asarray(value)
+        except ValueError:
+            return json.dumps(value, default=str)
+        if arr.dtype.kind in 'biuf' and arr.size <= _MAX_ATTR_SIZE:
+            return arr
+        if arr.dtype.kind in 'OUS' and arr.size <= _MAX_ATTR_SIZE:
+            return json.dumps(np.asarray(value, dtype=object).tolist(), default=str)
+        return None
+    return None
+
+
+def _write_attrs(group, values):
+    for key, value in values.items():
+        value = _attr_value(value)
+        if value is not None:
+            group.attrs[key] = value
+
+
+def _pick(obj, names):
+    return {n: getattr(obj, n) for n in names if hasattr(obj, n)}
+
+
+def module_metadata(obj):
+    """
+    Configuration of a SAOS module (Telescope, Atmosphere, DeformableMirror, Source/ExtendedSource, WFS, ScienceCam,
+    Vibration, LightPath) as a flat dict of metadata. Unknown objects give only their class.
+    """
+    meta = {'class': type(obj).__name__}
+    tag = getattr(obj, 'tag', None)
+    if tag == 'lightpath':
+        meta['delay'] = getattr(obj, 'delay', None)
+        dms = getattr(obj, 'dm', None) or []
+        meta['n_dms'] = len(dms)
+        meta['dm_altitudes'] = [getattr(d, 'altitude', None) for d in dms]
+        for prefix, sub in (('src', getattr(obj, 'src', None)), ('wfs', getattr(obj, 'wfs', None)), ('sci', getattr(obj, 'sci', None)),
+                            ('vibration', getattr(obj, 'vibration', None))):
+            if sub is not None:
+                meta.update({f'{prefix}_{k}': v for k, v in module_metadata(sub).items()})
+        meta['has_atmosphere'] = getattr(obj, 'atm', None) is not None
+        return meta
+    if tag == 'atmosphere':
+        meta.update(_pick(obj, ('r0', 'L0', 'fractionalR0', 'altitude', 'windSpeed', 'windDirection', 'nLayer', 'randomState')))
+        if hasattr(obj, 'zenith'):
+            meta['zenith_deg'] = float(np.rad2deg(obj.zenith))
+        return meta
+    if tag == 'deformableMirror':
+        meta.update(_pick(obj, ('typeDM', 'nActs', 'nValidAct', 'altitude', 'pitch', 'mechCoupling', 'validActThreshpercentage',
+                                'maxStrokePtV', 'dynamic_model_path')))
+        if getattr(obj, 'misReg', None) is not None:
+            meta.update({f'misReg_{k}': v for k, v in _pick(obj.misReg, ('shiftX', 'shiftY', 'rotation', 'radialScaling')).items()})
+        return meta
+    if tag in ('source', 'sun'):
+        meta.update(_pick(obj, ('tag', 'optBand', 'wavelength', 'bandwidth', 'coordinates', 'magnitude', 'fov', 'nSubDirs')))
+        return meta
+    if tag == 'telescope':
+        meta.update(_pick(obj, ('D', 'resolution', 'pixelSize', 'centralObstruction', 'samplingTime', 'fov')))
+        meta['spiders'] = getattr(obj, 'spiders', None) or 'none'
+        return meta
+    if hasattr(obj, 'nSubap'):                                                          # wavefront sensors
+        meta.update(_pick(obj, ('nSubap', 'nValidSubaperture', 'plate_scale', 'fieldOfView', 'lightRatio', 'use_brightest',
+                                'unit_in_rad', 'guardPx', 'fft_fieldOfView_oversampling', 'validSubapThreshold', 'camera_params')))
+        return meta
+    if hasattr(obj, 'integrationTime'):                                                 # science cameras
+        meta.update(_pick(obj, ('plate_scale', 'fieldOfView', 'nPix', 'integrationTime', 'samplingTime', 'lightRatio', 'camera_params')))
+        return meta
+    meta.update(_pick(obj, ('Ts',)))
+    return meta
+
+
 class Savepoint:
     def __init__(self, file_path=None, atm=0, atm_per_dir=0, dm=0, dm_per_dir=0, slopes=0, error= 0, wfs=0, wfs_frame=0, sci=0, sci_frame=0, 
-                 only_metrics=False, only_long_exp=False, logger=None):
+                 only_metrics=False, only_long_exp=False, metadata=None, logger=None):
         """
         Initialize the Savepoint object for saving simulation data.
 
@@ -97,8 +234,23 @@ class Savepoint:
             is included as well.
         only_long_exp : bool
             If True, only the long exposure frame is saved. By default, False.
+        metadata : dict, optional
+            User metadata of the simulation (case, draw, controller settings...), stored in /metadata/user. More can be
+            added with add_metadata().
         logger : logging.Logger, optional
-            External logger to use. If None, initializes internal logging.        
+            External logger to use. If None, initializes internal logging.
+
+        Notes
+        -----
+        Every file has a group /metadata, written at the first save:
+          - its attributes: SAOS version and git commit (saos_git_dirty = uncommitted changes), Python, library versions,
+            GIL, host, user, command line, creation time (UTC) and the Savepoint settings; last_iteration and
+            last_saved_utc are updated at every save (an interrupted run can be detected);
+          - /metadata/user: the user metadata;
+          - /metadata/telescope, /metadata/atmosphere and /metadata/dm_<i>: configuration of the modules of the first
+            light path that has them (written whatever is saved);
+        and every LightPath_<k>, Atmosphere_<i> and DeformableMirror_<i> group has the configuration of its module as
+        attributes (source, WFS, science camera, delay...). Values are scalars, small arrays or JSON strings.
         """
         self.logger = logger if logger is not None else get_logger()
         
@@ -115,6 +267,8 @@ class Savepoint:
         self.only_long_exp = only_long_exp
         self.sci_frame = sci_frame
         self.only_metrics = only_metrics
+        self.metadata = dict(metadata) if metadata else {}
+        self._metadata_pending = bool(self.metadata)
 
         # Create the file path if not provided
         if not self.file_path:
@@ -126,6 +280,46 @@ class Savepoint:
         
         self.logger.info(f'Savepoint::__init__ - Saving path (not yet created): {self.file_path}')
 
+
+    def add_metadata(self, **metadata):
+        """
+        Add user metadata (stored in /metadata/user at the next save; a key given twice keeps the last value).
+
+        Parameters
+        ----------
+        **metadata
+            Name and value of every entry: scalars, strings, small arrays, lists or dicts (as JSON).
+        """
+        self.metadata.update(metadata)
+        self._metadata_pending = True
+
+    def _settings(self):
+        names = ('atm', 'atm_per_dir', 'dm', 'dm_per_dir', 'slopes', 'error', 'wfs', 'wfs_frame', 'sci', 'sci_frame',
+                 'only_metrics', 'only_long_exp')
+        return json.dumps({n: getattr(self, n) for n in names}, default=str)
+
+    def _write_metadata(self, f, data_object, iteration):
+        """Run, module and user metadata in /metadata (see __init__)."""
+        meta = f.require_group('metadata')
+        if 'saos_version' not in meta.attrs:
+            _write_attrs(meta, run_info())
+            meta.attrs['created_utc'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
+            meta.attrs['savepoint_settings'] = self._settings()
+        meta.attrs['last_iteration'] = int(iteration)
+        meta.attrs['last_saved_utc'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        if self._metadata_pending:
+            _write_attrs(meta.require_group('user'), self.metadata)
+            self._metadata_pending = False
+        for obj in data_object:
+            if getattr(obj, 'tag', None) != 'lightpath':
+                continue
+            if 'telescope' not in meta and getattr(obj, 'tel', None) is not None:
+                _write_attrs(meta.create_group('telescope'), module_metadata(obj.tel))
+            if 'atmosphere' not in meta and getattr(obj, 'atm', None) is not None:
+                _write_attrs(meta.create_group('atmosphere'), module_metadata(obj.atm))
+            for i, dm in enumerate(getattr(obj, 'dm', None) or []):
+                if f'dm_{i}' not in meta:
+                    _write_attrs(meta.create_group(f'dm_{i}'), module_metadata(dm))
 
     def _resolve_setting(self, setting_value, lp, lp_index):
         """
@@ -189,6 +383,7 @@ class Savepoint:
             Current iteration number.
         """
         group = f.create_group(group_name)
+        _write_attrs(group, module_metadata(data_group))
 
         lp_index = None
         if group_name.startswith('LightPath_'):
@@ -529,6 +724,7 @@ class Savepoint:
         tag = data_object[0].tag
 
         with h5py.File(self.file_path, 'a') as f:
+            self._write_metadata(f, data_object, iteration)
             # First, check atmosphere and DM flags
             if tag == 'atmosphere' and self.atm:
                 for i in range(len(data_object)):

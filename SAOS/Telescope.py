@@ -76,7 +76,7 @@ class Telescope:
     def set_pupil(self):
         """
         Generate the pupil mask either from user input or by creating a circular aperture
-        with optional central obstruction.
+        with optional central obstruction (without spiders: self.spiders is reset to None).
 
         Updates the following:
         - self.pupil
@@ -88,6 +88,7 @@ class Telescope:
         -------
         None
         """
+        self.spiders = None                # set by apply_spiders()
         # Case where the pupil is not input: circular pupil with central obstruction    
         if self.user_defined_pupil is None:
             D           = self.resolution+1
@@ -128,6 +129,9 @@ class Telescope:
         """
         # Reset the pupil to the default one before adding the spiders
         self.set_pupil()
+        self.spiders = dict(angle=list(np.atleast_1d(angle).astype(float)), thickness=float(thickness_spider),
+                            offset_X=None if offset_X is None else list(np.atleast_1d(offset_X).astype(float)),
+                            offset_Y=None if offset_Y is None else list(np.atleast_1d(offset_Y).astype(float)))
 
         if thickness_spider > 0:           
             pup = np.copy(self.pupil)

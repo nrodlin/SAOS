@@ -21,3 +21,4 @@ All docstrings follow the **NumPy** format.
 | [Interaction Matrix](interaction_matrix.md) | `InteractionMatrixHandler` | IM measurement and reconstruction |
 | [Controller](controller.md) | `Controller` | Leaky integrator / PI AO controller |
 | [Sharepoint](sharepoint.md) | `Sharepoint` | Real-time telemetry via ZeroMQ |
+| [Savepoint](savepoint.md) | `Savepoint` | HDF5 results: data, metrics and simulation metadata |

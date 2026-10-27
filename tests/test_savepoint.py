@@ -388,3 +388,71 @@ def test_saved_frames_match_decimation(logger, savepoint, rng, tolerances, repor
                                  np.max(np.abs(frames[k] - expected_frame(lp, opds[it]))) / expected_frame(lp, opds[it]).max(),
                                  0.0, atol=tol['frame_atol'])
     report.assert_ok()
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Metadata
+# ----------------------------------------------------------------------------------------------------------------------
+
+def test_metadata_provenance_and_config(logger, savepoint, rng, report):
+    """
+    /metadata of a saved file: SAOS version (== SAOS.__version__), provenance (Python, host, command line, Savepoint
+    settings), last_iteration updated at every save, user metadata given at construction and with add_metadata() (dicts
+    as JSON), the telescope configuration, and the configuration of the light path (source, science camera, delay) in the
+    attributes of its group.
+    """
+    import json
+    import SAOS
+    n_it = 3
+    lp, _ = small_lightpath(logger, rng, n_it)
+    sp = savepoint(sci=1, only_metrics=True, metadata=dict(case=1, draw=2, label='test'))
+    sp.add_metadata(gain=[0.25, 0.2], controller=dict(type='leaky', decay=0.99))
+    for i in range(n_it):
+        lp.propagate(True)
+        sp.save([lp], i)
+    with h5py.File(sp.file_path, 'r') as f:
+        m = f['metadata']
+        report.check('saos_version == SAOS.__version__', int(m.attrs['saos_version'] == SAOS.__version__), 1, atol=0)
+        for key in ('python_version', 'hostname', 'command_line', 'created_utc', 'last_saved_utc', 'savepoint_settings'):
+            report.check(f'metadata has {key}', int(key in m.attrs), 1, atol=0)
+        report.check('savepoint settings (sci decimation)', json.loads(m.attrs['savepoint_settings'])['sci'], 1, atol=0)
+        report.check('last_iteration', int(m.attrs['last_iteration']), n_it - 1, atol=0)
+        u = m['user'].attrs
+        report.check('user metadata (constructor)', [u['case'], u['draw']], [1, 2], atol=0)
+        report.check('user metadata (string)', int(u['label'] == 'test'), 1, atol=0)
+        report.check('user metadata (add_metadata, list)', u['gain'], [0.25, 0.2], atol=0)
+        report.check('user metadata (add_metadata, dict as JSON)', json.loads(u['controller'])['decay'], 0.99, atol=0)
+        t = m['telescope'].attrs
+        report.check('telescope D / resolution', [t['D'], t['resolution']], [lp.tel.D, lp.tel.resolution], atol=0)
+        report.check('telescope without spiders', int(t['spiders'] == 'none'), 1, atol=0)
+        g = f['LightPath_0'].attrs
+        report.check('light path: source wavelength', g['src_wavelength'], lp.src.wavelength, atol=0)
+        report.check('light path: delay', g['delay'], lp.delay, atol=0)
+        report.check('light path: science camera plate scale', g['sci_plate_scale'], lp.sci.plate_scale, atol=0)
+    report.assert_ok()
+
+
+def test_metadata_of_modules(logger, report):
+    """module_metadata of a telescope with spiders, an atmosphere and a DM: the parameters they were created with."""
+    import json
+    from SAOS.Atmosphere import Atmosphere
+    from SAOS.DeformableMirror import DeformableMirror
+    from SAOS.Savepoint import module_metadata
+    tel = Telescope(resolution=64, diameter=2.0, samplingTime=1e-3, centralObstruction=0.2, fov=10, logger=logger)
+    tel.apply_spiders([0, 90], 0.05)
+    mt = module_metadata(tel)
+    report.check('spider angles and thickness', mt['spiders']['angle'] + [mt['spiders']['thickness']], [0, 90, 0.05], atol=0)
+    tel.set_pupil()
+    report.check('set_pupil removes the spiders', int(module_metadata(tel)['spiders'] == 'none'), 1, atol=0)
+    atm = Atmosphere(telescope=tel, r0=0.1, L0=25, fractionalR0=[0.7, 0.3], altitude=[0, 5000], windSpeed=[5, 10],
+                     windDirection=[0, 90], zenith=30, logger=logger)
+    ma = module_metadata(atm)
+    report.check('atmosphere r0 / L0', [ma['r0'], ma['L0']], [0.1, 25], atol=0)
+    report.check('atmosphere altitudes / wind', list(ma['altitude']) + list(ma['windSpeed']), [0, 5000, 5, 10], atol=0)
+    report.check('atmosphere zenith [deg]', ma['zenith_deg'], 30.0, rtol=1e-12)
+    dm = DeformableMirror(telescope=tel, nActs=9, altitude=0, logger=logger)
+    md = module_metadata(dm)
+    report.check('DM nActs / nValidAct / altitude', [md['nActs'], md['nValidAct'], md['altitude']], [9, dm.nValidAct, 0], atol=0)
+    report.check('DM misregistration recorded', [md['misReg_shiftX'], md['misReg_rotation']], [0, 0], atol=0)
+    json.dumps({k: v for k, v in mt.items() if isinstance(v, (str, int, float, dict))})
+    report.assert_ok()
