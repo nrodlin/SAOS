@@ -341,14 +341,6 @@ SPIDER_CASES = [
     pytest.param([17, 107, 197, 287], id='rotated'),
     pytest.param([357, 87, 177, 267], id='near_cardinal'),
 ]
-CLIP = known_issue('SPIDER-CLIP', 'quadrant clipping (map_dist[:res//2, :] = thickness ...) lies along the axis of an arm whose SAOS direction is just inside the quadrant '
-                   'boundary (angle just below a multiple of 90 deg): the half of the strip on the clipped side is not removed and the opposite side of the line is '
-                   'removed instead (the arm is no longer a half-line)', 'SAOS/Telescope.py:151-171')
-YSIGN = known_issue('SPIDER-YSIGN', 'apply_spiders builds the arm line with sin(-angle) on a grid with Y = +row: the arm at angle theta points to (cos theta, -sin theta) '
-                    '(counter-clockwise on an imshow display), mirrored with respect to the y = +row convention of the rest of SAOS (azimuth 90 deg = +rows)',
-                    'SAOS/Telescope.py:151-171')
-GRID = known_issue('SPIDER-GRID', 'the arm mask is evaluated on linspace(-D/2, D/2, N) (pitch D/(N-1)) while the pupil pixel is D/N: the arm width is (N-1)/N of the request '
-                   '(-0.4 % of the removed area at N = 256, -1.6 % at N = 64)', 'SAOS/Telescope.py:151-171')
 
 
 def spider_telescope(logger, angles):
@@ -362,7 +354,7 @@ def spider_params(marks):
     return [pytest.param(c.values[0], id=c.id, marks=marks.get(c.id, [])) for c in SPIDER_CASES]
 
 
-@pytest.mark.parametrize('angles', spider_params({'non_cardinal': GRID, 'rotated': GRID}))
+@pytest.mark.parametrize('angles', spider_params({}))
 def test_spider_removed_area(angles, logger, report, tolerances):
     """
     Removed area = n w (R - R_co) / pixel^2 (exact strip-annulus integral n [A(R) - A(R_co)], pixel = D/N) within the
@@ -391,7 +383,7 @@ def test_spider_removed_area(angles, logger, report, tolerances):
     report.assert_ok()
 
 
-@pytest.mark.parametrize('angles', spider_params({'non_cardinal': YSIGN, 'rotated': YSIGN, 'near_cardinal': YSIGN}))
+@pytest.mark.parametrize('angles', spider_params({}))
 def test_spider_arm_angles(angles, logger, report, tolerances):
     """
     Each arm points to the requested angle (counter-clockwise from +x, y = +row): the PCA axis of every removed region
@@ -415,7 +407,7 @@ def test_spider_arm_angles(angles, logger, report, tolerances):
 @pytest.mark.parametrize('angle', [
     pytest.param(30, id='30'),
     pytest.param(0, id='0'),
-    pytest.param(357, id='357', marks=CLIP),
+    pytest.param(357, id='357'),
 ])
 def test_spider_single_arm_is_one_half_strip(angle, logger, report):
     """
@@ -460,7 +452,6 @@ def fft_psf(pupil, fw):
     return np.fft.fftshift(np.abs(np.fft.fft2(pad)) ** 2)[c - N // 2:c + N // 2, c - N // 2:c + N // 2]
 
 
-@YSIGN
 def test_spider_psf_spikes_perpendicular_to_arms(logger, report, tolerances):
     """
     Diffraction spikes are perpendicular to the arms (a line is perpendicular on both sides). Two perpendicular arms at 20

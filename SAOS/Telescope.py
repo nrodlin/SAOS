@@ -113,7 +113,8 @@ class Telescope:
         Parameters
         ----------
         angle : list of float
-            List of angles [deg] defining the spider orientation.
+            Direction of every arm [deg], counter-clockwise from +x (columns) with y = +row, the frame of the source
+            azimuths. Each arm is a half-strip of width thickness_spider from the centre to the pupil edge.
         thickness_spider : float
             Width of the spider arms in meters.
         offset_X : list of float, optional
@@ -142,24 +143,18 @@ class Telescope:
             if np.max(np.abs(offset_X))>=max_offset or np.max(np.abs(offset_Y))>max_offset:
                 self.logger.warning('Telescope::apply_spiders - The spider offsets are too large! Weird things could happen!')
 
+            # Pixel centres of the pupil grid, (i - (N-1)/2) D/N, with x = +column and y = +row (frame of the source azimuths)
+            x = (np.arange(self.resolution) - (self.resolution - 1) / 2) * self.D / self.resolution
+            [X0, Y0] = np.meshgrid(x, x)
             for i in range(len(angle)):
-                angle_val = (angle[i]+90)%360
-                x = np.linspace(-self.D/2,self.D/2,self.resolution)
-                [X,Y] = np.meshgrid(x,x)
-                X+=offset_X[i]
-                Y+=offset_Y[i]
-    
-                map_dist = np.abs(X*np.cos(np.deg2rad(angle_val)) + Y*np.sin(np.deg2rad(-angle_val)))
-        
-                if 0<=angle_val<90:
-                    map_dist[:self.resolution//2,:] = thickness_spider
-                if 90<=angle_val<180:
-                    map_dist[:,:self.resolution//2] = thickness_spider
-                if 180<=angle_val<270:
-                    map_dist[self.resolution//2:,:] = thickness_spider
-                if 270<=angle_val<360:
-                    map_dist[:,self.resolution//2:] = thickness_spider                
-                pup*= map_dist>thickness_spider/2
+                # Arm i: half-strip of width thickness_spider starting at the centre (displaced by the offsets) towards the
+                # angle [deg], counter-clockwise from +x
+                th = np.deg2rad(angle[i])
+                X = X0 + offset_X[i]
+                Y = Y0 + offset_Y[i]
+                along = X*np.cos(th) + Y*np.sin(th)
+                perp = -X*np.sin(th) + Y*np.cos(th)
+                pup = pup * ~((along > 0) & (np.abs(perp) < thickness_spider/2))
 
             self.pupil = pup.copy()
             self.pupilReflectivity = self.pupil.astype(float) * self.pupilReflectivity
