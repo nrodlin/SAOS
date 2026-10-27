@@ -2,14 +2,16 @@ import torch
 import numpy as np
 import scipy.special as sp
 
+from SAOS.modalBasis.zernikeModes import piston_free_orthonormal
+
 # Returns a 2D matrix of size: (nValidActs x Nmodes) whose range is between -1 and 1.
 # Based on: Milton & Lloyd-Hart, Disk Harmonic functions for adaptive optics simulations, Optics Society of America, 2005.
 
 def generate_dh_modes(dm, nModes=None, useTorch=False, include_piston=False):
 
-    # If the modes are not specified, use the number of actuators --> maximum number of modes
+    # If the modes are not specified, use every degree of freedom: nValidAct, minus piston when it is excluded
     if nModes is None:
-        nModes = dm.nValidAct
+        nModes = dm.nValidAct if include_piston else dm.nValidAct - 1
 
     # Compute radius and theta arrays for all points
     r = np.sqrt(dm.coordinates[:,0]**2 + dm.coordinates[:,1]**2)
@@ -40,6 +42,8 @@ def generate_dh_modes(dm, nModes=None, useTorch=False, include_piston=False):
     
     # Gram-Schmidt orthogonalization
     dh_modes_qr, _ =  np.linalg.qr(dh_modes[dm.validAct,:])
+    if not include_piston:
+        dh_modes_qr = piston_free_orthonormal(dh_modes_qr)
 
     dh_modes[dm.validAct, :]  = dh_modes_qr
     dh_modes[~dm.validAct, :] = 0.0

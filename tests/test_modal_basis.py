@@ -29,12 +29,6 @@ pytestmark = pytest.mark.fast
 GENERATORS = dict(zonal=generate_zonal_modes, dh=generate_dh_modes, kl=generate_kl_modes,
                   hadamard=generate_hadamard_modes, zernike=generate_zernike_modes)
 
-NMODES_PISTON = known_issue(
-    'MB-NMODES-PISTON',
-    'with include_piston=False the default nModes is nValidAct, but only nValidAct-1 piston-free modes exist: '
-    'Hadamard loses one rank, DH/KL put piston into the last modes (QR)',
-    'discHarmonicModes.py:8-13, karhunenLoeveModes.py:14-18, hadamardModes.py:5-8')
-
 
 @pytest.fixture(scope='module')
 def dm11(logger):
@@ -67,8 +61,8 @@ def piston_fraction(B):
 # Rank, orthogonality and piston
 # ----------------------------------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize('name', ['zonal', pytest.param('dh', marks=NMODES_PISTON), pytest.param('kl', marks=NMODES_PISTON),
-                                  pytest.param('hadamard', marks=NMODES_PISTON)])
+@pytest.mark.parametrize('name', ['zonal', pytest.param('dh', marks=[]), pytest.param('kl', marks=[]),
+                                  pytest.param('hadamard', marks=[])])
 def test_basis_spans_actuator_space(name, dm11, report, tolerances):
     """
     A modal basis must be a basis of the commandable space: rank = number of modes (singular values > 1e-10 s_max).
@@ -374,8 +368,6 @@ def test_zernike_low_order_shapes(noll, label, func, dm11, report, tolerances):
     report.assert_ok()
 
 
-@known_issue('MB-NOLL-SIGN', 'odd-Noll (sine) Zernike modes have the opposite sign of Noll\'s convention: '
-             'sin(m theta) is evaluated with m < 0', 'zernikeModes.py:197-203, 357-359')
 @pytest.mark.parametrize('noll,label,func', [(3, 'tilt 2 rho sin', lambda x, y: y),
                                              (5, 'astigmatism rho^2 sin 2theta', lambda x, y: 2 * x * y)])
 def test_zernike_noll_sign_convention(noll, label, func, dm11, report, tolerances):

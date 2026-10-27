@@ -5,9 +5,9 @@ import torch
 
 def generate_zernike_modes(dm, nModes=None, useTorch=False, include_piston=False):
 
-    # If the modes are not specified, use the number of actuators --> maximum number of modes
+    # If the modes are not specified, use every degree of freedom: nValidAct, minus piston when it is excluded
     if nModes is None:
-        nModes = dm.nValidAct
+        nModes = dm.nValidAct if include_piston else dm.nValidAct - 1
 
     if include_piston:
         Noffset = 1
@@ -30,6 +30,18 @@ def generate_zernike_modes(dm, nModes=None, useTorch=False, include_piston=False
 
 # Generate zernikes, this process is split form the main call function to provide a better interface for the KL modal base
 # that requires the generation of the full set of Zernikes, not normalized and without the pupil occlusion and spider.
+
+def piston_free_orthonormal(Q):
+    """
+    Orthonormal, piston-free version of the orthonormal columns Q [nValidAct, nModes] (nModes <= nValidAct - 1): the piston
+    is projected out and the columns are re-orthonormalised in order (Gram-Schmidt keeps the columns that were already
+    piston-free, with their sign). Needed when the sampled modes are rank-deficient on the actuators: the QR then completes
+    the basis with arbitrary directions that may contain piston.
+    """
+    Qp = Q - Q.mean(axis=0, keepdims=True)
+    Q2, R2 = np.linalg.qr(Qp)
+    return Q2 * np.where(np.diag(R2) < 0, -1.0, 1.0)
+
 
 def get_zernikes(coordinates, validActs, nModes, Noffset, return_energy=False):
     """
@@ -196,7 +208,7 @@ class ZernikeNaive(object):
         elif is_even:
             Z = R * np.cos(m * theta)
         else:
-            Z = R * np.sin(m * theta)
+            Z = R * np.sin(abs(m) * theta)        # Noll: odd j -> sin(|m| theta) (m < 0 only labels the sine term)
         if normalize_noll:
             if m == 0:
                 norm_coeff = np.sqrt(n + 1)

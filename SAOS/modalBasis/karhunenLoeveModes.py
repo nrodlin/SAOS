@@ -3,7 +3,7 @@ import torch
 
 from scipy.special import gamma
 
-from SAOS.modalBasis.zernikeModes import ZernikeNaive, get_zernikes
+from SAOS.modalBasis.zernikeModes import ZernikeNaive, get_zernikes, piston_free_orthonormal
 
 # Code reused from the Phase Diversity repository of the EST project.
 # An important point regarding this implementation is that the modes amplitude is not corrected by the atmosphere r0 nor the telescope diameter D. 
@@ -13,9 +13,9 @@ from SAOS.modalBasis.zernikeModes import ZernikeNaive, get_zernikes
 
 def generate_kl_modes(dm, nModes=None, useTorch=False):
 
-    # If the modes are not specified, use the number of actuators --> maximum number of modes
+    # If the modes are not specified, use every piston-free degree of freedom (the KL basis excludes piston)
     if nModes is None:
-        nModes = dm.nValidAct
+        nModes = dm.nValidAct - 1
 
     kl_modes = np.zeros((dm.coordinates.shape[0], nModes))
 
@@ -27,6 +27,8 @@ def generate_kl_modes(dm, nModes=None, useTorch=False):
     zernikes, energies = get_zernikes(dm.coordinates, dm.validAct, nModes, Noffset, return_energy=True)
 
     zernikes_qr, R =  np.linalg.qr(zernikes[dm.validAct,:])
+    # Piston-free orthonormal columns also where the sampled Zernikes are rank-deficient (the covariance R C R^T is unchanged)
+    zernikes_qr = piston_free_orthonormal(zernikes_qr)
 
     zernikes_ortho = np.zeros_like(zernikes)
 
