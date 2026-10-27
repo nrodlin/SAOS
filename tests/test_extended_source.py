@@ -800,10 +800,6 @@ def test_b5_structured_object_mosaic_has_no_seams(ground_case, pattern, tel, log
     report.assert_ok()
 
 
-@known_issue('EXT-FILTER-SUM', 'filter_2D does not sum to one: the edge extension adds template[-(W//2):] to the first W//2 rows '
-             '(shifted by one pixel: deficit 1/(W/2) = 0.34% on the border strips for n = 3) and an even filter width W does not tile '
-             'with the integer stride W/2 (uniform deficit 0.26-0.51% for n = 2, 4, 5); ScienceCam renormalises with small_gain_corrector, so the '
-             'frames are not affected (uniform and structured object tests pass)', 'SAOS/ExtendedSource.py:122-146')
 @pytest.mark.parametrize('n_sub', [2, 3, 4, 5])
 def test_b5_filters_partition_of_unity(n_sub, pattern, logger, report):
     """
@@ -903,3 +899,18 @@ def test_b5_default_science_photon_budget(flat_case, tel, logger, report):
     report.check('long exposure photons / (flux T A_eff), default camera', lp.long_exposure_frame.sum() / expected,
                  expected=1.0, rtol=1e-6)
     report.assert_ok()
+
+
+def test_band_without_source_entry(logger, report):
+    """
+    ExtendedSource uses its own band table (C.9, owner: the wavelengths of the solar images are kept): a band absent from the
+    Source table ('IR') constructs, and the sub-direction sources carry the wavelength of the extended source.
+    """
+    from SAOS.ExtendedSource import ExtendedSource
+    for band in ('IR', 'V', 'R'):
+        sun = ExtendedSource(optBand=band, coordinates=[0, 0], nSubDirs=2, img_PS=0.0128, fov=6.0, subDir_margin=4.0,
+                             patch_padding=10.0, logger=logger)
+        lam = {s.wavelength for s in sun.subDirs_stars}
+        report.check(f'{band}: sub-direction wavelengths == extended source wavelength', float(lam == {sun.wavelength}), 1.0, atol=0)
+    report.assert_ok()
+

@@ -681,11 +681,11 @@ class DeformableMirror:
         None
         """
         self.logger.info('DeformableMirror::print_properties')
-        self.logger.info('DeformableMirror::print_properties')
         self.logger.info('{: ^21s}'.format('Controlled Actuators')                     + '{: ^18s}'.format(str(self.nValidAct)))
         self.logger.info('{: ^21s}'.format('Pitch')                                    + '{: ^18s}'.format(str(self.pitch))                    +'{: ^18s}'.format('[m]'))
         self.logger.info('{: ^21s}'.format('Mechanical Coupling')                      + '{: ^18s}'.format(str(self.mechCoupling))             +'{: ^18s}'.format('[%]' ))
-        self.logger.info('Mis-registration:')
-        self.misReg.print_properties()
+        self.logger.info('Mis-registration (map level):')
+        self.logger.info(f'shift X {self.misReg.shiftX} m, shift Y {self.misReg.shiftY} m, rotation {self.misReg.rotation} deg, '
+                         f'radial scaling {self.misReg.radialScaling}')
 
     

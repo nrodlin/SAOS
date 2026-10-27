@@ -101,7 +101,7 @@ class Vibration:
         np.ndarray
            Vibration combining X-Y vibrations for the given iteration
         """        
-        if ((iteration+1) > len(self.x_vibrations_stroke)) or ((iteration+1) > len(self.x_vibrations_stroke)):
+        if ((iteration+1) > len(self.x_vibrations_stroke)) or ((iteration+1) > len(self.y_vibrations_stroke)):
             self.logger.warning('Vibration::getCurrentVibrations - The length of the vibrations array is smaller than the simulation window. Wrapping-around.')
             iteration = iteration % np.minimum(len(self.x_vibrations_stroke), len(self.y_vibrations_stroke))
         

@@ -116,11 +116,14 @@ class ExtendedSource(Source):
 
         for dirX in range(self.nSubDirs):
             for dirY in range(self.nSubDirs):
-                self.subDirs_stars.append(Source(optBand=self.optBand, 
-                                            magnitude=1, 
-                                            coordinates=[self.subDirs_coordinates[0,dirX,dirY], self.subDirs_coordinates[1,dirX,dirY]],
-                                            logger=self.logger))
-                self.subDirs_stars[-1].flux = np.round(self.flux/(self.nSubDirs*self.nSubDirs))
+                # The sub-direction sources carry the photometry of this extended source (its own band table, e.g. 'IR' or
+                # 500/680 nm for the solar images), not the one of Source: they are built with a placeholder band and overwritten
+                star = Source(optBand='V', magnitude=1,
+                              coordinates=[self.subDirs_coordinates[0,dirX,dirY], self.subDirs_coordinates[1,dirX,dirY]],
+                              logger=self.logger)
+                star.optBand, star.wavelength, star.bandwidth = self.optBand, self.wavelength, self.bandwidth
+                star.flux = np.round(self.flux/(self.nSubDirs*self.nSubDirs))
+                self.subDirs_stars.append(star)
         
         # Last step, define the 2D filter that will be used to combine the subDirs. 
         # Taken from the WideField module of DASP (Durham Adaptive Optics Simulator, Alaister Basedn et al.)
@@ -128,41 +131,22 @@ class ExtendedSource(Source):
         if self.nSubDirs == 1:
             self.filter_2D = np.ones((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
         else:
-            self.filter_2D = np.zeros((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
-
-            lin = 1 - np.abs(np.arange(filt_width) - (filt_width - 1) / 2) / ((filt_width - 1) / 2)
-            filter_2D_template = np.tile(lin, (filt_width, 1))
-            filter_2D_template = filter_2D_template * lin[:, np.newaxis]
-            
-            subDir_size = filt_width
-
+            # Partition of unity by construction: tent windows (separable, non-zero at the edges) placed with the stride
+            # round(W/2) used to assemble the mosaic, each divided by the sum of all the placed windows. The filters then sum
+            # to one at every pixel of the mosaic, also along its border (where a single patch contributes)
+            stride = int(np.round(filt_width / 2))
+            lin = 1 - np.abs(np.arange(filt_width) - (filt_width - 1) / 2) / (filt_width / 2)
+            filter_2D_template = lin[:, np.newaxis] * lin[np.newaxis, :]
+            size = (self.nSubDirs - 1) * stride + filt_width
+            weight_sum = np.zeros((size, size))
             for dirX in range(self.nSubDirs):
                 for dirY in range(self.nSubDirs):
-                    self.filter_2D[:,:,dirX,dirY] = np.copy(filter_2D_template)
-
-                    if dirX == 0: # top, add top left and right to match the external contributions to the filter
-                        # top
-                        self.filter_2D[0:subDir_size//2,:,dirX,dirY] += filter_2D_template[-(subDir_size//2):,:] # add bottom
-                    if dirX == (self.nSubDirs-1): # bottom, add top to match the external contributions to the filter
-                        # bottom
-                        self.filter_2D[-(subDir_size//2):,:,dirX,dirY] += filter_2D_template[0:subDir_size//2,:] # add top
-                    if dirY == 0: # left, add right match the external contributions to the filter
-                        # left
-                        self.filter_2D[:,0:subDir_size//2,dirX,dirY] += filter_2D_template[:,-(subDir_size//2):] # add right
-                    if dirY == (self.nSubDirs-1): # right, add left match the external contributions to the filter
-                        # right
-                        self.filter_2D[:,-(subDir_size//2):,dirX,dirY] += filter_2D_template[:,0:subDir_size//2] # add left
-
-                    # Corner cases:
-
-                    if (dirX == 0 and dirY == 0): # top-left
-                        self.filter_2D[0:subDir_size//2,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
-                    if (dirX == 0 and dirY == (self.nSubDirs-1)): # top-right
-                        self.filter_2D[0:subDir_size//2,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
-                    if (dirX == (self.nSubDirs-1) and dirY == 0): # bottom-left
-                        self.filter_2D[-(subDir_size//2):,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
-                    if (dirX == (self.nSubDirs-1) and dirY == (self.nSubDirs-1)): # bottom-right
-                        self.filter_2D[-(subDir_size//2):,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
+                    weight_sum[dirX*stride:dirX*stride + filt_width, dirY*stride:dirY*stride + filt_width] += filter_2D_template
+            self.filter_2D = np.zeros((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
+            for dirX in range(self.nSubDirs):
+                for dirY in range(self.nSubDirs):
+                    self.filter_2D[:, :, dirX, dirY] = filter_2D_template / weight_sum[dirX*stride:dirX*stride + filt_width,
+                                                                                         dirY*stride:dirY*stride + filt_width]
                         
         self.is_initialized = True
         

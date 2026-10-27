@@ -131,8 +131,7 @@ def test_vibration_one_step_tilt_moves_image_by_file_angle(logger, tmp_path, rep
 
 @pytest.mark.parametrize('lx, ly', [
     pytest.param(5, 8, id='x_shorter'),
-    pytest.param(8, 5, id='y_shorter', marks=known_issue('VIB-LEN', 'length check tests x twice: when y is shorter than x, getCurrentVibrations '
-                                                         'indexes y out of range instead of wrapping', 'SAOS/Vibration.py:108')),
+    pytest.param(8, 5, id='y_shorter'),
     pytest.param(6, 6, id='equal'),
 ])
 def test_vibration_wraps_with_different_length_series(lx, ly, logger, tmp_path, report, tolerances):

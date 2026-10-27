@@ -501,3 +501,12 @@ def test_regression_actuator_vs_map_misregistration_convention(name, dxp, dyp, r
     report.check('same sense: max interior |diff| / rms', same, hi=tolerances['dm']['misregistration']['convention'])
     report.check('opposite sense / same sense', opposite / max(same, 1e-300), lo=10)
     report.assert_ok()
+
+
+def test_print_properties_runs(dm, logger, caplog):
+    """print_properties logs the DM configuration and its map-level misregistration without errors (C.11)."""
+    import logging
+    with caplog.at_level(logging.INFO, logger=logger.name):
+        dm.print_properties()
+    assert any('Controlled Actuators' in r.getMessage() for r in caplog.records)
+
