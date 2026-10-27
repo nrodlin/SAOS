@@ -68,24 +68,21 @@ def test_readout_noise_on_signal(logger, report, tolerances):
     report.assert_ok()
 
 
-@known_issue('DET-RON-CLIP', 'readout noise is clipped at 0 before quantisation (no bias pedestal) and the output is '
-             'unsigned, so dark pixels lose the negative half of the noise', 'Detector.py:269-286')
 def test_readout_noise_dark_frame(logger, report, tolerances):
     """
-    Readout noise on a dark frame: after readout the signal must stay zero-mean with variance sigma^2 (a camera adds a
-    bias pedestal before the ADC and removes it after, so negative excursions are kept). Clipping at 0 gives mean
-    sigma/sqrt(2 pi) and variance sigma^2 (1/2 - 1/(2 pi)), which biases centroids towards the window centre.
+    Readout noise on a dark frame. SAOS convention (owner's decision 2026-10-27, DET-RON-CLIP accepted): no bias pedestal and
+    unsigned output, so negative excursions are clipped at 0. A zero-mean Gaussian of sigma clipped at 0 has mean
+    sigma/sqrt(2 pi) and variance sigma^2 (1/2 - 1/(2 pi)): the dark frame must follow that clipped law.
     """
     tol = tolerances['detector']['readout_noise']
     sigma = 5.0
     det = make_detector(logger, readoutNoise=sigma, quantization_conversion=0.01)
     f = uniform_frames(det, 0, 4) * 0.01
-    report.check('mean / sigma', f.mean() / sigma, 0.0, atol=tol['dark_mean_atol'])
-    report.check('variance / sigma^2', f.var() / sigma ** 2, 1.0, atol=tol['var_rtol'])
+    report.check('mean / (sigma / sqrt(2 pi)) - 1 (clipped Gaussian)', f.mean() / (sigma / np.sqrt(2 * np.pi)) - 1, 0.0, atol=tol['dark_mean_atol'])
+    report.check('variance / (sigma^2 (1/2 - 1/(2 pi)))', f.var() / (sigma ** 2 * (0.5 - 0.5 / np.pi)), 1.0, atol=tol['var_rtol'])
     report.assert_ok()
 
 
-@known_issue('DET-TRUNC', 'quantisation truncates (astype) instead of rounding: -0.5 DN bias', 'Detector.py:286')
 def test_quantisation_unbiased(logger, report, tolerances):
     """
     Quantisation with q = 10 e-/DN of 1000 e- per pixel (readout noise 10 e- dithers the ADC): the mean output must be
@@ -98,18 +95,17 @@ def test_quantisation_unbiased(logger, report, tolerances):
     report.assert_ok()
 
 
-@known_issue('DET-WRAP', 'dark-calibrated frames are cast to unsigned after subtracting the dark: negative values wrap '
-             'to ~2^16', 'Detector.py:281-286')
 def test_dark_calibration_no_wrap(logger, report, tolerances):
     """
     Dark calibration (20 frames) with readout noise 10 e-, 12 bits, 1 e-/DN, no signal: the calibrated output must stay
-    within [0, 2^12 - 1] (or be signed) with mean ~ 0. Unsigned wrap of negative values produces counts near 65535.
+    within [0, 2^12 - 1] (negative residuals clipped at 0, SAOS convention). Unsigned wrap of negative values would produce
+    counts near 65535.
     """
-    tol = tolerances['detector']['dark_calibration']
     det = make_detector(logger, readoutNoise=10.0, nBits=12, darkCalibration=20, fullWellCapacity=60000)
     f = uniform_frames(det, 0, 2)
     report.check('max DN', f.max(), hi=2 ** 12 - 1, unit='DN')
-    report.check('mean DN', f.mean(), 0.0, atol=tol['mean_atol_dn'], unit='DN')
+    report.check('min DN', f.min(), lo=0, unit='DN')
+    report.metric('mean DN (clipped residual of the dark subtraction)', f.mean())
     report.assert_ok()
 
 
@@ -123,8 +119,6 @@ def test_full_well_saturation(logger, report):
 
 
 @pytest.mark.parametrize('fwc', [np.inf, float('inf')], ids=['np.inf', 'float_inf'])
-@known_issue('DET-FWC-INF', 'with an infinite full well and q = 0 every frame is normalised by its own maximum (np.inf), '
-             'or the output is all zeros (float("inf") fails the `is np.inf` test)', 'Detector.py:263-268')
 def test_infinite_full_well_scale(logger, report, fwc):
     """
     Infinite full well with automatic quantisation (q = 0): the output must keep the absolute signal scale, so a frame

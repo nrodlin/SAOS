@@ -169,7 +169,7 @@ class Detector:
             self.calibrating  = True
             for _ in range(self.darkCalibration):
                 self.dark_calibration_frame += self.integrate(np.zeros_like(self.frame, dtype=float), 0)
-            self.dark_calibration_frame = self.dark_calibration_frame // self.darkCalibration
+            self.dark_calibration_frame = self.dark_calibration_frame / self.darkCalibration     # mean dark [DN]
             self.shotNoise = shotNoise
             self.calibrating = False
         else:
@@ -295,9 +295,10 @@ class Detector:
         
         # 10: Quantification
         if self.quantization_conversion == 0:
-            if self.fullWellCapacity is np.inf:
-                self.quantizationNoise = 0 # [e-]
-                quantized_frame = (electron_noisy_frame / electron_noisy_frame.max()) * 2**(self.nBits) # [counts]
+            if np.isinf(self.fullWellCapacity):
+                # Automatic conversion with an infinite full well: 1 e-/DN, so that the absolute signal scale is kept
+                self.quantizationNoise = 1 / np.sqrt(12) # [e-]
+                quantized_frame = electron_noisy_frame # [counts]
             else:
                 self.quantizationNoise = self.fullWellCapacity / (np.sqrt(12) * 2**(self.nBits)) # [e-]
                 quantized_frame = (electron_noisy_frame / self.fullWellCapacity) * 2**(self.nBits)  # [counts]
@@ -305,14 +306,15 @@ class Detector:
             self.quantizationNoise = self.quantization_conversion / np.sqrt(12)  # [e-]
             quantized_frame = electron_noisy_frame / self.quantization_conversion  # [counts]
         
-        quantized_saturated_frame = np.clip(quantized_frame, a_min=0, a_max=(2**self.nBits) - 1) # [counts]
+        # Rounding to the nearest count (truncation would bias the output by -0.5 DN)
+        quantized_saturated_frame = np.clip(np.round(quantized_frame), a_min=0, a_max=(2**self.nBits) - 1) # [counts]
         self.saturation_level = 100 * (quantized_saturated_frame.max() / 2**self.nBits)  # [%]
 
        
-        # Apply dark calibration
-
+        # Apply dark calibration: the calibrated frame is clipped at 0 (no bias pedestal: unsigned output, negative residuals
+        # of the dark subtraction would otherwise wrap to ~2^bits)
         if self.darkCalibration and not self.calibrating:
-            quantized_saturated_frame -= self.dark_calibration_frame
+            quantized_saturated_frame = np.clip(np.round(quantized_saturated_frame - self.dark_calibration_frame), a_min=0, a_max=None)
 
         # 11: Set precision 
             
