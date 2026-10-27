@@ -1,7 +1,13 @@
 # Installation Guideline
 
 This guide covers the recommended installation procedure for SAOS, targeting a Linux environment (e.g., Ubuntu 24). 
-Since SAOS relies heavily on multi-threading for performance, the use of **free-threaded Python** (e.g., Python 3.13.2t) is highly recommended.
+SAOS requires Python >= 3.10. Since it propagates the light paths in threads, a **free-threaded Python** (no GIL) is highly
+recommended: with the GIL enabled the results are the same but the light paths do not run in parallel (SAOS logs a notice at
+import). Tested configuration: Python 3.13.9t, torch 2.11 (CUDA 13.0), h5py 3.16, pyzmq 27.1, pvlib 0.15.
+
+> **Note on free-threading:** torch support for 3.13t is experimental and PyTorch is moving its free-threaded wheels to 3.14t.
+> `PYTHON_GIL=0` also forces extensions that do not declare free-threading support (OpenCV, astropy, pyzmq) to run without the
+> GIL.
 
 ---
 
@@ -65,9 +71,17 @@ cd SAOS
 # Checkout to the development branch (if required)
 git checkout develop
 
-# Install SAOS
+# Install SAOS (editable) with its runtime dependencies
 pip install -e .
+
+# Optional: documentation and validation-suite tools
+pip install -r requirements.txt
 ```
+
+The runtime dependencies (astropy, h5py, joblib, jsonpickle, matplotlib, numpy, opencv-contrib-python, pvlib, pyzmq, scipy,
+torch) are declared in `setup.cfg` and installed by pip. A non-editable install (`pip install .` or a wheel built with
+`pip wheel . --no-deps`) contains every subpackage and the solar images (~90 MB compressed), so SAOS also works outside the
+repository.
 
 ### Git Large File Storage (LFS)
 
@@ -113,15 +127,7 @@ git lfs ls-files
 
 ## 4. Additional Dependencies
 
-Depending on your simulation needs, you may want to install the following dependencies:
-
-```bash
-# Required for telemetry streaming
-pip install zmq
-
-# Required for handling large data formats (like M7 discrete models)
-pip install h5py
-```
+h5py (data files, M7 discrete models) and pyzmq (telemetry streaming) are installed with SAOS.
 
 ### Compiling HDF5 and h5py from source (Optional)
 

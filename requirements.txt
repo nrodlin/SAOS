@@ -1,9 +1,13 @@
+# SAOS and its runtime dependencies (setup.cfg install_requires)
 -e .
+# Documentation
 mkdocs
 mkdocs-material
 mkdocs-jupyter
 mkdocstrings[python]
+# Development and validation suite (tests/, ci/run_ci.sh)
 ruff
 jupyter
-zmq
-h5py
+pytest
+pytest-timeout
+psutil
