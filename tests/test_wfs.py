@@ -234,8 +234,6 @@ def test_odd_symmetry_all_pixels(logger, report, tolerances):
     report.assert_ok()
 
 
-@known_issue('WFS-BRIGHTEST-TIES', 'CoG on the 50 brightest pixels of a point-source spot: equal-valued pixels at the '
-             'threshold make the response discontinuous at 0 and asymmetric', 'ShackHartmann.py:325-337')
 def test_continuity_default_brightest(logger, report, tolerances):
     """
     Default use_brightest = 50: the small-signal response must still be linear and odd, gain(+-0.002 px) equal to
@@ -557,8 +555,6 @@ def test_undersampled_spot_rejected(logger, report):
 
 
 @pytest.mark.parametrize('n', [0, 15 ** 2 + 1], ids=['zero', 'more_than_window'])
-@known_issue('WFS-PARAM-BRIGHTEST', 'use_brightest outside [1, npix_subap^2] is not validated: 0 raises IndexError and '
-             'larger values a torch RuntimeError deep in centroid()', 'ShackHartmann.py:139, 330')
 def test_use_brightest_validated(logger, report, n):
     """
     use_brightest outside [1, npix^2] must either raise a ValueError at construction or behave as 'all pixels'
@@ -576,8 +572,6 @@ def test_use_brightest_validated(logger, report, n):
     report.assert_ok()
 
 
-@known_issue('WFS-KWARGS', 'unknown keyword arguments are silently ignored (**kwargs), so a misspelt option keeps its '
-             'default without notice', 'ShackHartmann.py:47')
 def test_unknown_kwarg_reported(logger, report, caplog):
     """A misspelt option (validSubapTreshold) must raise a TypeError or at least log a warning naming it."""
     import logging

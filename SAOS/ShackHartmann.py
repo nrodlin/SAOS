@@ -30,6 +30,11 @@ This module contains the `ShackHartmann` class, used for modeling a SH-WFS in ad
 """
 
 class ShackHartmann:
+    # Keyword arguments read from **kwargs (any other one is reported as unknown)
+    KNOWN_KWARGS = ('device', 'pupil_oversampling', 'n_reference_frames', 'validSubapThreshold', 'fullWellCapacity', 'nBits', 'quantumEfficiency',
+                    'shotNoise', 'darkCurrent', 'readoutNoise', 'gain', 'quantization_conversion', 'sensorType', 'darkCalibration',
+                    'randomState', 'integrationTime')
+
     def __init__(self,
                  nSubap:float,
                  telescope,
@@ -120,6 +125,9 @@ class ShackHartmann:
                 Detector parameter. Integration time for the detector [s]. Default is the sampling time.        
         """
         self.logger = logger if logger is not None else get_logger()
+        unknown = sorted(set(kwargs) - set(self.KNOWN_KWARGS))
+        if unknown:
+            self.logger.warning(f'ShackHartmann::__init__ - unknown keyword argument(s) {unknown} ignored (accepted: {", ".join(self.KNOWN_KWARGS)}).')
 
         self.tag                            = 'shackHartmann'
 
@@ -154,6 +162,9 @@ class ShackHartmann:
         self.subaperture_size           = telescope.D / self.nSubap
         self.npix_lenslet               = int(np.round((self.fieldOfView + self.fft_fieldOfView_oversampling) / self.plate_scale))
         self.npix_subap                 = int(np.round(self.fieldOfView / self.plate_scale))
+        if not (1 <= int(self.use_brightest) <= self.npix_subap ** 2):
+            self.logger.error(f'{type(self).__name__}::__init__ - use_brightest = {self.use_brightest} outside [1, {self.npix_subap ** 2}] (pixels of the window).')
+            raise ValueError(f'use_brightest must be in [1, {self.npix_subap ** 2}] (pixels of the {self.npix_subap}x{self.npix_subap} window), got {self.use_brightest}.')
         self.npix_phase                 = telescope.resolution // self.nSubap
 
         # Compensate the phase intensity due to the interpolation
@@ -348,8 +359,9 @@ class ShackHartmann:
         ----------
         image : np.ndarray
             Subaperture image cube.
-        use_brightest : float, optional
-            Minimum intensity to include in centroid.
+        use_brightest : int, optional
+            Number of brightest pixels of the thresholded centre of gravity (weights I - T, T the next pixel value);
+            the number of pixels of the window gives the plain centre of gravity.
 
         Returns
         -------
@@ -366,15 +378,15 @@ class ShackHartmann:
         # flatten each subap
         flat = image.view(n_subap, -1)
 
-        # Obtener umbral para los brightest
-        topk_vals, _ = torch.topk(flat, use_brightest, dim=1)
-        thresholds = topk_vals[:, -1].unsqueeze(1)
-
-        # Máscara para pixels válidos
-        mask = flat >= thresholds
-
-        # Aplicar máscara
-        filtered = flat * mask
+        # Thresholded centre of gravity: weights (I - T)+ with T the (use_brightest + 1)-th largest value, so that a pixel enters
+        # or leaves the group with zero weight and the response is continuous (a hard top-k selection jumps when ties at the
+        # threshold break, e.g. around zero tilt). With all the pixels of the window (use_brightest = H W) it is the plain CoG.
+        if use_brightest < flat.shape[1]:
+            topk_vals, _ = torch.topk(flat, use_brightest + 1, dim=1)
+            thresholds = topk_vals[:, -1].unsqueeze(1)
+            filtered = torch.clamp(flat - thresholds, min=0)
+        else:
+            filtered = flat
 
         # Restaurar forma original
         filtered = filtered.view(n_subap, H, W)

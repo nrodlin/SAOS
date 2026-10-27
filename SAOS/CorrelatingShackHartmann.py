@@ -27,6 +27,11 @@ This module contains the `CorrelatingShackHartmann` class, used for modeling a S
 """
 
 class CorrelatingShackHartmann:
+    # Keyword arguments read from **kwargs (any other one is reported as unknown)
+    KNOWN_KWARGS = ('device', 'pupil_oversampling', 'n_reference_frames', 'validSubapThreshold', 'fullWellCapacity', 'nBits', 'quantumEfficiency',
+                    'shotNoise', 'darkCurrent', 'readoutNoise', 'gain', 'quantization_conversion', 'sensorType', 'darkCalibration',
+                    'randomState', 'integrationTime')
+
     def __init__(self,
                  nSubap:float,
                  telescope,
@@ -116,6 +121,9 @@ class CorrelatingShackHartmann:
                 Detector parameter. Integration time for the detector [s]. Default is the sampling time.
         """
         self.logger = logger if logger is not None else get_logger()
+        unknown = sorted(set(kwargs) - set(self.KNOWN_KWARGS))
+        if unknown:
+            self.logger.warning(f'CorrelatingShackHartmann::__init__ - unknown keyword argument(s) {unknown} ignored (accepted: {", ".join(self.KNOWN_KWARGS)}).')
 
         self.tag                            = 'shackHartmann'
 
@@ -144,6 +152,9 @@ class CorrelatingShackHartmann:
         self.subaperture_size           = telescope.D / self.nSubap
         self.npix_lenslet               = int(np.round((self.fieldOfView + self.fft_fieldOfView_oversampling) / self.plate_scale))
         self.npix_subap                 = int(np.round(self.fieldOfView / self.plate_scale))
+        if not (1 <= int(self.use_brightest) <= self.npix_subap ** 2):
+            self.logger.error(f'{type(self).__name__}::__init__ - use_brightest = {self.use_brightest} outside [1, {self.npix_subap ** 2}] (pixels of the window).')
+            raise ValueError(f'use_brightest must be in [1, {self.npix_subap ** 2}] (pixels of the {self.npix_subap}x{self.npix_subap} window), got {self.use_brightest}.')
         self.npix_phase                 = telescope.resolution // self.nSubap
 
         # Compensate the phase intensity due to the interpolation
@@ -294,6 +305,9 @@ class CorrelatingShackHartmann:
 
             mode_amp = np.std(Tip)
             amp_list = [i for i in range(-2,3)]
+            # Tilts are measured against the pseudo-reference and reference slopes of the unaberrated object (a pseudo-reference
+            # taken from each tilted frame would move with it and the slopes would be zero)
+            pseudoref, reference_slopes = self.initialize_wfs(telescope, src)
 
             mean_slope = np.zeros(5)
             input_std = np.zeros(5)
@@ -301,14 +315,14 @@ class CorrelatingShackHartmann:
             for i in range(len(amp_list)):
                 calibration_phase_tip = amp_list[i]*Tip*telescope.pupil
                 calibration_phase_tip = np.repeat(calibration_phase_tip[np.newaxis,:,:], src.nSubDirs**2, axis=0)
-                signalTip,_,_ = self.wfs_measure(calibration_phase_tip, src, None, None)
+                signalTip,_,_,_ = self.wfs_measure(calibration_phase_tip, src, pseudoref, reference_slopes)
 
                 calibration_phase_tilt = amp_list[i]*Tilt*telescope.pupil
                 calibration_phase_tilt = np.repeat(calibration_phase_tilt[np.newaxis,:,:], src.nSubDirs**2, axis=0)
-                signalTilt,_,_ = self.wfs_measure(calibration_phase_tilt, src, None, None)
+                signalTilt,_,_,_ = self.wfs_measure(calibration_phase_tilt, src, pseudoref, reference_slopes)
 
                 mean_slope[i] = np.mean(signalTip[:self.nValidSubaperture] + signalTilt[:self.nValidSubaperture])
-                input_std[i] = np.std(calibration_phase_tip[telescope.pupil])
+                input_std[i] = np.std(amp_list[i]*Tip[telescope.pupil.astype(bool)])
                 
             p = np.polyfit(amp_list*np.asarray(mode_amp), mean_slope, deg = 1)
             self.slopes_units = np.abs(p[0]) # [px/rad]
@@ -883,9 +897,9 @@ class CorrelatingShackHartmann:
         # fill camera frame with computed intensity (only valid subapertures)
 
         ideal_frame = self.create_full_frame(I)
-        # Compute the number of photons considering the flux of the sun, collecting area of the telescope, sampling time and FoV of the WFS 
-        # that may be smaller in the simulation than the FoV of the source
-        nPhotons = np.round(src.flux * self.area_eff * self.integration_time * self.lightRatio * (self.fieldOfView / src.fov)).astype(int)
+        # Compute the number of photons considering the flux of the sun, collecting area of the telescope, sampling time and FoV of the WFS
+        # that may be smaller in the simulation than the FoV of the source: the flux is per field, so it scales with the sky area (FoV^2)
+        nPhotons = np.round(src.flux * self.area_eff * self.integration_time * self.lightRatio * (self.fieldOfView / src.fov)**2).astype(int)
         return ideal_frame, I, nPhotons
               
       

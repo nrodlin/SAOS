@@ -578,8 +578,6 @@ def test_tilt_axes_isotropy_and_sign(logger, report, tolerances):
     report.assert_ok()
 
 
-@known_issue('CSH-UNIT-RAD', 'calib_unit unpacks 3 values from wfs_measure, which returns 4: unit_in_rad=True cannot be constructed',
-             'CorrelatingShackHartmann.py:273-277')
 def test_unit_in_rad_constructs(logger, report):
     """unit_in_rad=True must construct and give a finite, positive px/rad conversion (slopes_units)."""
     wfs, tel, src = make_csh(logger, unit_in_rad=True)
@@ -587,8 +585,6 @@ def test_unit_in_rad_constructs(logger, report):
     report.assert_ok()
 
 
-@known_issue('CSH-FOV-FLUX', 'the photon count scales with fieldOfView / src.fov instead of its square (a sky area): a WFS FoV of 6" of '
-             'a 10" source gets 60 % of the photons instead of 36 %', 'CorrelatingShackHartmann.py:827')
 def test_photons_scale_with_fov_squared(logger, report, tolerances):
     """
     The photons collected scale with the sky area observed: (fieldOfView / src.fov)^2 times the flux of the source (src.fov
