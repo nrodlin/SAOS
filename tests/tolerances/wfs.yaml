@@ -23,5 +23,7 @@ quadratic:
 fwhm_atol: 0.02         # spot FWHM / 0.886 lambda/d (band-limited interpolation of the sampled sinc^2)
 photon_noise:
   ratio_atol: 0.053     # var/(M2/N): 120 frames x 36 subap x 2 axes = 8640 samples -> sigma(var)/var = sqrt(2/8640) = 1.5 %; 3.5 sigma
-reference_ratio_max: 0.1  # rms(noisy - clean reference) / single-frame noise rms
+reference:                # reference slopes averaged over n frames (noiseFlag=True)
+  n_frames: 100           # default n_reference_frames
+  n_sigma: 3.5            # band on sqrt(n) * rms(noisy - clean) / sigma_1 = 1: n_sigma / sqrt(2 M), M valid slopes
 energy_atol: 2.0e-3     # energy / expected transmitted energy: float32 FFT and exact Fourier-sum reference

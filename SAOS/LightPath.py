@@ -157,6 +157,10 @@ class LightPath:
 
         self.wfs = wfs
         self.sci = sci
+        # Noise stream of this path on each detector: streams are numbered in the order in which the light paths are connected to the
+        # detector, so the noise of a path does not depend on thread scheduling when several paths share a WFS or a camera
+        self.wfs_noise_stream = wfs.cam.register_stream() if wfs is not None else None
+        self.sci_noise_stream = sci.cam.register_stream() if sci is not None else None
         # Special disturbance object
 
         self.vibration   = vibration
@@ -201,16 +205,18 @@ class LightPath:
             self.vibration_opd = self.vibration.getCurrentVibrations(self.iteration)
             self.vibration_phase = self.vibration_opd * (2*np.pi/self.src.wavelength)
         else:
-            self.vibration_opd   *= 0
-            self.vibration_phase *= 0
+            # New zero arrays, never in-place: the previous arrays may be views of the user's data (e.g. LocalSeeing input)
+            self.vibration_opd   = np.zeros_like(self.vibration_opd)
+            self.vibration_phase = np.zeros_like(self.vibration_phase)
         
         ## Local seeing
         if (not interaction_matrix) and (self.localSeeing is not None):
             self.localSeeing_opd = self.localSeeing.getCurrentOPD(self.iteration)
             self.localSeeing_phase = self.localSeeing_opd * (2*np.pi/self.src.wavelength)
         else:
-            self.localSeeing_opd   *= 0
-            self.localSeeing_phase *= 0
+            # getCurrentOPD returns a view of the LocalSeeing input: zeroing it in place would erase that frame of the sequence
+            self.localSeeing_opd   = np.zeros_like(self.localSeeing_opd)
+            self.localSeeing_phase = np.zeros_like(self.localSeeing_phase)
 
         ## Project the atmosphere
      
@@ -218,8 +224,8 @@ class LightPath:
             self.atmosphere_opd = self.atm.getOPD(self.src)
             self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
         else: # Avoid interacting with the atmosphere while the IM is being measured
-            self.atmosphere_opd   *= 0
-            self.atmosphere_phase *= 0
+            self.atmosphere_opd   = np.zeros_like(self.atmosphere_opd)
+            self.atmosphere_phase = np.zeros_like(self.atmosphere_phase)
 
         # Project the DM
         if self.dm is not None:
@@ -258,9 +264,9 @@ class LightPath:
         # Then, measure the slopes at the WFS - if defined
         if self.wfs is not None:
             if self.src.tag == 'sun':
-                self.slopes_1D, self.slopes_2D, self.wfs_frame, _ = self.wfs.wfs_measure(self.wfs_phase, self.src, self.pseudo_ref, self.reference_slopes)
+                self.slopes_1D, self.slopes_2D, self.wfs_frame, _ = self.wfs.wfs_measure(self.wfs_phase, self.src, self.pseudo_ref, self.reference_slopes, stream=self.wfs_noise_stream)
             else:
-                self.slopes_1D, self.slopes_2D, self.wfs_frame = self.wfs.wfs_measure(self.wfs_phase, self.src)
+                self.slopes_1D, self.slopes_2D, self.wfs_frame = self.wfs.wfs_measure(self.wfs_phase, self.src, stream=self.wfs_noise_stream)
 
             self.error_measurement[:, (self.iteration+1)%self.error_measurement.shape[1]] = self.slopes_1D.copy()
 
@@ -301,7 +307,7 @@ class LightPath:
                         longExp /= total_energy
                     # Check if the user wants to add noise
                     if self.sci.cam.noiseFlag:
-                        longExp = self.sci.apply_noise(longExp, self.src.flux * self.sci.integrationTime * self.tel.area_eff)
+                        longExp = self.sci.apply_noise(longExp, self.src.flux * self.sci.integrationTime * self.tel.area_eff, stream=self.sci_noise_stream)
                     else:
                         longExp = longExp * self.src.flux * self.sci.integrationTime * self.tel.area_eff * self.sci.lightRatio
                     # Save the frame 

@@ -34,9 +34,15 @@ def generate_zernike_modes(dm, nModes=None, useTorch=False, include_piston=False
 # Generate zernikes, this process is split form the main call function to provide a better interface for the KL modal base
 # that requires the generation of the full set of Zernikes, not normalized and without the pupil occlusion and spider.
 
-def get_zernikes(coordinates, validActs, nModes, Noffset):
+def get_zernikes(coordinates, validActs, nModes, Noffset, return_energy=False):
+    """
+    Noll-normalised Zernike modes j = Noffset ... Noffset + nModes - 1 sampled at the actuators, piston removed and rescaled to unit rms
+    over the valid actuators (zern_modes[:, j] = Z_j / energy_j). With return_energy=True the rms energy_j of every mode before the
+    rescaling is returned too: the coefficients on these columns are the Noll coefficients times energy_j.
+    """
 
     zern_modes = np.zeros((coordinates.shape[0], nModes))
+    energies = np.ones(nModes)
 
     Z_machine = ZernikeNaive(mask=[])
 
@@ -48,7 +54,8 @@ def get_zernikes(coordinates, validActs, nModes, Noffset):
 
     for j in range(nModes):
         # Jacobi form of the radial polynomial: the explicit factorial sum ('Standard') loses all precision above n ~ 40
-        Z, _ = Z_machine.Z_nm(j + Noffset, rho, theta, True, 'Jacobi')
+        Z, norm_coeff = Z_machine.Z_nm(j + Noffset, rho, theta, True, 'Jacobi')
+        Z = Z * norm_coeff                      # Noll normalisation (Z_nm returns the coefficient without applying it)
         Z[~validActs] = 0.0
         
         # Remove piston
@@ -58,10 +65,13 @@ def get_zernikes(coordinates, validActs, nModes, Noffset):
         energy = np.sqrt(np.mean(Z[validActs]**2))
         if energy > 0:
             Z /= energy
+            energies[j] = energy
         
         # Apply the pupil mask
         zern_modes[:, j] = Z
 
+    if return_energy:
+        return zern_modes, energies
     return zern_modes
 
 ### --------------------------------------- ###

@@ -15,11 +15,13 @@ b2:
 b3:                               # ground layer, 8 seeds: max over the 18 stars per seed
   ref_atol: 0.012                 # extended vs independent PSF of the screen: 0.0059-0.0091 (mean 0.0082, sd 0.0012) + 3.5 sd
   ngs_atol: 0.008                 # extended vs NGS: 0.0030-0.0065 (mean 0.0040, sd 0.0011) + 3.5 sd (898 vs 779 px resampling)
-b4:                               # layer at 15 km, expected from the screen with exact sub-pixel offsets; reference alone
+b4:                               # layer at 15 km, expected from the screen with the offsets rounded to the layer pixel (integer-pixel model); reference alone
   orientation_min_sep: 0.05      # discriminating power of the orientation test (selection, not a tolerance): stars where E and E_t differ by > 5% of the peak
   ref_atol: 0.0011                # numerical precision of the reference: expected star windows from the 1024 px FFT / 4x4 pupil
                                   # sub-pixels / bilinear phase on the 450 px grid vs the 2048 px FFT / 8x8 / cubic-sampled phase,
                                   # max over the 18 stars, 8 seeds: mean 6.8e-4, sd 1.1e-4 (max 9.0e-4) + 3.5 sd = 1.06e-3
+  psf_atol: 0.02                  # owner's criterion (2026-10-27): ext vs E per star, all stars. Includes the extended-image model error
+                                  # validated in b3 (ground, 0.59-0.91 %); measured at 15 km 0.13-0.45 % (1 seed)
 b4_growth:                        # 8 seeds
   floor: 0.014                    # ext vs NGS at patch centres (zero anisoplanatism): 0.0045-0.0091 (mean 0.0069, sd 0.0020) + 3.5 sd
   ratio_min: 3.0                  # mean off-centre / mean centre difference: 6.6-17 measured; physical expectation >> 1

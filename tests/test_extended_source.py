@@ -523,19 +523,18 @@ def test_b2_subdirection_footprint_orientation(altitude_case, report):
     report.assert_ok()
 
 
-@known_issue('ATM-FOOTPRINT-INT', 'Atmosphere.get_pupil_footprint truncates the footprint centre to an integer layer pixel '
-             '(int(x_z), int(y_z)): the line of sight is displaced by up to 1 px of the layer (0.9 cm at the pupil) from h tan(theta)',
-             'SAOS/Atmosphere.py:464-469')
 def test_b2_subdirection_footprint_subpixel(altitude_case, tolerances, report):
     """
     Same measurement as test_b2_subdirection_footprint_orientation, restricted to the diagonal sub-directions (a = b, 0, 4, 8)
-    where the layer axes (transposed or not) give the same offset, so that only the sub-pixel accuracy of the footprint is
-    tested: the measured offset must match h tan(theta) (exact, sub-pixel). The tolerance is the precision of the offset
-    estimator itself (whitened cross-correlation + parabola) on the exact sub-pixel windows of the same screens, 8 seeds.
+    where the layer axes (transposed or not) give the same offset, so that only the footprint position is tested: the measured
+    offset must match h tan(theta) rounded to the nearest layer pixel (integer-pixel model, owner's decision 2026-10-27). The
+    tolerance is the precision of the offset estimator itself (whitened cross-correlation + parabola), 8 seeds.
     """
     tol = tolerances['extended_source']['b2']
     meas, expd, _ = _footprint_offsets(altitude_case)
     diag = np.array([i // NSUB == i % NSUB for i in range(NSUB ** 2)])
+    report.metric('|h tan(theta) - rounded| [px] (integer-pixel model, <= 0.5)', np.abs(expd - np.round(expd))[diag])
+    expd = np.round(expd)
     err = (meas - expd)[diag]
     report.metric('measured diagonal footprint offsets (row, col) [px]', meas[diag])
     report.metric('expected diagonal footprint offsets (row, col) [px]', expd[diag])
@@ -595,7 +594,7 @@ def _patch_psfs(ref, atm, transposed=False):
     psfs = {}
     for i in range(NSUB):
         for j in range(NSUB):
-            o = layer_offset_px(centres[i], centres[j], H_ALT, pitch)
+            o = np.round(layer_offset_px(centres[i], centres[j], H_ALT, pitch))   # integer-pixel footprint model
             o = o[::-1] if transposed else o
             psfs[i, j] = ref.psf(screen_window(scr, *o))
     return psfs
@@ -603,7 +602,7 @@ def _patch_psfs(ref, atm, transposed=False):
 
 @pytest.fixture(scope='module')
 def b4_expect(altitude_case, pattern, ref):
-    """Star windows of the extended frame and expectations (exact sub-pixel offsets; transposed layer axes) from the screen."""
+    """Star windows of the extended frame and expectations (offsets rounded to the layer pixel; transposed layer axes) from the screen."""
     _, stars, _ = pattern
     s, centres = patch_geometry()
     psfs, psfs_t = _patch_psfs(ref, altitude_case['atm']), _patch_psfs(ref, altitude_case['atm'], transposed=True)
@@ -633,8 +632,7 @@ def test_b4_altitude_layer_orientation(b4_expect, tolerances, report):
     ext_w, E, Et = b4_expect['ext'], b4_expect['E'], b4_expect['Et']
     d, dt = _peak_diff(ext_w, E), _peak_diff(ext_w, Et)
     sep = _peak_diff(E, Et)
-    # Orientation is decided only where the two expectations differ clearly (orientation_min_sep of the peak), above the
-    # ~1% residual of the integer footprint (ATM-FOOTPRINT-INT, tested separately)
+    # Orientation is decided only where the two expectations differ clearly (orientation_min_sep of the peak)
     sel = sep > max(tol['ref_atol'], tol['orientation_min_sep'])
     report.metric('max |E - E_t| / peak per star (distinguishability)', sep)
     report.metric('max |ext - E| / peak per star', d)
@@ -643,36 +641,26 @@ def test_b4_altitude_layer_orientation(b4_expect, tolerances, report):
     report.assert_ok()
 
 
-@known_issue('ATM-FOOTPRINT-INT', 'Atmosphere.get_pupil_footprint truncates the footprint centre to an integer layer pixel '
-             '(int(x_z), int(y_z)); the extended-source patch phase is that of a line of sight displaced by up to 1 layer pixel '
-             'from h tan(theta)', 'SAOS/Atmosphere.py:464-469')
 def test_b4_altitude_layer_psf_vs_screen(b4_expect, tolerances, report):
     """
-    Same set-up as test_b4_altitude_layer_orientation. Absolute criterion, max |ext - E| / peak per star <= b4.ref_atol, on
-    the stars for which the transposed-axes expectation is indistinguishable from E (max |E - E_t| / peak <= ref_atol), so that
-    the layer-axes orientation (EXT-TRANSPOSE) does not enter and only the sub-pixel accuracy of the footprint is tested.
-    b4.ref_atol is the numerical precision of the reference itself (E from a 1024 px FFT, 4x4 pupil sub-pixels, bilinear phase
-    on the 450 px grid vs the same from a 2048 px FFT, 8x8 sub-pixels, phase sampled directly from the cubic screen; 8
-    seeds, max over stars: mean + 3.5 sd), not a bound derived from SAOS.
+    Same set-up as test_b4_altitude_layer_orientation. Absolute criterion on every star: max |ext - E| / peak <= b4.psf_atol
+    (2 %, owner's criterion), E built from the screen with the footprint offsets h tan(theta) rounded to the layer pixel
+    (integer-pixel model). The criterion covers the extended-image model error itself (patch resampling and PSF blending,
+    validated on the ground layer in b3: 0.6-0.9 %); the reference precision is b4.ref_atol (0.11 %). The layer-axes
+    orientation is fixed (EXT-TRANSPOSE solved) and tested separately by test_b4_altitude_layer_orientation.
     """
     tol = tolerances['extended_source']['b4']
     ext_w, E, Et = b4_expect['ext'], b4_expect['E'], b4_expect['Et']
     stars = b4_expect['stars']
     d = _peak_diff(ext_w, E)
-    sel = _peak_diff(E, Et) <= tol['ref_atol']
-    report.metric('stars tested (transposition-insensitive)', int(sel.sum()))
     report.metric('max |ext - E| / peak, per star', d)
-    if not sel.any():
-        # Design gap: only stars at the centre of a diagonal patch (i == j, off axis) are insensitive to EXT-TRANSPOSE and
-        # still probe the fractional footprint; the pattern has none. Skip instead of passing on an empty selection.
-        pytest.skip('no transposition-insensitive star in the pattern: add stars at the diagonal patch centres (pending)')
-    report.check('max |ext - expected| / peak, transposition-insensitive stars', d[sel], expected=0.0, atol=tol['ref_atol'])
+    report.check('max |ext - expected| / peak, all stars', d, expected=0.0, atol=tol['psf_atol'])
     mosaic(report, 'b4_mosaic', ext_w, E, star_labels(stars), 'B4 layer at 15 km: extended star PSF vs expected (tent-weighted patch PSFs)')
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(7, 3.4))
     ax.plot(d * 100, 'o-', label='expected, image axes')
     ax.plot(_peak_diff(ext_w, Et) * 100, 's-', label='expected, transposed layer axes')
-    ax.axhline(100 * tol['ref_atol'], color='k', ls=':', label='tolerance')
+    ax.axhline(100 * tol['psf_atol'], color='k', ls=':', label='tolerance')
     ax.set_xticks(np.arange(len(stars)))
     ax.set_xticklabels(star_labels(stars), rotation=90, fontsize=6)
     ax.set_ylabel('max |ext - expected| / peak [%]')
@@ -865,7 +853,7 @@ def test_b5_flux(flat_case, pattern, ref, tel, logger, tolerances, report):
     cam50 = make_cam(tel, logger)
     cam50.lightRatio = 50
     _, lp50 = science_frame(sun, None, tel, cam50, logger)
-    report.metric('long exposure photons with the default ScienceCam lightRatio 50 / (flux T A_eff) (context)',
+    report.metric('long exposure photons with ScienceCam lightRatio 50 (default before 2026-10-27) / (flux T A_eff) (context)',
                   lp50.long_exposure_frame.sum() / (N_exp * TS * tel.area_eff))
     f = flat_case['ext']
     P = ref.psf()
@@ -899,13 +887,12 @@ def test_b5_flux(flat_case, pattern, ref, tel, logger, tolerances, report):
     report.assert_ok()
 
 
-@known_issue('SCI-LIGHTRATIO', 'ScienceCam default lightRatio is 50 (documented as a threshold) and LightPath multiplies the long exposure by it: 50x the photons', 'SAOS/ScienceCam.py:34, SAOS/LightPath.py:306')
 def test_b5_default_science_photon_budget(flat_case, tel, logger, report):
     """
     With the default ScienceCam arguments the long-exposure frame of a noise-free LightPath must hold the photons that the
     source delivers through the effective area in the exposure time, flux x T x A_eff (a camera that records all the light
-    of the path). SAOS multiplies the photons by ScienceCam.lightRatio (default 50, documented as a subaperture threshold,
-    LightPath.py:306 and ScienceCam.apply_noise), so the default camera sees 50 times more photons than the source gives.
+    of the path): ScienceCam.lightRatio is the fraction of the photons reaching the camera (LightPath.py and
+    ScienceCam.apply_noise), 1.0 by default (it was 50 before 2026-10-27).
     """
     sun = flat_case['sun']
     cam = ScienceCam(fieldOfView=FOV, plate_scale=PS, samplingTime=TS, telescope=tel, integrationTime=TS, logger=logger,

@@ -66,8 +66,15 @@ class CorrelatingShackHartmann:
             Number of pixels between subapertures.
         fft_fieldOfView_oversampling : float, optional
             Extra FoV in [arcsec] that is taken for the FFT computation, in order to reduce wrapping effects.
+        pupil_oversampling : int, optional (keyword)
+            Pupil samples per subaperture used to form the spots, as a multiple k of the sun patch size. Default (None):
+            the smallest number that keeps the bias of the spot second moment, ~1.22 (u / n)^2 with u the half-width of the
+            sun patch in lambda/d, below 1%. The cost of the spot computation grows roughly as n^2.
         use_brightest : int, optional
             Picks the n brightest pixels as threshold for center-of-gravity spot detection.
+        n_reference_frames : int, optional (keyword)
+            Detector frames averaged to acquire the pseudo-reference image and then the reference slopes when noiseFlag is
+            True, as in operation (residual noise = single-frame noise / sqrt(n)). Default 100. Without noise one frame is used.
         threshold_convolution : float, optional
             Cut-off threshold for Gaussian convolution.
         unit_in_rad : bool, optional
@@ -135,6 +142,7 @@ class CorrelatingShackHartmann:
         self.threshold_convolution          = threshold_convolution
         self.use_brightest                  = use_brightest
         self.unit_in_rad                    = unit_in_rad
+        self.n_reference_frames             = int(kwargs.get('n_reference_frames', 100))
 
         self.device = torch.device(kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
        
@@ -220,10 +228,39 @@ class CorrelatingShackHartmann:
         # Energy of each subaperture relative to a fully illuminated one: sum of |amplitude|^2
         self.npix_sun = self.get_npix_sun(src)
         self.pupil_torch = torch.from_numpy(telescope.pupil.astype(float)).unsqueeze(0).contiguous().to(self.device)
-        self.subap_amplitude = torch.nn.functional.interpolate(self.split_subapertures(self.pupil_torch)[self.valid_subapertures_1D],
-                                                               size=(self.npix_sun, self.npix_sun), mode='bilinear', align_corners=True).contiguous().float()
-        self.subap_amplitude_inv = torch.where(self.subap_amplitude > 0, 1 / self.subap_amplitude.clamp_min(1e-12), 0.0)
+        # Pupil samples per subaperture for the image formation (decoupled from the detector pixels by the MFT, see
+        # ShackHartmann): smallest number keeping the bias of the spot second moment over the sun patch <= 1%, or
+        # pupil_oversampling * npix_sun; rounded up to a multiple of the pupil pixels per subaperture
+        self.pupil_oversampling = kwargs.get('pupil_oversampling', None)
+        if self.pupil_oversampling is None:
+            fwhm_px = src.wavelength * 206265 / (self.subaperture_size * self.plate_scale)
+            n_min = np.sqrt(1.22 / 0.01) * (self.npix_sun / 2) / fwhm_px
+        else:
+            n_min = int(self.pupil_oversampling) * self.npix_sun
+        self.npix_pupil = int(self.npix_phase * np.ceil(max(n_min, self.npix_phase) / self.npix_phase))
+        self.valid_index = torch.from_numpy(np.flatnonzero(self.valid_subapertures_1D)).to(self.device)
+        self.subap_resampling = self.cell_centred_resampling(telescope.resolution, self.nSubap * self.npix_pupil)
+        self.local_resampling = None
+        if telescope.resolution == self.nSubap * self.npix_phase:
+            npp = self.npix_phase
+            u = (np.arange(self.npix_pupil) + 0.5) * npp / self.npix_pupil - 0.5 + 1      # patch index units (margin of 1)
+            m0 = np.floor(u).astype(int)
+            w1 = u - m0
+            Wl = np.zeros((self.npix_pupil, npp + 2))
+            Wl[np.arange(self.npix_pupil), m0] = 1 - w1
+            Wl[np.arange(self.npix_pupil), m0 + 1] = w1
+            self.local_resampling = torch.from_numpy(Wl).float().to(self.device)
+        pupil_sub = self.split_subapertures(self.pupil_torch, self.valid_index).float()          # [nValid, 1, n, n]
+        # Amplitude = sqrt(covered fraction of each fine cell): the light of a partially illuminated subaperture equals its
+        # illuminated area and varies continuously with the pupil geometry
+        coverage = self.cell_coverage(telescope.resolution, self.nSubap * self.npix_pupil)
+        covered = coverage @ self.pupil_torch[0].to(coverage.dtype) @ coverage.transpose(0, 1)
+        n = self.npix_pupil
+        covered = covered.view(self.nSubap, n, self.nSubap, n).permute(0, 2, 1, 3).reshape(self.nSubap * self.nSubap, 1, n, n)
+        self.subap_amplitude = torch.sqrt(covered[self.valid_index].clamp(0.0, 1.0)).contiguous().float()
+        self.subap_amplitude_inv = torch.where(pupil_sub > 1e-6, 1 / pupil_sub.clamp_min(1e-12), 0.0)
         self.subap_energy = torch.mean(self.subap_amplitude**2, dim=(-2, -1), keepdim=True)
+        self._mft_cache = {}
         # Pseudo-reference of the correlations: the first fully illuminated subaperture
         self.pseudoref_index = int(np.argmax(self.subaperture_illumination[self.valid_subapertures] == 1))
 
@@ -285,8 +322,9 @@ class CorrelatingShackHartmann:
         
     def initialize_wfs(self, telescope, src):
         """
-        Initialize the Shack-Hartmann WFS by measuring reference slopes
-        and determining slope units.
+        Acquire the pseudo-reference image and the reference slopes at null phase. With detector noise, as in operation, the
+        pseudo-reference is the average of n_reference_frames images of subaperture pseudoref_index and the reference slopes
+        the average of n_reference_frames further frames correlated with it.
 
         Parameters
         ----------
@@ -297,11 +335,24 @@ class CorrelatingShackHartmann:
 
         Returns
         -------
-        None
+        tuple
+            Pseudo-reference image (torch.Tensor) and reference slopes map [2 nSubap, nSubap].
         """
         self.logger.info('CorrelatingShackHartmann::initialize_wfs - Acquiring reference slopes..')
-        null_phase = np.zeros((src.nSubDirs**2, telescope.resolution, telescope.resolution))       
-        _, reference_slopes_maps,_, pseudoref = self.wfs_measure(null_phase, src)        
+        # As in operation: the pseudo-reference is the average of n images of subaperture pseudoref_index, then the reference
+        # slopes are the average of n further frames correlated with it (the optical propagation is computed once, the noise
+        # is drawn per frame)
+        null_phase = np.zeros((src.nSubDirs**2, telescope.resolution, telescope.resolution))
+        ideal_frame, I, nPhotons = self.ideal_frame(null_phase, src)
+        n_frames = self.n_reference_frames if self.cam.noiseFlag else 1
+        pseudoref = 0
+        for _ in range(n_frames):
+            pseudoref = pseudoref + self.get_subaps(self.cam.integrate(ideal_frame, nPhotons))[self.pseudoref_index].double()
+        pseudoref = (pseudoref / n_frames).float().contiguous().to(self.device)
+        reference_slopes_maps = 0
+        for _ in range(n_frames):
+            reference_slopes_maps = reference_slopes_maps + self.wfs_integrate(ideal_frame, I, nPhotons, pseudoref)[1]
+        reference_slopes_maps = reference_slopes_maps / n_frames
                 
         self.logger.info('CorrelatingShackHartmann::initialize_wfs - Done!') 
         
@@ -411,144 +462,134 @@ class CorrelatingShackHartmann:
         """
         return np.round((src.subDirs_coordinates[2,0,0] + src.subDir_margin)/ self.plate_scale).astype(int) # Coordinate 2 has the width of the subDir
 
-    def split_subapertures(self, field):
+    def cell_centred_resampling(self, n_in, n_out):
         """
-        Resample a pupil-plane map to the subaperture grid and split it into subapertures, each one with its border row and column
-        (shared with the neighbour) so that the later interpolation to the subaperture sampling covers the whole subaperture.
+        Linear resampling (indices and weights) between two cell-centred grids covering the same length (see
+        ShackHartmann.cell_centred_resampling): output sample i = (1 - w1[i]) input[m0[i]] + w1[i] input[m0[i] + 1], with
+        linear extrapolation in the outermost half input cell.
+        """
+        u = (np.arange(n_out) + 0.5) * n_in / n_out - 0.5
+        m0 = np.clip(np.floor(u).astype(int), 0, n_in - 2)
+        w1 = u - m0
+        return (torch.from_numpy(m0).to(self.device), torch.from_numpy(w1).to(self.device))
+
+    def cell_coverage(self, n_in, n_out):
+        """Area-weighting matrix [n_out, n_in]: fraction of output cell i covered by input cell m (see ShackHartmann)."""
+        edges_in = np.arange(n_in + 1) / n_in
+        edges_out = np.arange(n_out + 1) / n_out
+        lo = np.maximum(edges_out[:-1, None], edges_in[None, :-1])
+        hi = np.minimum(edges_out[1:, None], edges_in[None, 1:])
+        return torch.from_numpy(np.clip(hi - lo, 0, None) * n_out).to(self.device)
+
+    def split_subapertures(self, field, index=None):
+        """
+        Resample pupil-plane maps to npix_pupil cell-centred samples per subaperture and split them into subapertures.
+
+        The subaperture of width d is sampled at the centres of npix_pupil cells, (j + 1/2) d / npix_pupil from its edge, by
+        linear interpolation of the pupil pixels (cells as well); a linear phase is reproduced exactly (full slope across the
+        subaperture, no shift of its centre).
 
         Parameters
         ----------
         field : torch.Tensor
             Pupil-plane maps [C, resolution, resolution] (phase per subdirection, or the pupil).
+        index : torch.Tensor, optional
+            Subapertures to return (default: all).
 
         Returns
         -------
         torch.Tensor
-            Subaperture maps [nSubap**2, C, npix_phase+1, npix_phase+1], sorted from left to right, top to bottom.
+            Subaperture maps [nSubap**2 (or len(index)), C, npix_pupil, npix_pupil], sorted from left to right, top to bottom.
         """
-        field_rescaled = torch.nn.functional.interpolate(field.unsqueeze(0),
-                                                         size=(self.nSubap*self.npix_phase, self.nSubap*self.npix_phase),
-                                                         mode='bilinear', align_corners=True).squeeze(0).contiguous()
+        n = self.npix_pupil
+        f = field.float()
+        C = f.shape[0]
+        if self.local_resampling is not None:
+            # Pupil patch of every subaperture with a one-pixel margin (linear extrapolation outside the array)
+            f = torch.cat([2 * f[:, :1] - f[:, 1:2], f, 2 * f[:, -1:] - f[:, -2:-1]], dim=1)
+            f = torch.cat([2 * f[:, :, :1] - f[:, :, 1:2], f, 2 * f[:, :, -1:] - f[:, :, -2:-1]], dim=2)
+            npp = self.npix_phase
+            patches = f.unfold(1, npp + 2, npp).unfold(2, npp + 2, npp)            # [C, nSubap, nSubap, npp+2, npp+2]
+            patches = patches.permute(1, 2, 0, 3, 4).reshape(self.nSubap * self.nSubap, C, npp + 2, npp + 2)
+            if index is not None:
+                patches = patches[index]
+            W = self.local_resampling
+            return W @ patches @ W.transpose(0, 1)
+        m0, w1 = self.subap_resampling
+        f = f.to(w1.dtype)
+        f = f[:, m0] * (1 - w1)[None, :, None] + f[:, m0 + 1] * w1[None, :, None]
+        f = f[:, :, m0] * (1 - w1)[None, None, :] + f[:, :, m0 + 1] * w1[None, None, :]
+        out = f.view(C, self.nSubap, n, self.nSubap, n).permute(1, 3, 0, 2, 4).reshape(self.nSubap ** 2, C, n, n).float()
+        return out if index is None else out[index]
 
-        C, H, W = field_rescaled.shape
-
-        # Build row indices
-        row_ids = torch.arange(H)
-        insert_rows = ((row_ids % self.npix_phase == 0) & (row_ids < H - 2) & (row_ids > 0)) | (row_ids == (H - self.npix_phase - 1))
-        extra_rows = row_ids[insert_rows]
-        row_idx = torch.cat([row_ids, extra_rows]).sort().values
-        row_idx[-self.npix_phase-2:-self.npix_phase] = row_idx[-self.npix_phase-2:-self.npix_phase].flip(0)
-
-        # Build column indices
-        col_ids = torch.arange(W)
-        insert_cols = ((col_ids % self.npix_phase == 0) & (col_ids < W - 2) & (col_ids > 0)) | (col_ids == (W - self.npix_phase - 1))
-        extra_cols = col_ids[insert_cols]
-        col_idx = torch.cat([col_ids, extra_cols]).sort().values
-        col_idx[-self.npix_phase-2:-self.npix_phase] = col_idx[-self.npix_phase-2:-self.npix_phase].flip(0)
-
-        # Apply advanced indexing
-        field_reshaped = field_rescaled[:, row_idx][:, :, col_idx]  # shape: (C, H', W')
-        field_reshaped = field_reshaped.view(C, self.nSubap, self.npix_phase+1, self.nSubap, self.npix_phase+1)
-        return field_reshaped.permute(1, 3, 0, 2, 4).reshape(self.nSubap**2, C, self.npix_phase+1, self.npix_phase+1)
-
-    # This function takes the phase at the pupil as input. Then, the field at each subaperture (pupil amplitude times the complex
-    # phase) gives the PSF per subaperture, as an array of dimensions (nSubap**2, n_pix_lenslet_init, n_pix_lenslet_init)
-    # The subapertures are sorted from left to right, top to bottom.
+    def _mft_kernel(self, fwhm, npix_sun):
+        """
+        MFT matrix A[k, j] = exp(-2 pi i (j - (n_p-1)/2) (k - npix_sun//2) / (fwhm n_p)): field of a subaperture sampled at
+        n_p cell-centred points -> image pixel k at the angle (k - npix_sun//2) * plate_scale. Cached per (fwhm, npix_sun).
+        """
+        key = (round(float(fwhm), 12), int(npix_sun))
+        A = self._mft_cache.get(key)
+        if A is None:
+            n_p = self.npix_pupil
+            j = torch.arange(n_p, dtype=torch.float64, device=self.device) - (n_p - 1) / 2
+            k = torch.arange(npix_sun, dtype=torch.float64, device=self.device) - npix_sun // 2
+            A = torch.exp(-2j * np.pi * torch.outer(k, j) / (fwhm * n_p)).to(torch.complex64)
+            self._mft_cache[key] = A
+        return A
 
     def get_psf(self, phase, fwhm, npix_sun):
         """
-        Get the electromagnetic field per subaperture based on input phase.
+        Spot of every valid subaperture and subdirection from the pupil phase, with a matrix Fourier transform (MFT) at the
+        WFS plate scale, on the npix_sun x npix_sun grid of the sun patches.
+
+        The field of each subaperture is sqrt(covered fraction) times exp(i phase), sampled at npix_pupil cell-centred points
+        (split_subapertures); the phase uses the normalised interpolation interp(pupil * phase) / interp(pupil). Image pixel
+        k is at the angle (k - npix_sun//2) * plate_scale exactly, so that the PSF is centred at pixel npix_sun//2 (the
+        origin used by compute_images). Each PSF is normalised to the energy of its subaperture (1 if fully illuminated).
 
         Parameters
         ----------
         phase : np.ndarray
-            List of Wavefront phase in radians per subdirection
+            Wavefront phase in radians per subdirection [nSubDirs**2, resolution, resolution].
         fwhm : float
-            Full width at half maximum for the PSF in [px].
-        npix_sun : float
-            Number of pixels in the sun image [px]
-        
+            lambda / d in WFS pixels.
+        npix_sun : int
+            Number of pixels of the sun patches [px].
+
         Returns
         -------
-        np.ndarray
-            Complex field per subaperture.
+        torch.Tensor
+            PSF per subaperture and subdirection [nSubap**2, nSubDirs**2, npix_sun, npix_sun] (zero for invalid subapertures).
         """
-
         self.logger.debug('CorrelatingShackHartmann::get_psf')
-        # Get dimensions to keep the FWHM stable during the computation
         if fwhm < 1:
             raise ValueError('FWHM must be greater than 2 to guarantee enough spatial sampling.')
-        nFFT = np.round(fwhm * npix_sun).astype(int)
-        # Define pupil
-        start = (nFFT - npix_sun) // 2
-        end = start + npix_sun
-        square_pupil = np.zeros((nFFT, nFFT), dtype=float)
-        square_pupil[start:end, start:end] = 1.0
-
         if npix_sun != self.npix_sun:
             self.logger.error(f'CorrelatingShackHartmann::get_psf - The source gives {npix_sun} px per subaperture, the WFS was built for {self.npix_sun} px.')
             raise ValueError('CorrelatingShackHartmann::get_psf - The source does not match the one used to build the WFS.')
-
         t0 = time.time()
-        # Rescale the phase
         input_phase_torch = torch.from_numpy(phase).contiguous().to(self.device) * self.pupil_torch   # no phase outside the pupil
-        square_pupil_torch = torch.from_numpy(square_pupil).contiguous().to(self.device)
+        phase_sub = self.split_subapertures(input_phase_torch, self.valid_index) * self.subap_amplitude_inv   # [nValid, C, n, n]
         t1 = time.time()
-        # Reshape the subapertures to a grid of subapertures. The sensor can be zeropadded, so the phase is filling the central part of the subaperture
-        phase_reshaped = self.split_subapertures(input_phase_torch)
-
-        t2 = time.time()
-        phase_rescaled_valids = torch.nn.functional.interpolate(phase_reshaped[self.valid_subapertures_1D, :, :, :],
-                                                                size=(npix_sun, npix_sun),
-                                                                mode='bilinear', align_corners=True).contiguous().float()
-        # Normalized interpolation: the input phase is set to zero outside the pupil, so the interpolation above is
-        # interp(pupil * phase); dividing by interp(pupil) = subap_amplitude keeps only the points inside the pupil (zero amplitude outside)
-        phase_rescaled_valids = phase_rescaled_valids * self.subap_amplitude_inv
-        t3 = time.time()
-        # Generate an array of phase, filling the valid subapertures  
-        rows = torch.where(square_pupil_torch.any(dim=1))[0]
-        cols = torch.where(square_pupil_torch.any(dim=0))[0]
-
-        row_start, row_end = rows[0].item(), rows[-1].item() + 1
-        col_start, col_end = cols[0].item(), cols[-1].item() + 1
-        n_valids = phase_rescaled_valids.shape[0]
+        A = self._mft_kernel(fwhm, npix_sun)
+        At = A.transpose(0, 1)
+        n_valids = phase_sub.shape[0]
         psf = torch.zeros((self.nSubap**2, input_phase_torch.shape[0], npix_sun, npix_sun), dtype=torch.float32, device=self.device)
-
-        valid_indices = np.where(self.valid_subapertures_1D)[0]
-        # Pixels of the subaperture image in the FFT plane: the crop [row_start:row_end, col_start:col_end] of the centred (fftshift) plane
-        crop_rows = torch.remainder(torch.arange(row_start, row_end, device=self.device) - nFFT // 2, nFFT)
-        crop_cols = torch.remainder(torch.arange(col_start, col_end, device=self.device) - nFFT // 2, nFFT)
         chunk_size = 512
         for start_idx in range(0, n_valids, chunk_size):
             end_idx = min(start_idx + chunk_size, n_valids)
-            chunk_valids = phase_rescaled_valids[start_idx:end_idx]
-            chunk_len = end_idx - start_idx
-
-            cube_em = torch.zeros((chunk_len, input_phase_torch.shape[0], nFFT, nFFT), dtype=torch.complex64, device=self.device)
-            exp_block = torch.polar(self.subap_amplitude[start_idx:end_idx].expand_as(chunk_valids), chunk_valids)
-            cube_em[:, :, row_start:row_end, col_start:col_end] = exp_block
-
-            fft_res = torch.fft.fft2(cube_em, dim=(-2, -1), norm='backward')
-            del cube_em
-
-            fft_res = fft_res[:, :, crop_rows][:, :, :, crop_cols]
-            intensity = fft_res.real.square().add_(fft_res.imag.square())
-            del fft_res
-
+            field = torch.polar(self.subap_amplitude[start_idx:end_idx].expand_as(phase_sub[start_idx:end_idx]), phase_sub[start_idx:end_idx])
+            E = A @ field @ At
+            intensity = E.real.square().add_(E.imag.square())
+            del E, field
             # Energy of the subaperture: 1 if fully illuminated, its fraction of |amplitude|^2 otherwise
             norma = torch.sum(intensity, dim=(-2, -1), keepdim=True)
-            valids_sub_idx = valid_indices[start_idx:end_idx]
-            psf[valids_sub_idx, :, :, :] = intensity / norma * self.subap_energy[start_idx:end_idx]
+            psf[self.valid_index[start_idx:end_idx]] = intensity / norma * self.subap_energy[start_idx:end_idx]
             del intensity
-
-        t4 = time.time()
-        t5 = t4
-        
-        self.logger.debug(f'CorrelatingShackHartmann::get_psf - Time taken for each step: '
-                         f'Rescale input phase: {t1-t0} [s], Reshape into subaps: {t2-t1} [s], Interpolate to npix_sun: {t3-t2} [s], '
-                         f'Compute exponential: {t4-t3} [s], PSF: {t5-t4} [s], Total processing time: {t5-t0}')
+        t2 = time.time()
+        self.logger.debug(f'CorrelatingShackHartmann::get_psf - Time taken: sample subapertures {t1-t0} [s], MFT {t2-t1} [s]')
         return psf
-    
+
     def compute_images(self, psf, subDirs_sun, new_px):
         """
         Compute correlated subaperture images using convolution.
@@ -581,10 +622,12 @@ class CorrelatingShackHartmann:
 
         # Compute FFT of the PSF
 
-        psf_fft = torch.fft.fft2(psf[self.valid_subapertures_1D, :, :, :], norm='backward', dim=(-2, -1))
+        # The PSF centre (pixel npix_sun//2, see get_psf) is moved to the origin, so that the circular convolution does not shift
+        # the sun patch, for odd and even npix_sun
+        psf_fft = torch.fft.fft2(torch.fft.ifftshift(psf[self.valid_subapertures_1D, :, :, :], dim=(-2, -1)), norm='backward', dim=(-2, -1))
 
         # Convolute
-        sun_patches_complex = torch.fft.fftshift(torch.fft.ifft2(sun_fft*psf_fft, norm='forward', dim=(-2, -1)), dim=(-2, -1))
+        sun_patches_complex = torch.fft.ifft2(sun_fft*psf_fft, norm='forward', dim=(-2, -1))
 
         sun_patches = torch.sqrt(sun_patches_complex.real**2 + sun_patches_complex.imag**2)
 
@@ -710,7 +753,7 @@ class CorrelatingShackHartmann:
         return torch.Tensor(subaps).contiguous().to(self.device)
             
 #%% SH Measurement
-    def wfs_integrate(self, ideal_frame, subaps, nPhoton, pseudoref=None, reference_slopes=None):
+    def wfs_integrate(self, ideal_frame, subaps, nPhoton, pseudoref=None, reference_slopes=None, stream=None):
         """
         Integrate the full detector image and compute valid slopes.
 
@@ -724,13 +767,15 @@ class CorrelatingShackHartmann:
             Number of incident photons
         pseudoref : torch.Tensor
             Subaperture used as pseudo-reference for the correlations, if None the first fully illuminated subaperture is picked
+        stream : int, optional
+            Noise stream of the light path (Detector.register_stream); None uses the detector's own generator.
         Returns
         -------
         tuple
             Slopes 1D, slopes 2D, and final noisy image.
         """
         # propagate to detector to add noise and detector effects
-        noisy_frame = self.cam.integrate(ideal_frame, nPhoton)
+        noisy_frame = self.cam.integrate(ideal_frame, nPhoton, stream)
         subaps = self.get_subaps(noisy_frame)
 
         # Check if we have a pseudo reference 
@@ -774,7 +819,7 @@ class CorrelatingShackHartmann:
     
     # Receives the phase [rad]] and return the slopes measured by the SH in [px]
     # Expects the ideal frame WITHOUT pupil applied.
-    def wfs_measure(self,phase_in, src, pseudoref=None, reference_slopes=None):
+    def wfs_measure(self,phase_in, src, pseudoref=None, reference_slopes=None, stream=None):
         """
         Measure slopes from a wavefront phase using the SH-WFS.
 
@@ -788,6 +833,8 @@ class CorrelatingShackHartmann:
             Pseudo-reference image used for the correlations, if None the method picks one.
         reference_slopes : np.ndarray
             Reference for the WF sensor, if None, geometric references are used.
+        stream : int, optional
+            Noise stream of the light path (Detector.register_stream); None uses the detector's own generator.
 
         Returns
         -------
@@ -799,37 +846,53 @@ class CorrelatingShackHartmann:
         if (phase_in is None) or (src is None):
             self.logger.error("CorrelatingShackHartmann::wfs_measure - Phase or Source are none.")
             raise ValueError('CorrelatingShackHartmann::wfs_measure - Phase or Source are none.') 
-        # compute fwhm
-        fwhm = src.wavelength * 206265 / (self.subaperture_size * self.plate_scale)
-        # Compute the new number of pixels for the sun patches to match the WFS plate scale
-        new_px = self.get_npix_sun(src)
         # If the phase is not 3D, we need to repeat it for each subDir --> typically when the phase uses the DM only
         if np.ndim(phase_in) < 3:
             phase_in = np.repeat(phase_in[np.newaxis,:,:], src.nSubDirs**2, axis=0)
         t0 = time.time()
+        ideal_frame, I, nPhotons = self.ideal_frame(phase_in, src)
+        t1 = time.time()
+        # Compute the frame and the slopes
+        signal, signal_2D, noisy_frame, pseudoref = self.wfs_integrate(ideal_frame, I, nPhotons, pseudoref, reference_slopes, stream)
+        t2 = time.time()
+        self.logger.debug(f'Ideal frame: {t1-t0}, Integrate:{t2-t1}')
+        return signal, signal_2D, noisy_frame, pseudoref
+
+    def ideal_frame(self, phase_in, src):
+        """
+        Noise-free detector frame of a wavefront phase (the deterministic part of wfs_measure).
+
+        Parameters
+        ----------
+        phase_in : np.ndarray
+            Phase map input [radians], one per sub-direction of the source.
+        src : Source
+            Source object.
+
+        Returns
+        -------
+        tuple
+            Ideal full frame, merged images of the valid subapertures and number of photons.
+        """
+        # compute fwhm
+        fwhm = src.wavelength * 206265 / (self.subaperture_size * self.plate_scale)
+        # Compute the new number of pixels for the sun patches to match the WFS plate scale
+        new_px = self.get_npix_sun(src)
         # compute the PSF intensity
         psf = self.get_psf(phase_in, fwhm, new_px)
-        t1 = time.time()
         # Convolute with the sun patches - only valid subaps
 
         sun_patches = self.compute_images(psf, src.subDirs_sun, new_px)
-        t2 = time.time()
         # Merge the patches into a single image per subap
 
         I = self.merges_images(sun_patches, src)
-        t3 = time.time()
         # fill camera frame with computed intensity (only valid subapertures)
 
         ideal_frame = self.create_full_frame(I)
-        t4 = time.time()
         # Compute the number of photons considering the flux of the sun, collecting area of the telescope, sampling time and FoV of the WFS 
         # that may be smaller in the simulation than the FoV of the source
         nPhotons = np.round(src.flux * self.area_eff * self.integration_time * self.lightRatio * (self.fieldOfView / src.fov)).astype(int)
-        # Compute the frame and the slopes        
-        signal, signal_2D, noisy_frame, pseudoref = self.wfs_integrate(ideal_frame, I, nPhotons, pseudoref, reference_slopes)                
-        t5 = time.time()
-        self.logger.debug(f'PSF: {t1-t0}, Compute images: {t2-t1}, Merge images: {t3-t2}, Create full frame: {t4-t3}, Integrate:{t5-t4}')
-        return signal, signal_2D, noisy_frame, pseudoref
+        return ideal_frame, I, nPhotons
               
       
     def setup_logging(self, logging_level=logging.WARNING):

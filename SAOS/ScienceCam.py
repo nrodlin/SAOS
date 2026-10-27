@@ -31,7 +31,7 @@ class ScienceCam:
                  plate_scale:float,
                  samplingTime:float,
                  telescope,
-                 lightRatio:float=50,
+                 lightRatio:float=1.0,
                  integrationTime:float=None,
                  decimation:int=1,
                  noiseFlag:bool=False,
@@ -50,8 +50,9 @@ class ScienceCam:
             Time interval between frames [s].
         telescope : Telescope
             Associated telescope object.
-        lightRatio : float
-            Threshold ratio to select valid subapertures based on flux.            
+        lightRatio : float, optional
+            Fraction of the source photons (flux x integration time x effective area) that reaches the science camera (photon
+            budget). Default 1.0: the camera records all the light of the path.
         integrationTime : float, optional
             Integration time in seconds. Defaults to samplingTime.
         decimation : int, optional
@@ -269,7 +270,7 @@ class ScienceCam:
 
         return frame.cpu().numpy()
     
-    def apply_noise(self, frame, total_photons):
+    def apply_noise(self, frame, total_photons, stream=None):
         """
         Apply detector noise to the science frame.
 
@@ -279,6 +280,8 @@ class ScienceCam:
             The input noise-free science frame.
         total_photons : int or float
             Total number of photons arriving.
+        stream : int, optional
+            Noise stream of the light path (Detector.register_stream); None uses the detector's own generator.
 
         Returns
         -------
@@ -288,7 +291,7 @@ class ScienceCam:
         # Compute photons arriving to the sensor
         input_photons = total_photons * self.lightRatio
         # Add detector noise
-        frame = self.cam.integrate(frame, input_photons)
+        frame = self.cam.integrate(frame, input_photons, stream)
 
         return frame
 

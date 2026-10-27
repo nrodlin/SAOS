@@ -135,8 +135,6 @@ def test_threads_reproducible_with_per_object_seeds_and_noise(logger, report, to
     report.assert_ok()
 
 
-@known_issue('DET-RNG', 'a Detector owns a single numpy Generator (default_rng(seed)) that is used without a lock: LightPaths that share a WFS/Detector and run in '
-             'threads draw the noise in scheduling order, so the results depend on n_jobs and are not reproducible', 'SAOS/Detector.py:143')
 def test_threads_reproducible_with_shared_detector(logger, report, tolerances):
     """
     EQUIVALENCE TEST (SAOS vs SAOS): four LightPaths share one WFS (one Detector, one seed) and are propagated with n_jobs = 1

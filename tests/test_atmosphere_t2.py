@@ -28,11 +28,11 @@ pytestmark = pytest.mark.nightly
 
 D, NX, L0, TS = 4.149, 216, 25.0, 1e-3
 PIX = D / NX
+ROW_SPEED = PIX / TS * (1 + 1e-9)     # wind speed of one screen row per update [m/s] (advance() counts rows as updates)
 LAM = 500e-9
 K_OPD = 2 * np.pi / LAM                      # OPD [m] -> phase [rad at 500 nm]
 RAD2ARCSEC = 206265.0
 R0S = [0.05, 0.08, 0.10, 0.15, 0.20, 0.30, 1.0]
-WIND_CAP = known_issue('ATM-WIND-CAP', 'screen motion capped at 1 px/step per axis', 'SAOS/Atmosphere.py:371-376')
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -82,7 +82,7 @@ def circle_mask(n):
 
 
 def advance(atm, rows):
-    """`rows` updates of every layer (Atmosphere.update without the thread-pool overhead)."""
+    """`rows` updates of every layer (Atmosphere.update without the thread-pool overhead); one row each at ROW_SPEED."""
     layers = [getattr(atm, f'layer_{i + 1}') for i in range(atm.nLayer)]
     for _ in range(rows):
         for L in layers:
@@ -253,7 +253,7 @@ def zernike_initial(seed, n, logger, r0=0.10):
 
 
 A5_PROFILE = dict(r0=0.12, fractionalR0=[0.6, 0.3, 0.1], altitude=[0.0, 5000.0, 12000.0], windDirection=[0, 90, 0],
-                  windSpeed=[100.0, 100.0, 100.0])
+                  windSpeed=[ROW_SPEED] * 3)
 
 
 def zernike_atmosphere(seed, n, logger, n_inst=4, spacing=1000):
@@ -362,7 +362,7 @@ def frozen_flow(k, direction, seed, logger, steps=2000, r0=0.10, tau_max=108):
 
 @pytest.mark.parametrize('k,direction', [
     (1, 0), (1, 90),
-    pytest.param(2, 0, marks=WIND_CAP)])
+    (2, 0)])
 def test_taylor_frozen_flow(logger, report, tolerances, seed, k, direction):
     """
     Frozen flow at k integer px/step (v = k px / Ts): the temporal structure function of the on-axis OPD of one layer,
@@ -403,8 +403,9 @@ A11 = dict(r0=0.12, frac=[0.5, 0.2, 0.2, 0.1], theta1=5.0, n_px=[0, 2, 5, 10], t
 def a11_profile():
     """
     Layer altitudes chosen so that the footprint offset of the 5 arcsec source, h tan(theta) / (D/N) = n + 0.02 px with
-    n = 0, 2, 5, 10, so that the int() truncation of the offsets (a separate known defect, tested in test_atmosphere.py)
-    stays below 0.02 j px for theta = j x 5 arcsec (j <= 4) and does not mix with the anisoplanatic physics tested here.
+    n = 0, 2, 5, 10, so that the rounding of the offsets to the layer pixel (integer-pixel footprint model, tested in
+    test_atmosphere.py) stays below 0.02 j px for theta = j x 5 arcsec (j <= 4) and does not mix with the anisoplanatic
+    physics tested here.
     """
     t1 = A11['theta1'] / RAD2ARCSEC
     return [(n + A11['frac_px']) * PIX / np.tan(t1) if n else 0.0 for n in A11['n_px']]
@@ -443,7 +444,7 @@ def aniso_measure(seed, n, logger, n_inst=4, spacing=1000):
 
     def one(i):
         atm = Atmosphere(r0=A11['r0'], L0=L0, fractionalR0=A11['frac'], altitude=alt, windDirection=[0, 90, 0, 90],
-                         windSpeed=[100.0] * 4, telescope=tel, zenith=0, logger=logger)
+                         windSpeed=[ROW_SPEED] * 4, telescope=tel, zenith=0, logger=logger)
         atm.initializeAtmosphere(randomState=seed + 104729 * i)
         advance(atm, spacing)
         pw, pr = [], []
@@ -545,7 +546,7 @@ def seeing_le(r0, seed, logger, n_chunks=6, n_per=80, spacing=800):
     ps = src.wavelength / D * RAD2ARCSEC / FW
 
     def one(i):
-        atm = Atmosphere(r0=r0, L0=L0, fractionalR0=[1.0], altitude=[0.0], windDirection=[0], windSpeed=[100.0],
+        atm = Atmosphere(r0=r0, L0=L0, fractionalR0=[1.0], altitude=[0.0], windDirection=[0], windSpeed=[ROW_SPEED],
                          telescope=tel, zenith=0, logger=logger)
         atm.initializeAtmosphere(randomState=seed + 15485863 * i)
         cam = ScienceCam(fieldOfView=NX * ps, plate_scale=ps, samplingTime=TS, telescope=tel, logger=logger, device='cpu')

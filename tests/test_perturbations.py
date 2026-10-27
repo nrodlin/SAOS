@@ -266,8 +266,6 @@ def test_localseeing_resolution_mismatch_is_bilinear_resampling(logger, tmp_path
     report.assert_ok()
 
 
-@known_issue('LS-VIEW', 'getCurrentOPD returns a view of the input cube and LightPath.propagate(interaction_matrix=True) zeroes it in place '
-             '(localSeeing_opd *= 0), destroying the local-seeing sequence after the first interaction-matrix measurement', 'SAOS/LightPath.py:204-222')
 def test_localseeing_input_not_modified_by_interaction_matrix_propagate(logger, tmp_path, report):
     """
     The user's sequence is data: propagating a normal step and then an interaction-matrix step (which suppresses the

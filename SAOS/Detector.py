@@ -10,6 +10,8 @@ Update on March 26 2025
 Major implementation belong to OOPAO authors, the module now is just adjusted to fit the code style of SAOS.
 """
 
+import threading
+
 import numpy as np
 
 
@@ -141,6 +143,12 @@ class Detector:
         self.dark_calibration_frame = np.zeros_like(self.frame)  # stores the dark calibration frame
         
         self.randomGenerator    = np.random.default_rng(seed=self.random_state)
+        # Noise streams: every LightPath connected to this detector gets its own generator (register_stream), so that the noise of a
+        # path does not depend on the order in which paths sharing the detector are scheduled in threads
+        self._stream_entropy    = np.random.SeedSequence(self.random_state).entropy
+        self._streams           = {}
+        self._n_streams         = 0
+        self._stream_lock       = threading.Lock()
 
         if self.nBits == 8:
             self.dataType = np.uint8   
@@ -175,7 +183,34 @@ class Detector:
             self.dark_calibration_frame = np.zeros_like(self.frame)
 
 
-    def integrate(self, input_frame, input_photons):
+    def register_stream(self):
+        """
+        Assign a noise stream to a new user of the detector (LightPath.initialize_path): streams are numbered 0, 1, 2... in the
+        order in which the light paths are connected to this detector.
+
+        Returns
+        -------
+        int
+            Stream index, to be passed to integrate(stream=...).
+        """
+        with self._stream_lock:
+            stream = self._n_streams
+            self._n_streams += 1
+        return stream
+
+    def _generator(self, stream):
+        """Random generator of a noise stream (None: the detector's own generator). Each stream is seeded from the detector seed
+        and its index (SeedSequence spawn key), so its noise does not depend on the other streams."""
+        if stream is None:
+            return self.randomGenerator
+        with self._stream_lock:
+            rng = self._streams.get(stream)
+            if rng is None:
+                rng = np.random.default_rng(np.random.SeedSequence(self._stream_entropy, spawn_key=(int(stream),)))
+                self._streams[stream] = rng
+        return rng
+
+    def integrate(self, input_frame, input_photons, stream=None):
         """
         Integrate the noise free frame, adding the corresponding noise.
         
@@ -185,6 +220,8 @@ class Detector:
             The noise-free frame to integrate.
         input_photons : int
             The number of photons received in the current sampling time.
+        stream : int, optional
+            Noise stream (register_stream) of the light path; None uses the detector's own generator.
 
         Returns
         -------
@@ -196,13 +233,13 @@ class Detector:
         # Integrate
         if self.noiseFlag:
             # Get the noisy frame
-            frame = self.readout(input_frame, input_photons)
+            frame = self.readout(input_frame, input_photons, stream)
         else:
             frame = input_frame
 
         return frame
         
-    def readout(self, input_frame, photons):
+    def readout(self, input_frame, photons, stream=None):
         """
         Simulate the readout process of the detector including noises and quantification.
 
@@ -212,12 +249,15 @@ class Detector:
             The noise-free input frame.
         photons : int or float
             Number of incident photons.
+        stream : int, optional
+            Noise stream (register_stream); None uses the detector's own generator.
 
         Returns
         -------
         np.ndarray
             The simulated quantized and saturated frame.
         """
+        rng = self._generator(stream)
 
         # 1: Normalize energy in the frame to 1
         energy = np.sum(input_frame)
@@ -232,13 +272,13 @@ class Detector:
         # Poisson photon stream, i.e. Poisson(QE * photons). Applying QE after the Poisson draw would underestimate the
         # shot noise by sqrt(QE)
         if self.shotNoise:
-            electron_noisy_frame = self.randomGenerator.poisson(self.quantumEfficiency * photons_frame).astype(np.float64) # [e-]
+            electron_noisy_frame = rng.poisson(self.quantumEfficiency * photons_frame).astype(np.float64) # [e-]
         else:
             electron_noisy_frame = self.quantumEfficiency * photons_frame # [e-]
 
         # 5: Dark current noise
         dark_current_map = np.ones_like(input_frame) * self.darkCurrent * self.integrationTime
-        electron_noisy_frame += self.randomGenerator.poisson(dark_current_map) # [e-]
+        electron_noisy_frame += rng.poisson(dark_current_map) # [e-]
 
         # 6: Saturate
 
@@ -253,7 +293,7 @@ class Detector:
         
         # 8: Readout noise
 
-        electron_noisy_frame += self.randomGenerator.normal(loc=0.0, scale=self.readoutNoise, size=electron_noisy_frame.shape) # [e-]
+        electron_noisy_frame += rng.normal(loc=0.0, scale=self.readoutNoise, size=electron_noisy_frame.shape) # [e-]
 
         # 9: CCD/CMOS gain
 

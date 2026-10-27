@@ -14,7 +14,8 @@ Independent reference (no SAOS code, no SAOS coordinates): the DOCUMENTED actuat
   * Gaussian influence function g_k(x) = exp(-(eps |x - x_k|)^2), eps = sqrt(-ln c) / p, i.e. g = c at one pitch
     (c = mechanical coupling);
   * partition of unity: W(x) = sum_k a_k g_k(x) / sum_k g_k(x) (the denominator runs over the valid actuators).
-The pupil grid is np.linspace(-D/2, D/2, N) (DM-layer grid contract) with a pupil mask built here. The reference never
+The pupil grid is the telescope pixel grid, samples at the cell centres (i - (N-1)/2) D/N (the grid of the pupil, the
+atmosphere and the WFS), with a pupil mask built here. The reference never
 uses dm.coordinates, dm.high_res_coords, dm.influence_functions or any SAOS-generated OPD. Tests that compare SAOS with
 its own alternative code path are named `test_regression_*` and are not physics checks.
 """
@@ -43,8 +44,8 @@ ARCSEC = np.pi / 180 / 3600      # rad per arcsec (exact)
 # ----------------------------------------------------------------------------------------------------------------------
 
 def pupil_grid(n, diameter):
-    """Pupil sample coordinates [m]: n points from -D/2 to D/2 (x along columns, y along rows)."""
-    x = np.linspace(-diameter / 2, diameter / 2, n)
+    """Pupil sample coordinates [m]: centres of the n pixels of D/n across D, (i - (n-1)/2) D/n (x along columns, y along rows)."""
+    x = (np.arange(n) - (n - 1) / 2) * diameter / n
     return np.meshgrid(x, x)
 
 
@@ -144,13 +145,15 @@ def _poke_index(valid_xy, pos):
 
 def test_single_actuator_surface_central_and_edge(logger, report, tolerances):
     """
-    Surface of a single poked actuator (11x11 DM, c = 0.6, 61 px so that the actuators fall on pupil samples: pitch =
-    6 samples). Independent expectations:
+    Surface of a single poked actuator (11x11 DM, c = 0.6, 61 px). Independent expectations:
       * the whole surface equals the model (Gaussian of width fixed by c, normalised by the sum over the valid
-        actuators), absolute amplitude in metres;
+        actuators), absolute amplitude in metres, on the pupil samples;
       * interior actuator (infinite-lattice limit): the value at the actuator is 1 / (sum_i c^(i^2))^2 = 0.1626 a and the
         value at the n-th neighbour on an axis is c^(n^2) times it (mechanical coupling = neighbour / actuator ratio);
       * edge actuator (valid, on the border): the value at the actuator is 1 / sum over valid actuators of c^(d/p)^2.
+    On the cell-centred pupil grid (D/N) only the central actuator falls on a sample (61 px, odd): its value is read from
+    SAOS; the values at the other actuators (between samples, the edge one at D/2 beyond the last sample centre) are those of
+    the model, which SAOS equals on every sample (first check).
     """
     n61 = 61
     tel61 = Telescope(resolution=n61, diameter=D, samplingTime=1 / 2000, logger=logger, pupil=circular_pupil(n61, D))
@@ -167,18 +170,17 @@ def test_single_actuator_surface_central_and_edge(logger, report, tolerances):
         got = shape(d61, cmd)
         ref = model_opd(cmd, X, Y, 11, D)
         report.check(f'{name}: max |OPD - model| / peak', np.max(np.abs(got - ref)) / np.max(np.abs(ref)), hi=tol)
-        # value at the actuator pixel (pupil samples fall on actuators: x = -D/2 + 6 i * D/60)
-        i_row = int(round((vy[k] + D / 2) / (D / (n61 - 1)))); i_col = int(round((vx[k] + D / 2) / (D / (n61 - 1))))
-        self_val = got[i_row, i_col] / a
+        at = lambda x, y: model_opd(cmd, np.array([[x]]), np.array([[y]]), 11, D)[0, 0]      # model at a point [m]
         if name == 'central':
-            report.check('central: value at the actuator / a', self_val, expected=lattice_peak(c0), rtol=1e-3)
+            ic = (n61 - 1) // 2                                                              # sample at x = y = 0
+            report.check('central: SAOS value at the actuator / a', got[ic, ic] / a, expected=lattice_peak(c0), rtol=1e-3)
             for step in (1, 2):
-                report.check(f'central: value {step} pitch away / value at the actuator', got[i_row, i_col + 6 * step] / got[i_row, i_col],
+                report.check(f'central: model value {step} pitch away / value at the actuator', at(step * pitch, 0.0) / at(0.0, 0.0),
                              expected=c0 ** (step ** 2), rtol=1e-3)
-            report.check('central: diagonal neighbour / value at the actuator', got[i_row + 6, i_col + 6] / got[i_row, i_col], expected=c0 ** 2, rtol=1e-3)
+            report.check('central: model diagonal neighbour / value at the actuator', at(pitch, pitch) / at(0.0, 0.0), expected=c0 ** 2, rtol=1e-3)
         if name.startswith('edge'):
             d2 = ((vx - vx[k]) ** 2 + (vy - vy[k]) ** 2) / pitch ** 2
-            report.check('edge: value at the actuator / a', self_val, expected=1.0 / np.sum(c0 ** d2), rtol=1e-9)
+            report.check('edge: model value at the actuator / a', at(vx[k], vy[k]) / a, expected=1.0 / np.sum(c0 ** d2), rtol=1e-9)
     report.assert_ok()
 
 
@@ -277,11 +279,10 @@ def dm_alt(tel, logger):
     return DeformableMirror(telescope=tel, nActs=NACT_ALT, altitude=ALT, logger=logger, device='cpu', validActThreshpercentage=0.5)
 
 
-FOOTPRINT_CASES = [(0, 0.5), (0, 1.6), (90, 2.5), (180, 1.5), (270, 0.6)]      # (azimuth [deg], displacement [grid steps])
+# (azimuth [deg], displacement [grid steps]); fractions away from 0.5 so that the rounded offset is unambiguous, none rounding to 0
+FOOTPRINT_CASES = [(0, 0.7), (0, 1.6), (90, 2.3), (180, 1.3), (270, 0.8)]
 
 
-@known_issue('DM-FOOTPRINT-INT', 'altitude footprint offsets are truncated with int() instead of rounded or interpolated: '
-             'up to 1 px error, biased towards the axis (same in the atmosphere)', 'DeformableMirror.py:430-431')
 @pytest.mark.parametrize('az,disp', FOOTPRINT_CASES, ids=[f'az{a}-{d}px' for a, d in FOOTPRINT_CASES])
 def test_altitude_dm_footprint_physical_displacement(az, disp, dm_alt, tel, report, tolerances):
     """
@@ -289,17 +290,19 @@ def test_altitude_dm_footprint_physical_displacement(az, disp, dm_alt, tel, repo
     delta = h tan(theta) (cos az, sin az): azimuth 0 -> +x (columns), 90 -> +y (rows). Prescribed surface: a ramp
     command c = g (x_act + 0.7 y_act) (actuators of the independent model, metapupil D_fov = D + 2 h tan(fov/2)), whose exact surface
     W(x, y) is the independent model. Expectation for the change of the OPD relative to the on-axis one:
-    dW = W(x_p + delta) - W(x_p) at the pupil points x_p, for fractional displacements (0.5-2.5 grid steps D/(N-1)): the
-    pupil must see the surface at the physical displaced position, not at a rounded pixel offset. Criterion: relative L2
-    error of the change over the pupil < yaml bound.
+    dW = W(x_p + delta_r) - W(x_p) at the pupil points x_p. Integer-pixel model (as the atmosphere footprint, owner's decision
+    2026-10-27): delta_r is delta rounded to the nearest grid step D/N (the pupil pixel), so |delta_r - delta| <= half a step, unbiased
+    (truncation would give 0 for 0.7-0.8 steps). Fractional displacements 0.7-2.3 steps. Criterion: relative L2 error of the
+    change over the pupil < yaml bound.
     """
     d_fov = D + 2 * ALT * np.tan(FOV / 2 * ARCSEC)
     ax, ay, valid, _ = actuators(NACT_ALT, d_fov)
     g = 2e-6
     cmd = g * (ax[valid] + 0.7 * ay[valid])
     dm_alt.updateDMShape(cmd, dynamicResponse=False)
-    step = D / (N - 1)
+    step = D / N
     delta = disp * step
+    delta_r = np.round(disp) * step                        # integer-pixel model
     theta = np.arctan(delta / ALT) / ARCSEC
     pup = circular_pupil(N, D)
     on, _ = dm_alt.get_dm_opd(src_at(0.0, 0.0))
@@ -307,10 +310,11 @@ def test_altitude_dm_footprint_physical_displacement(az, disp, dm_alt, tel, repo
     X, Y = pupil_grid(N, D)
     ex, ey = np.cos(np.deg2rad(az)), np.sin(np.deg2rad(az))
     w0 = model_opd(cmd, X, Y, NACT_ALT, d_fov)
-    w1 = model_opd(cmd, X + delta * ex, Y + delta * ey, NACT_ALT, d_fov)
+    w1 = model_opd(cmd, X + delta_r * ex, Y + delta_r * ey, NACT_ALT, d_fov)
     dw_ref = (w1 - w0)[pup]
     dw_got = (off - on)[pup]
     err = np.linalg.norm(dw_got - dw_ref) / np.linalg.norm(dw_ref)
+    report.metric('rounded displacement - physical [grid steps] (integer-pixel model, |.| <= 0.5)', (delta_r - delta) / step)
     report.metric('expected change: rms [m]', np.std(dw_ref))
     report.metric('SAOS change: rms [m]', np.std(dw_got))
     report.check(f'azimuth {az}, displacement {disp} steps: |dOPD - dW| / |dW|', err, hi=tolerances['dm']['footprint']['rel'])
@@ -330,7 +334,6 @@ def _layer(tel_like, altitude):
 EST_TEL = types.SimpleNamespace(D=4.149, resolution=216, fov=60.0, pupil=np.ones((216, 216), dtype=bool))
 
 
-@known_issue('DM-206624', 'metapupil diameter uses 206624 instead of 206265 arcsec/rad', 'DeformableMirror.py:391')
 def test_altitude_dm_metapupil_diameter(report, tolerances):
     """D_fov = D + 2 h tan(fov/2) for the telescope field (EST: 4.149 m, 60", h = 20 km), relative error < 1e-6."""
     L = _layer(EST_TEL, 20000)
@@ -339,24 +342,23 @@ def test_altitude_dm_metapupil_diameter(report, tolerances):
     report.assert_ok()
 
 
-@known_issue('DM-ALT-GRIDSTEP', 'altitude DMs sample their metapupil with step D_fov/(D_px - 1), ceil(D_px) breaks the '
-             'equality with the ground grid step D/(N - 1): footprints are smaller than the pupil (EST: -0.40 % at 20 km)',
-             'DeformableMirror.py:391-392, 178')
 def test_altitude_dm_grid_step_matches_ground(report, tolerances):
-    """Every DM grid must sample the same physical pixel as the ground DM/pupil grid (D/(N-1)): EST, h = 5 and 20 km."""
-    ground = EST_TEL.D / (EST_TEL.resolution - 1)
-    for h in (5000, 20000):
+    """
+    Every DM grid samples the same physical pixel as the pupil, the atmosphere and the WFS (D/N, cell centres): EST, h = 0, 5
+    and 20 km. The grid covers the metapupil with a symmetric whole-pixel margin: 0 <= D_px p - D_fov < 2 p, D_px - N even.
+    """
+    pix = EST_TEL.D / EST_TEL.resolution
+    for h in (0, 5000, 20000):
         L = _layer(EST_TEL, h)
-        report.check(f'h = {h / 1e3:g} km: step / ground step - 1', L.D_fov / (L.D_px - 1) / ground - 1, expected=0,
-                     atol=tolerances['dm']['geometry']['grid_step_rel'])
+        report.check(f'h = {h / 1e3:g} km: step / (D/N) - 1', L.pixel_size / pix - 1, expected=0, atol=tolerances['dm']['geometry']['grid_step_rel'])
+        report.check(f'h = {h / 1e3:g} km: (D_px p - D_fov) / p (in [0, 2))', (L.D_px * pix - L.D_fov) / pix, lo=-1e-9, hi=2.0 - 1e-9)
+        report.check(f'h = {h / 1e3:g} km: (D_px - N) mod 2', (L.D_px - EST_TEL.resolution) % 2, expected=0, atol=0)
     report.assert_ok()
 
 
-@known_issue('DM-MISREG-PIXELSIZE', 'MisRegistration converts metres to pixels with telescope.pixelSize = D/N while '
-             'the DM grid step is D/(N-1): map-level shifts are 1/(N-1) too large', 'Telescope.py:72, MisRegistration.py:72')
 def test_misregistration_pixel_size_matches_dm_grid(dm, tel, report, tolerances):
-    """The metre-to-pixel conversion of MisRegistration must use the DM grid step (relative difference < 1e-3)."""
-    step = dm.dm_layer.D_fov / (dm.dm_layer.D_px - 1)
+    """The metre-to-pixel conversion of MisRegistration must use the DM grid step (relative difference < 1e-3), measured on the grid."""
+    step = dm.high_res_coords[1, 0] - dm.high_res_coords[0, 0]
     report.check('misReg pixel / DM grid step - 1', dm.misReg.spatialSampling / step - 1, expected=0,
                  atol=tolerances['dm']['geometry']['grid_step_rel'])
     report.assert_ok()
@@ -486,7 +488,7 @@ def test_regression_actuator_vs_map_misregistration_convention(name, dxp, dyp, r
     c += 3e-7 * actuators(11, D)[0][actuators(11, D)[2]] / D          # asymmetric shape
     o0 = shape(d, c)
     rms0 = np.std(o0)
-    step = D / (N - 1)
+    step = D / N
     px = tel.pixelSize
     d.set_actuator_misregistration(dxp * step, dyp * step, rot, 1)
     o1 = shape(d, c)

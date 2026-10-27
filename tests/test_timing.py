@@ -75,8 +75,8 @@ def run(chain, logger, delay, impulse):
 
 
 def dm_model(cmd_full, nacts=7):
-    """Independent documented DM (Gaussian, coupling 0.6, partition of unity) on the pupil grid; cmd_full = nacts^2 command."""
-    xs = np.linspace(-D / 2, D / 2, RES)
+    """Independent documented DM (Gaussian, coupling 0.6, partition of unity) on the pupil grid (cell centres, D/RES); cmd_full = nacts^2 command."""
+    xs = (np.arange(RES) - (RES - 1) / 2) * D / RES
     Xp, Yp = np.meshgrid(xs, xs)
     xa = np.linspace(-D / 2, D / 2, nacts)
     ax, ay = np.meshgrid(xa, xa)

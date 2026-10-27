@@ -440,23 +440,26 @@ def test_cog_photon_noise(logger, report, tolerances):
 # C7: reference slopes
 # ----------------------------------------------------------------------------------------------------------------------
 
-@known_issue('WFS-NOISY-REF', 'reference slopes are measured on a single noisy frame when noiseFlag=True, leaving a '
-             'static offset of one frame of noise', 'ShackHartmann.py:270')
-def test_reference_slopes_noise_free(logger, report, tolerances):
+def test_reference_slopes_averaged(logger, report, tolerances):
     """
-    The reference slopes (subtracted from every measurement) must not depend on the noise: with noiseFlag=True they
-    must equal the noise-free reference within 10 % of the single-frame noise rms.
+    With noiseFlag=True the reference slopes are the average of n_reference_frames detector frames, as in operation. The noise
+    of the frames is independent, so rms(noisy - noise-free reference) = sigma_1 / sqrt(n), sigma_1 the single-frame noise rms
+    (measured on 30 further frames). Checked as sqrt(n) * ratio = 1 within the estimator statistics (n_sigma / sqrt(2 M), M slopes).
     """
+    tol = tolerances['wfs']['reference']
     det = dict(noiseFlag=True, quantumEfficiency=1.0, shotNoise=1, quantization_conversion=1, fullWellCapacity=1e12,
                nBits=32, darkCalibration=0, readoutNoise=0, darkCurrent=0, randomState=5)
-    noisy, tel, src = make_wfs(logger, magnitude=8.0, **det)
+    noisy, tel, src = make_wfs(logger, magnitude=8.0, n_reference_frames=tol['n_frames'], **det)
     clean, _, _ = make_wfs(logger, magnitude=8.0)
     frames = np.array([noisy.wfs_measure(np.zeros((RES, RES)), src)[0] for _ in range(30)])
-    noise_rms = frames.std(0).mean()
+    noise_rms = np.sqrt(frames.var(0, ddof=1).mean())
     diff = (noisy.reference_slopes_maps - clean.reference_slopes_maps)[noisy.valid_slopes_maps]
+    m = diff.size
+    band = tol['n_sigma'] / np.sqrt(2 * m)
     report.metric('single-frame noise rms', noise_rms, unit='px')
-    report.check('rms(reference noisy - noise-free) / noise rms', np.sqrt(np.mean(diff ** 2)) / noise_rms,
-                 hi=tolerances['wfs']['reference_ratio_max'])
+    report.metric('averaged frames n', tol['n_frames'])
+    report.check('sqrt(n) * rms(reference noisy - noise-free) / single-frame noise rms', np.sqrt(tol['n_frames'] * np.mean(diff ** 2)) / noise_rms,
+                 lo=1 - band, hi=1 + band)
     report.assert_ok()
 
 
@@ -475,7 +478,7 @@ def annulus_mask(res):
     return (r < D / 2) & (r >= OBS * D / 2)
 
 
-def partial_energy_discrepancy(logger, res, samp=2.0, fov_px=31, M=2):
+def partial_energy_discrepancy(logger, res, samp=2.0, fov_px=31, M=None):
     """
     Returns (energy ratio SAOS/expected of the valid subapertures, valid map, expected valid map, fraction map).
     Contract: the pupil is the piecewise-constant binary mask given to the Telescope (every pixel a uniform cell of the
@@ -485,6 +488,10 @@ def partial_energy_discrepancy(logger, res, samp=2.0, fov_px=31, M=2):
     through the same window.
     """
     np_ = res // NSUB
+    if M is None:
+        # >= 256 Fourier-sum cells per subaperture: the reference itself converged (with 2 cells per pupil pixel, 16 per
+        # subaperture at 48 px, its far field aliases and the window energy is off by ~1%)
+        M = int(np.ceil(256 / np_))
     m = annulus_mask(res)
     tel = Telescope(resolution=res, diameter=D, samplingTime=1e-3, pupil=m, logger=logger)
     src = Source('R', 0, logger=logger)
@@ -526,17 +533,15 @@ def test_partial_subaperture_energy(logger, report, tolerances, res):
     report.assert_ok()
 
 
-def test_partial_energy_converges(logger, report):
+def test_partial_energy_converges(logger, report, tolerances):
     """
-    Discretisation of the pupil must converge: the error of the energy of the valid subapertures (rms over subapertures)
-    decreases monotonically with the pupil resolution (8, 16, 32 px per subaperture) and the finest is at least twice
-    smaller than the coarsest (first-order scheme: expected factor 4).
+    The energy of partially illuminated subapertures must not depend on the pupil resolution: at 8, 16 and 32 pupil px per
+    subaperture the rms error (over the valid subapertures) against the converged reference stays below the precision of
+    the reference (energy_atol). The energy is a property of the aperture, not of its sampling.
     """
     errs = [np.sqrt(np.mean((partial_energy_discrepancy(logger, res)[0] - 1) ** 2)) for res in PUP_RES]
     for res, e in zip(PUP_RES, errs):
-        report.metric(f'rms(energy ratio - 1), pupil {res} px', e)
-    report.check('monotonic decrease', float(errs[0] > errs[1] > errs[2]), 1.0, atol=0)
-    report.check('error(48 px) / error(192 px)', errs[0] / errs[2], lo=2.0)
+        report.check(f'rms(energy ratio - 1), pupil {res} px', e, lo=0, hi=tolerances['wfs']['energy_atol'])
     report.assert_ok()
 
 

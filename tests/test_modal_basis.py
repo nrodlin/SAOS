@@ -222,10 +222,6 @@ def test_noll_covariance_reference_matches_noll_table(report):
     report.assert_ok()
 
 
-@known_issue('KL-COV-SCALE', 'karhunenLoeveModes applies the Noll covariance matrix (Noll-normalised coefficients) to Zernike columns '
-             'that get_zernikes rescales to unit rms on the actuators (rms 0.99-1.22 on an 11x11 grid) and piston-removes: the '
-             'diagonalisation is exact for the wrong covariance, the KL modes are not uncorrelated under the atmosphere '
-             '(variance deviations up to 43 % for some of the first 20 modes)', 'karhunenLoeveModes.py:25-37, zernikeModes.py:49-59')
 def test_kl_modes_are_the_atmospheric_eigenmodes_of_the_zernike_subspace(report, tolerances):
     """
     Karhunen-Loeve modes of an 11x11 DM (first 20 Zernike modes, Noll 2..21 = radial orders 1..5 complete): the span of

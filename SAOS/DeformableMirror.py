@@ -30,8 +30,9 @@ from .tools.tools import pol2cart
 class dmLayerClass():
     def __init__(self):
         self.altitude = None
-        self.D_fov                  = None # diameter of the DM projected into the altitude layer [meters]
-        self.D_px                   = None # size of the DM in [pixels]
+        self.D_fov                  = None # diameter of the DM projected into the altitude layer (metapupil) [meters]
+        self.D_px                   = None # size of the DM grid in [pixels]: telescope resolution + symmetric whole-pixel margin
+        self.pixel_size             = None # grid step [meters]: the telescope pixel D / resolution, samples at the cell centres
         self.telescope_D            = None # Telescope diamter in [meters]
         self.telescope_resolution   = None # Telescope diameter in [px] using the original telescope resolution
         self.center                 = None # center coordinates of the DM [pixels]
@@ -174,8 +175,9 @@ class DeformableMirror:
         # Compute scaling (epsilon) for the Gaussian influence functions based on mechanical coupling
         self.epsilon = np.sqrt(-1*np.log(self.mechCoupling))/self.pitch
 
-        # High resolution meshgrid
-        x    = np.linspace(-(self.dm_layer.D_fov)/2,(self.dm_layer.D_fov)/2, self.dm_layer.D_px)
+        # High resolution meshgrid: the telescope pixel grid (cell centres, step D / resolution), as the pupil, the atmosphere and
+        # the WFS sample the phase; the actuators span the metapupil D_fov
+        x    = (np.arange(self.dm_layer.D_px) - (self.dm_layer.D_px - 1)/2) * self.dm_layer.pixel_size
         X, Y = np.meshgrid(x,x)
 
         self.high_res_coords = np.array([X.flatten(), Y.flatten()]).T
@@ -387,9 +389,12 @@ class DeformableMirror:
         else:
             layer.altitude          = altitude
                 
-        # Diameter and resolution of the layer including the Field Of View and the number of extra pixels
-        layer.D_fov             = telescope.D + 2*np.tan(telescope.fov/(206624*2))*layer.altitude # in [m]
-        layer.D_px              = int(np.ceil((telescope.resolution/telescope.D)*layer.D_fov)) # Diameter in [px]
+        # Diameter of the layer seen by the Field Of View (metapupil) and its grid: the telescope pixel D / resolution, with the
+        # margin around the pupil rounded up to whole pixels and symmetric (D_px - resolution even), so that the on-axis footprint
+        # is centred and every altitude samples the same physical pixel as the pupil and the atmosphere
+        layer.D_fov             = telescope.D + 2*np.tan(np.deg2rad(telescope.fov/3600)/2)*layer.altitude # in [m]
+        layer.pixel_size        = telescope.D/telescope.resolution # in [m]
+        layer.D_px              = telescope.resolution + 2*int(np.ceil((layer.D_fov - telescope.D)/(2*layer.pixel_size) - 1e-9)) # in [px]
         layer.center            = layer.D_px//2
 
         layer.OPD               = np.zeros([layer.D_px,layer.D_px]) # stores the layer OPD without projection to any source (full pupil/metapupil)
@@ -398,10 +403,10 @@ class DeformableMirror:
         layer.telescope_D          = telescope.D # Telescope diameter in [m]
         layer.telescope_resolution = telescope.resolution # Telescope diameter in [px] using the original telescope resolution
 
-        # Circular entrance pupil
-        x = np.linspace(-layer.D_px/2, layer.D_px/2, layer.D_px)
+        # Circular metapupil (pixel centres inside D_fov)
+        x = (np.arange(layer.D_px) - (layer.D_px - 1)/2) * layer.pixel_size
         xx, yy = np.meshgrid(x, x)
-        layer.metapupil = xx**2 + yy**2 < ((layer.D_px + 1)/2)**2
+        layer.metapupil = xx**2 + yy**2 <= (layer.D_fov/2)**2
         layer.pupil                 = telescope.pupil.copy()
         
         return layer
@@ -425,15 +430,16 @@ class DeformableMirror:
         
         # Source coordinates are [angle_fov["], zenith_angle[rad]]. Hence, to obtain the location of the object at the DM altitude plane:
         # 1) Compute the projection: altitude * tan(angle_fov[rad]) -> location in meters
-        # 2) From meters to pixels: result_1 * (D_px/metapupil_D)
+        # 2) From meters to pixels: result_1 / pixel_size
         # 3) From polar to cartesian: (result_2[px], zenith_angle[rad]) -> (x_z, y_z) [px]
-        [x_z, y_z] = pol2cart(self.dm_layer.altitude * np.tan(src.coordinates[0]/206265)*(self.dm_layer.D_px/self.dm_layer.D_fov), 
+        [x_z, y_z] = pol2cart(self.dm_layer.altitude * np.tan(src.coordinates[0]/206265)/self.dm_layer.pixel_size, 
                              np.deg2rad(src.coordinates[1]))
 
         # Matriz origin is placed at the left-top corner, whereas the telescope origin is at the optical axis.
-        # We add an offset to translate the origins.
-        center_x = int(y_z) + self.dm_layer.D_px//2
-        center_y = int(x_z) + self.dm_layer.D_px//2
+        # We add an offset to translate the origins. The offset is rounded to the nearest pixel (integer-pixel model, as the
+        # atmosphere footprint): position error <= 0.5 px per axis, unbiased.
+        center_x = int(np.round(y_z)) + self.dm_layer.D_px//2
+        center_y = int(np.round(x_z)) + self.dm_layer.D_px//2
     
         # Finally, we mask the region that sees the source. This region is centered at the location computed in 3) 
         # and its shape equals the telescope pupil with the DM layer diameter in [px]
@@ -488,7 +494,7 @@ class DeformableMirror:
             ratio = self.dm_layer.telescope_D/r/2
             
             cube_in = sub_im.T
-            pixel_size_in   = self.dm_layer.D_fov/self.dm_layer.D_px
+            pixel_size_in   = self.dm_layer.pixel_size
             pixel_size_out  = pixel_size_in/ratio
             
             output_OPD = np.asarray(np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, self.dm_layer.telescope_resolution)))
@@ -673,8 +679,7 @@ class DeformableMirror:
             Shift [m] in the DM plane.
         rotation : float
             Rotation [deg] around the centre, same sense as misReg (clockwise for a positive angle with x right and y up).
-        Note: the shifts are in metres of the DM grid (step D_fov/(D_px-1)); misReg converts them with telescope.pixelSize = D/resolution,
-        so its shifts are 1/(resolution-1) larger (0.5 % at 200 px).
+        Note: the shifts are in metres; the DM grid step is the telescope pixel D/resolution, the same one misReg uses.
         radialScaling : float
             Magnification (1 = none).
         """

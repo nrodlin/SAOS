@@ -24,7 +24,7 @@ def generate_kl_modes(dm, nModes=None, useTorch=False):
 
     # Get metric on how far from orthogonal are the Zernikes in the DM:
     Noffset = 2 # +1 due to Noll's index starting at 1, +1 due to the piston mode
-    zernikes = get_zernikes(dm.coordinates, dm.validAct, nModes, Noffset)
+    zernikes, energies = get_zernikes(dm.coordinates, dm.validAct, nModes, Noffset, return_energy=True)
 
     zernikes_qr, R =  np.linalg.qr(zernikes[dm.validAct,:])
 
@@ -36,6 +36,9 @@ def generate_kl_modes(dm, nModes=None, useTorch=False):
     # Compute atmosphere Covariance Matrix
 
     Z_covmat = generate_covariance_matrix(nModes, Noffset-1)
+    # The columns are the Noll Zernikes divided by their rms on the actuators (energy_j): their coefficients are the Noll ones times
+    # energy_j, so their covariance is E C_Noll E (E = diag(energy))
+    Z_covmat = energies[:, None] * Z_covmat * energies[None, :]
 
     # Transform the CovMat to the Orthogonal space
 

@@ -156,3 +156,25 @@ def test_noise_flag_off_is_identity(logger, report):
     x = np.random.default_rng(0).random((NPIX, NPIX))
     report.check('max |out - in|', np.abs(det.integrate(x, 1e6) - x).max(), 0.0, atol=0)
     report.assert_ok()
+
+
+def test_noise_streams_independent_and_reproducible(logger, report):
+    """
+    Noise streams of light paths sharing a detector (Detector.register_stream): streams are numbered 0, 1, ... in connection
+    order; the same stream of a detector with the same seed reproduces its noise exactly, and two streams give uncorrelated
+    noise (correlation of the noise of a flat frame, 64x64 px, within 4 / sqrt(N)).
+    """
+    frame = np.ones((64, 64))
+    photons = 64 * 64 * 1e4
+    a = make_detector(logger, nPix=64, randomState=11, shotNoise=1, readoutNoise=3)
+    b = make_detector(logger, nPix=64, randomState=11, shotNoise=1, readoutNoise=3)
+    sa = [a.register_stream() for _ in range(2)]
+    sb = [b.register_stream() for _ in range(2)]
+    report.check('stream indices in connection order', sa, expected=[0, 1], atol=0)
+    n0 = a.integrate(frame, photons, sa[0]).astype(float)
+    n1 = a.integrate(frame, photons, sa[1]).astype(float)
+    m1 = b.integrate(frame, photons, sb[1]).astype(float)              # stream 1 of an identical detector, drawn first
+    report.check('same seed and stream, other draw order: max |difference|', np.max(np.abs(n1 - m1)), expected=0, atol=0)
+    r = np.corrcoef((n0 - n0.mean()).ravel(), (n1 - n1.mean()).ravel())[0, 1]
+    report.check('correlation of the noise of streams 0 and 1', r, expected=0, atol=4 / np.sqrt(n0.size))
+    report.assert_ok()

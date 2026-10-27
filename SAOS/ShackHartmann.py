@@ -69,8 +69,16 @@ class ShackHartmann:
             Number of pixels between subapertures.
         fft_fieldOfView_oversampling : float, optional
             Extra FoV in [arcsec] that is taken for the FFT computation, in order to reduce wrapping effects.
+        pupil_oversampling : int, optional (keyword)
+            Pupil samples per subaperture used to form the spots, as a multiple k of the lenslet image size. Default
+            (None): the smallest number that keeps the bias of the spot second moment (CoG noise), ~1.22 (u / n)^2 with u
+            the window half-width in lambda/d, below 1% (EST red: 48 samples). The cost of the spot computation grows
+            roughly as n^2.
         use_brightest : int, optional
             Picks the n brightest pixels as threshold for center-of-gravity spot detection.
+        n_reference_frames : int, optional (keyword)
+            Detector frames averaged to acquire the reference slopes when noiseFlag is True, as in operation (the residual
+            noise of the reference is the single-frame noise / sqrt(n)). Default 100. Without noise one frame is used.
         threshold_convolution : float, optional
             Cut-off threshold for Gaussian convolution.
         unit_in_rad : bool, optional
@@ -138,8 +146,15 @@ class ShackHartmann:
         self.threshold_convolution          = threshold_convolution
         self.use_brightest                  = use_brightest
         self.unit_in_rad                    = unit_in_rad
+        self.n_reference_frames             = int(kwargs.get('n_reference_frames', 100))
 
         self.device = torch.device(kwargs.get("device", "cuda" if torch.cuda.is_available() else "cpu"))
+        # Pupil samples per subaperture for the image formation (decoupled from the detector pixels by the MFT). A field sampled
+        # at n points gives a spot that repeats every n lambda/d, which raises its wings: the second moment of the spot (CoG
+        # noise) is biased by ~1.22 (u / n)^2, u = half-width of the detector window in lambda/d (calibrated against a
+        # converged Fourier sum). By default n is the smallest value that keeps that bias <= 1%; pupil_oversampling = k forces
+        # n = k * npix_lenslet. In both cases n is rounded up to a multiple of the pupil pixels per subaperture.
+        self.pupil_oversampling = kwargs.get('pupil_oversampling', None)
        
         # Subapeture definition
         self.subaperture_size           = telescope.D / self.nSubap
@@ -219,9 +234,42 @@ class ShackHartmann:
         # It also gives the normalized interpolation of the phase, interp(pupil * phase) / interp(pupil), which keeps the phase of the
         # edge points free of the zeros outside the pupil
         self.pupil_torch = torch.from_numpy(telescope.pupil.astype(float)).contiguous().to(self.device)
-        self.subap_amplitude = torch.nn.functional.interpolate(self.split_subapertures(self.pupil_torch).unsqueeze(1),
-                                                               size=(self.npix_lenslet, self.npix_lenslet), mode='bilinear', align_corners=True).squeeze(1).contiguous().float()
-        self.subap_amplitude_inv = torch.where(self.subap_amplitude > 0, 1 / self.subap_amplitude.clamp_min(1e-12), 0.0)
+        # Cell-centred resampling matrix (rows and columns): npix_lenslet samples per subaperture (see split_subapertures)
+        # Multiple of the native pupil pixels per subaperture, so that every fine cell lies inside one pupil pixel and the pupil
+        # edge is reproduced exactly (no fractional cells straddling native pixel boundaries)
+        if self.pupil_oversampling is None:
+            fwhm_px = src.wavelength * 206265 / (self.subaperture_size * self.plate_scale)
+            n_min = np.sqrt(1.22 / 0.01) * (self.npix_subap / 2) / fwhm_px
+        else:
+            n_min = int(self.pupil_oversampling) * self.npix_lenslet
+        self.npix_pupil = int(self.npix_phase * np.ceil(max(n_min, self.npix_phase) / self.npix_phase))
+        self.subap_resampling = self.cell_centred_resampling(telescope.resolution, self.nSubap * self.npix_pupil)
+        # Fast path when every subaperture covers exactly npix_phase pupil pixels: the same small interpolation matrix
+        # (npix_pupil x (npix_phase + 2)) maps the pupil patch of any subaperture (with a one-pixel margin) to its samples
+        self.local_resampling = None
+        if telescope.resolution == self.nSubap * self.npix_phase:
+            npp = self.npix_phase
+            u = (np.arange(self.npix_pupil) + 0.5) * npp / self.npix_pupil - 0.5 + 1      # patch index units (margin of 1)
+            m0 = np.floor(u).astype(int)
+            w1 = u - m0
+            W = np.zeros((self.npix_pupil, npp + 2))
+            W[np.arange(self.npix_pupil), m0] = 1 - w1
+            W[np.arange(self.npix_pupil), m0 + 1] = w1
+            self.local_resampling = torch.from_numpy(W).float().to(self.device)
+        self.valid_index = torch.from_numpy(np.flatnonzero(self.valid_subapertures_1D)).to(self.device)
+        pupil_sub = self.split_subapertures(self.pupil_torch).contiguous().float()
+        # Amplitude = sqrt(covered fraction): the interpolated mask is the fraction of each fine sample covered by the pupil, so the
+        # transmitted light sum |amplitude|^2 equals the illuminated area exactly and varies continuously with the pupil geometry
+        coverage = self.cell_coverage(telescope.resolution, self.nSubap * self.npix_pupil)
+        covered = (coverage @ self.pupil_torch.to(coverage.dtype) @ coverage.transpose(0, 1))
+        n = self.npix_pupil
+        covered = covered.view(self.nSubap, n, self.nSubap, n).permute(0, 2, 1, 3).reshape(self.nSubap * self.nSubap, n, n)
+        self.subap_amplitude = torch.sqrt(covered.clamp(0.0, 1.0)).contiguous().float()
+        self.subap_amplitude_inv = torch.where(pupil_sub > 1e-6, 1 / pupil_sub.clamp_min(1e-12), 0.0)
+        # Only the valid subapertures are imaged (get_psf)
+        self.subap_amplitude_valid = self.subap_amplitude[self.valid_index].contiguous()
+        self.subap_amplitude_inv_valid = self.subap_amplitude_inv[self.valid_index].contiguous()
+        self._mft_cache = {}       # MFT kernels per (lambda/d in px, spot centre)
 
         # Detector pixels of every valid subaperture image (create_full_frame, get_subaps)
         center_offset = self.guardPx + (self.npix_lenslet // 2) - self.npix_subap//2
@@ -246,7 +294,8 @@ class ShackHartmann:
     def initialize_wfs(self, telescope, src):
         """
         Initialize the Shack-Hartmann WFS by measuring reference slopes
-        and determining slope units.
+        and determining slope units. With detector noise the reference slopes are the average of n_reference_frames
+        frames of the unaberrated spots (residual noise = single-frame noise / sqrt(n)), as in operation.
 
         Parameters
         ----------
@@ -266,8 +315,14 @@ class ShackHartmann:
         self.slopes_units           = 1
 
         self.logger.info('ShackHartmann::initialize_wfs - Acquiring reference slopes..')
-        null_phase = np.zeros((telescope.resolution, telescope.resolution))        
-        _, self.reference_slopes_maps,_ = self.wfs_measure(null_phase, src)        
+        # Average of n detector frames of the unaberrated spots (the optical propagation is computed once, the noise is drawn per frame)
+        null_phase = np.zeros((telescope.resolution, telescope.resolution))
+        ideal_frame, I, nPhotons = self.ideal_frame(null_phase, src)
+        n_frames = self.n_reference_frames if self.cam.noiseFlag else 1
+        reference = np.zeros_like(self.reference_slopes_maps)
+        for _ in range(n_frames):
+            reference += self.wfs_integrate(ideal_frame, I, nPhotons)[1]
+        self.reference_slopes_maps = reference / n_frames
         self.isInitialized = True
         
         self.logger.info('ShackHartmann::initialize_wfs - Setting slopes units..')  
@@ -366,125 +421,162 @@ class ShackHartmann:
     # by the complex phase to obtain the PSF per subaperture, as an array of dimensions (nSubap**2, n_pix_lenslet_init, n_pix_lenslet_init)
     # The subapertures are sorted from left to right, top to bottom.
 
-    def split_subapertures(self, field):
+    def cell_centred_resampling(self, n_in, n_out):
         """
-        Resample a pupil-plane map to the subaperture grid and split it into subapertures, each one with its border row and column
-        (shared with the neighbour) so that the later interpolation to the subaperture sampling covers the whole subaperture.
+        Linear resampling (indices and weights) between two cell-centred grids covering the same length: input cell m
+        has its centre at (m + 1/2) / n_in, output cell i at (i + 1/2) / n_out (both in units of the full length).
+        The output samples are linear interpolations of the two nearest input centres; in the outermost half input cell
+        (beyond the first or last input centre) the line through the two edge samples is extrapolated, so that a linear
+        phase is reproduced exactly everywhere.
+
+        Parameters
+        ----------
+        n_in : int
+            Number of input cells (pupil-plane resolution).
+        n_out : int
+            Number of output cells (nSubap * npix_lenslet).
+
+        Returns
+        -------
+        tuple of torch.Tensor
+            (m0, w1): output sample i = (1 - w1[i]) * input[m0[i]] + w1[i] * input[m0[i] + 1] (on the WFS device).
+        """
+        u = (np.arange(n_out) + 0.5) * n_in / n_out - 0.5          # output centres in input index units
+        m0 = np.clip(np.floor(u).astype(int), 0, n_in - 2)
+        w1 = u - m0                                                 # < 0 or > 1 outside the input centres: extrapolation
+        return (torch.from_numpy(m0).to(self.device), torch.from_numpy(w1).to(self.device))
+
+    def cell_coverage(self, n_in, n_out):
+        """
+        Area-weighting matrix C [n_out, n_in] between two cell-centred grids covering the same length: C[i, m] is the
+        fraction of output cell i covered by input cell m (rows sum to 1). For a map that is constant on the input cells
+        (the pupil mask), C map C^T gives the exact mean over every output cell (its covered fraction), whether the output
+        grid is finer or coarser than the input one, and the total is conserved inside every subaperture.
+
+        Parameters
+        ----------
+        n_in : int
+            Number of input cells.
+        n_out : int
+            Number of output cells.
+
+        Returns
+        -------
+        torch.Tensor
+            Coverage matrix [n_out, n_in] (float64, on the WFS device).
+        """
+        edges_in = np.arange(n_in + 1) / n_in
+        edges_out = np.arange(n_out + 1) / n_out
+        lo = np.maximum(edges_out[:-1, None], edges_in[None, :-1])
+        hi = np.minimum(edges_out[1:, None], edges_in[None, 1:])
+        C = np.clip(hi - lo, 0, None) * n_out
+        return torch.from_numpy(C).to(self.device)
+
+    def split_subapertures(self, field, index=None):
+        """
+        Resample a pupil-plane map to npix_lenslet cell-centred samples per subaperture and split it into subapertures.
+
+        The pupil-plane pixels are cells of side D / resolution and the subaperture of width d = D / nSubap is sampled at
+        the centres of npix_lenslet cells, (j + 1/2) d / npix_lenslet from its edge (cell_centred_resampling). The samples
+        therefore span exactly the subaperture, with the spacing assumed by the Fourier transform (d / npix_lenslet), and a
+        linear phase is reproduced exactly (full slope across the subaperture, no shift of the subaperture centre).
 
         Parameters
         ----------
         field : torch.Tensor
             Pupil-plane map [resolution, resolution] (phase, or the pupil).
+        index : torch.Tensor, optional
+            Subapertures to return (default: all).
 
         Returns
         -------
         torch.Tensor
-            Subaperture maps [nSubap**2, npix_phase+1, npix_phase+1], sorted from left to right, top to bottom.
+            Subaperture maps [nSubap**2 (or len(index)), npix_pupil, npix_pupil], sorted from left to right, top to bottom.
         """
-        field_rescaled = torch.nn.functional.interpolate(field.unsqueeze(0).unsqueeze(0), 
-                                                            size=(self.nSubap*self.npix_phase, self.nSubap*self.npix_phase), 
-                                                            mode='bilinear', align_corners=True).squeeze().contiguous()
+        n = self.npix_pupil
+        if self.local_resampling is not None:
+            # Pupil patch of every subaperture with a one-pixel margin; the margin outside the array is the linear
+            # extrapolation of the two edge pixels, so that a linear phase stays exact
+            f = field.float()
+            f = torch.cat([2 * f[:1] - f[1:2], f, 2 * f[-1:] - f[-2:-1]], dim=0)
+            f = torch.cat([2 * f[:, :1] - f[:, 1:2], f, 2 * f[:, -1:] - f[:, -2:-1]], dim=1)
+            npp = self.npix_phase
+            patches = f.unfold(0, npp + 2, npp).unfold(1, npp + 2, npp).reshape(self.nSubap * self.nSubap, npp + 2, npp + 2)
+            if index is not None:
+                patches = patches[index]
+            W = self.local_resampling
+            return W @ patches @ W.transpose(0, 1)
+        m0, w1 = self.subap_resampling
+        f = field.to(w1.dtype)
+        # separable linear interpolation from the two nearest pupil cells (rows, then columns)
+        f = f[m0] * (1 - w1)[:, None] + f[m0 + 1] * w1[:, None]
+        field_rescaled = f[:, m0] * (1 - w1)[None, :] + f[:, m0 + 1] * w1[None, :]
+        out = field_rescaled.view(self.nSubap, n, self.nSubap, n).permute(0, 2, 1, 3).reshape(self.nSubap * self.nSubap, n, n)
+        return out if index is None else out[index]
 
-        H, W = field_rescaled.shape
-
-        # Build row indices
-        row_ids = torch.arange(H)
-        insert_rows = (row_ids % self.npix_phase == 0) & (row_ids < H - 2) & (row_ids > 0) | (row_ids == (H - self.npix_phase -1))
-        extra_rows = row_ids[insert_rows]
-        row_idx = torch.cat([row_ids, extra_rows]).sort().values
-        row_idx[-self.npix_phase-2:-self.npix_phase] = row_idx[-self.npix_phase-2:-self.npix_phase].flip(0)
-
-        # Build column indices
-        col_ids = torch.arange(H)
-        insert_cols = (col_ids % self.npix_phase == 0) & (col_ids < H - 2) & (col_ids > 0) | (col_ids == (H - self.npix_phase -1))
-        extra_cols = col_ids[insert_cols]
-        col_idx = torch.cat([col_ids, extra_cols]).sort().values
-        col_idx[-self.npix_phase-2:-self.npix_phase] = col_idx[-self.npix_phase-2:-self.npix_phase].flip(0)
-
-        # Apply advanced indexing
-        field_reshaped = field_rescaled[row_idx][:, col_idx].view(self.nSubap, self.npix_phase+1, 
-                                                                  self.nSubap, self.npix_phase+1).permute(0, 2, 1, 3).reshape(self.nSubap * self.nSubap, 
-                                                                                                                              self.npix_phase+1, self.npix_phase+1)
-
-
-        return field_reshaped
+    def _mft_kernel(self, fwhm, center):
+        """
+        MFT matrix A[k, j] = exp(-2 pi i (j - (n-1)/2) (k - center) / (fwhm n)), n = npix_lenslet: field of a subaperture
+        sampled at n cell-centred points -> image pixel k at the angle (k - center) * plate_scale, for any plate scale.
+        Cached per (fwhm, center).
+        """
+        key = (round(float(fwhm), 12), float(center))
+        A = self._mft_cache.get(key)
+        if A is None:
+            n, n_p = self.npix_lenslet, self.npix_pupil
+            j = torch.arange(n_p, dtype=torch.float64, device=self.device) - (n_p - 1) / 2
+            k = torch.arange(n, dtype=torch.float64, device=self.device) - center
+            A = torch.exp(-2j * np.pi * torch.outer(k, j) / (fwhm * n_p)).to(torch.complex64)
+            self._mft_cache[key] = A
+        return A
 
     def get_psf(self, phase, fwhm):
         """
-        Get the electromagnetic field per subaperture based on input phase.
+        Spot of every subaperture from the pupil phase, with a matrix Fourier transform (MFT) at the detector plate scale.
+
+        The field of each subaperture is the pupil amplitude times exp(i phase), both sampled at npix_lenslet cell-centred
+        points per subaperture (split_subapertures). The phase uses a normalised interpolation, interp(pupil * phase) /
+        interp(pupil), so that the points at the pupil edge are not biased by the zeros outside the pupil. Image pixel k is
+        at the angle (k - c) * plate_scale exactly (no FFT size rounding), with c = (npix_lenslet - npix_subap) // 2 +
+        (npix_subap - 1) / 2, so that a flat phase gives a spot centred in the detector window cut by create_full_frame, for odd
+        and even windows. The amplitude is sqrt(covered fraction) of each sample, so the light of a partially illuminated
+        subaperture equals its illuminated area.
 
         Parameters
         ----------
         phase : np.ndarray
             Wavefront phase in radians.
         fwhm : float
-            Full width at half maximum for the PSF in [px].
-        
+            lambda / d in detector pixels (lambda / d / plate_scale). Must be >= 1 (Nyquist: >= 2).
 
         Returns
         -------
         np.ndarray
-            Complex field per subaperture.
+            Spot intensities [nSubap**2, npix_lenslet, npix_lenslet].
         """
-
         self.logger.debug('ShackHartmann::get_psf')
-        # Get dimensions to keep the FWHM stable during the computation
         if fwhm < 1:
             raise ValueError('FWHM must be greater than 2 to guarantee enough spatial sampling.')
-        nFFT = np.round(fwhm * self.npix_lenslet).astype(int)
-        # Define pupil
-        start = (nFFT - self.npix_lenslet) // 2
-        end = start + self.npix_lenslet
-        square_pupil = np.zeros((nFFT, nFFT), dtype=float)
-        square_pupil[start:end, start:end] = 1.0
+        n = self.npix_lenslet
+        center = (n - self.npix_subap) // 2 + (self.npix_subap - 1) / 2   # zero tilt -> centre of the detector window
 
         t0 = time.time()
-        # Rescale the phase
         input_phase_torch = torch.from_numpy(phase).contiguous().detach().to(self.device) * self.pupil_torch   # no phase outside the pupil
-        square_pupil_torch = torch.from_numpy(square_pupil).contiguous().detach().to(self.device)
-
+        # Cell-centred samples of every subaperture (npix_lenslet x npix_lenslet); normalized interpolation:
+        # interp(pupil * phase) / interp(pupil) keeps only the points inside the pupil
+        phase_sub = self.split_subapertures(input_phase_torch, self.valid_index).float() * self.subap_amplitude_inv_valid
         t1 = time.time()
-        # Reshape the subapertures to a grid of subapertures. The sensor can be zeropadded, so the phase is filling the central part of the subaperture
-        phase_reshaped = self.split_subapertures(input_phase_torch)
+        field = torch.polar(self.subap_amplitude_valid, phase_sub)
+        A = self._mft_kernel(fwhm, center)
+        E = A @ field @ A.transpose(0, 1)
+        psf_valid = (E.real ** 2 + E.imag ** 2) / (fwhm * self.npix_pupil) ** 2
+        t2 = time.time()
+        # only the valid subapertures are imaged; the others are returned as zeros (same layout as before)
+        psf = np.zeros((self.nSubap ** 2, n, n), dtype=np.float32)
+        psf[self.valid_index.cpu().numpy()] = psf_valid.cpu().numpy()
+        self.logger.debug(f'ShackHartmann::get_psf - Time taken: sample subapertures {t1-t0} [s], MFT {t2-t1} [s]')
+        return psf
 
-        t2 = time.time()        
-        phase_rescaled_valids = torch.nn.functional.interpolate(phase_reshaped.unsqueeze(1), 
-                                                                size=(self.npix_lenslet, self.npix_lenslet), 
-                                                                mode='bilinear', align_corners=True).squeeze(1).contiguous().float()
-        # Normalized interpolation: the input phase is set to zero outside the pupil, so the interpolation above is
-        # interp(pupil * phase); dividing by interp(pupil) = subap_amplitude keeps only the points inside the pupil (zero amplitude outside)
-        phase_rescaled_valids = phase_rescaled_valids * self.subap_amplitude_inv
-        t3 = time.time()
-        # Generate an array of phase, filling the valid subapertures  
-        rows = torch.where(square_pupil_torch.any(dim=1))[0]
-        cols = torch.where(square_pupil_torch.any(dim=0))[0]
-
-        row_start, row_end = rows[0].item(), rows[-1].item() + 1
-        col_start, col_end = cols[0].item(), cols[-1].item() + 1
-        # Allocate full tensor
-        cube_em = torch.zeros((self.nSubap**2, nFFT, nFFT), dtype=torch.complex64, device=self.device)
-        # Exponential: field of each subaperture, pupil amplitude and phase
-        exp_block = torch.polar(self.subap_amplitude, phase_rescaled_valids)
-
-        cube_em[:, row_start:row_end, col_start:col_end] = exp_block
-        # Apply light scaling
-        # cube_em *= np.sqrt(cube_flux) * phasor_tiled
-        t4 = time.time()
-        # Get the PSF
-        psf = torch.fft.fft2(cube_em, dim=(-2, -1), norm='forward')  # same as dividing by nFFT²
-        t5 = time.time()
-        # Crop to desired region of the centred (fftshift) plane, taking its pixels directly
-        crop = torch.remainder(torch.arange(start, end, device=self.device) - nFFT // 2, nFFT)
-        psf = psf[:, crop][:, :, crop]
-        # Compute normalized intensity
-        psf = torch.sqrt(psf.real**2 + psf.imag **2)**2
-        psf = psf.cpu().numpy()
-        
-        self.logger.debug(f'ShackHartmann::get_psf - Time taken for each step: '
-                         f'Rescale input phase: {t1-t0} [s], Reshape into subaps: {t2-t1} [s], Interpolate to npix_lenslet: {t3-t2} [s], '
-                         f'Compute exponential: {t4-t3} [s], PSF: {t5-t4} [s], Total processing time: {t5-t0}')
-        return psf 
-  
     def create_full_frame(self, subaps):
         """
         Combine subaperture images into full detector frame.
@@ -649,7 +741,7 @@ class ShackHartmann:
         return
     
 #%% SH Measurement
-    def wfs_integrate(self, ideal_frame, subaps, nPhoton):
+    def wfs_integrate(self, ideal_frame, subaps, nPhoton, stream=None):
         """
         Integrate the full detector image and compute valid slopes.
 
@@ -659,6 +751,8 @@ class ShackHartmann:
             Full-frame ideal image.
         subaps : np.ndarray
             Spot images per subaperture.
+        stream : int, optional
+            Noise stream of the light path (Detector.register_stream); None uses the detector's own generator.
 
         Returns
         -------
@@ -666,7 +760,7 @@ class ShackHartmann:
             Slopes 1D, slopes 2D, and final noisy image.
         """
         # propagate to detector to add noise and detector effects
-        noisy_frame = self.cam.integrate(ideal_frame, nPhoton)
+        noisy_frame = self.cam.integrate(ideal_frame, nPhoton, stream)
         subaps = self.get_subaps(noisy_frame)
 
         # compute the centroid on valid subaperture
@@ -699,7 +793,7 @@ class ShackHartmann:
     
     # Receives the phase [rad]] and return the slopes measured by the SH in [px]
     # Expects the ideal frame WITHOUT pupil applied.
-    def wfs_measure(self,phase_in, src):
+    def wfs_measure(self,phase_in, src, stream=None):
         """
         Measure slopes from a wavefront phase using the SH-WFS.
 
@@ -709,6 +803,8 @@ class ShackHartmann:
             Phase map input [radians].
         src : Source
             Source object.
+        stream : int, optional
+            Noise stream of the light path (Detector.register_stream); None uses the detector's own generator.
 
         Returns
         -------
@@ -721,12 +817,36 @@ class ShackHartmann:
             self.logger.error("ShackHartmann::wfs_measure - Phase or Source are none.")
             raise ValueError('ShackHartmann::wfs_measure - Phase or Source are none.')
        
+        t0 = time.time()
+        ideal_frame, I, nPhotons = self.ideal_frame(phase_in, src)
+        t1 = time.time()
+        # Compute the frame and the slopes
+        signal, signal_2D, noisy_frame = self.wfs_integrate(ideal_frame, I, nPhotons, stream)
+        t2 = time.time()
+        self.logger.debug(f'Ideal frame: {(t1-t0)*1000}')
+        self.logger.debug(f'Integrate: {(t2-t1)*1000}')
+        return signal, signal_2D, noisy_frame
+
+    def ideal_frame(self, phase_in, src):
+        """
+        Noise-free detector frame of a wavefront phase (the deterministic part of wfs_measure).
+
+        Parameters
+        ----------
+        phase_in : np.ndarray
+            Phase map input [radians].
+        src : Source
+            Source object.
+
+        Returns
+        -------
+        tuple
+            Ideal full frame, spot images of the valid subapertures and number of photons.
+        """
         # compute fwhm
         fwhm = src.wavelength * 206265 / (self.subaperture_size * self.plate_scale)
         # compute the PSF intensity
-        t0 = time.time()
         I = self.get_psf(phase_in, fwhm)
-        t1 = time.time()
         # reduce to valid subaperture
         I = I[self.valid_subapertures_1D,:,:]    
                 
@@ -737,17 +857,9 @@ class ShackHartmann:
         # fill camera frame with computed intensity (only valid subapertures)
 
         ideal_frame = self.create_full_frame(I)
-        t2 = time.time()
         # Compute the number of photons considering the flux of the sun, collecting area of the telescope and sampling time
         nPhotons = np.round(src.flux * self.area_eff * self.integration_time * self.lightRatio).astype(int)
-        # Compute the frame and the slopes
-        signal, signal_2D, noisy_frame = self.wfs_integrate(ideal_frame, I, nPhotons)                
-        t3 = time.time()
-        self.logger.debug(f'Get PSF: {(t1-t0)*1000}')
-        self.logger.debug(f'Create full frame: {(t2-t1)*1000}')
-        self.logger.debug(f'Integrate: {(t3-t2)*1000}')
-        self.logger.debug(f'Total: {(t3-t0)*1000}')
-        return signal, signal_2D, noisy_frame
+        return ideal_frame, I, nPhotons
 
     def print_properties(self):
         """

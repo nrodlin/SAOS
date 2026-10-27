@@ -138,7 +138,7 @@ def dm_surface(cmd_valid, X, Y, nacts=7, coupling=0.6, thresh=0.5):
 
 
 SAMP, FOV_PX = 2.0, 15                           # pixels per lambda/d and window size of make_wfs
-ZERO_PX = int(round(SAMP * FOV_PX)) // 2 - (int(round(SAMP * FOV_PX)) - FOV_PX) // 2    # window pixel of the zero-frequency (even FFT array, centred crop)
+ZERO_PX = FOV_PX // 2                            # window pixel of the zero frequency: the lenslet axis at the window centre (WFS-SPOT-OFFCENTRE, solved)
 M_FINE = 32                                      # samples per subaperture side of the forward model
 
 
@@ -184,10 +184,6 @@ def _valid_mask():
     return dm_surface(np.zeros(37), np.zeros((1, 1)), np.zeros((1, 1)))[1]
 
 
-@known_issue('WFS-SCALE', 'subaperture phase interpolated with align_corners=True: N samples span d, the FFT pixel is '
-             '(N-1)/N of the plate scale and slopes are N/(N-1) too large (+7 % at N=15); measured gain SAOS / expected here '
-             '1.06-1.10 (the remainder over 7 % has not been decomposed: DM grid step D/(N-1) vs pixel D/N, subaperture split)',
-             'ShackHartmann.py:423-433, 458')
 def test_im_columns_vs_independent_forward_model(sysm, report, tolerances):
     """
     Absolute IM (slopes [px] per metre of mode amplitude) of the first NM zernike modes against the independent

@@ -304,14 +304,12 @@ def test_layer_r0_and_altitude_scaling(logger, report):
     report.check('layer altitude / (h / cos z)', [L.altitude / (h / np.cos(zr)) for L, h in zip(layers[1:], alt[1:])], expected=1, rtol=1e-12)
     d_fov = [2.0 + 2 * np.tan(np.deg2rad(40 / 3600) / 2) * L.altitude for L in layers]
     report.check('layer size / (D + 2 tan(fov/2) h)', [L.D_fov / d for L, d in zip(layers, d_fov)], expected=1, rtol=1e-5)   # 206265 vs exact rad
-    report.check('npix * pixel / layer size', [L.npix * L.spatial_res / L.D_fov for L in layers], expected=1, rtol=1e-12)
+    report.check('(npix * pixel - layer size) / pixel (whole-pixel symmetric margin: 0 <= . < 2)',
+                 [(L.npix * L.spatial_res - L.D_fov) / L.spatial_res for L in layers], lo=-1e-9, hi=2.0)
     report.metric('layer pixel / telescope pixel D/N - 1 (max)', max(abs(L.spatial_res / (2.0 / 32) - 1) for L in layers))
     report.assert_ok()
 
 
-@known_issue('ATM-LAYER-PIXEL', 'the layer has npix = ceil(res / D D_fov) pixels over D_fov, so its pixel D_fov / npix is smaller '
-             'than the pupil pixel D / res (up to 1/npix): the res pixels cut for the pupil span less than D, and the '
-             'footprint and wind displacements are computed with D / res but applied to layer pixels', 'Atmosphere.py:199-201')
 def test_layer_pixel_equals_pupil_pixel(logger, report):
     """
     The pupil is cut as res layer pixels, so the layer pixel pitch must equal the pupil pixel D / res (otherwise the
@@ -375,18 +373,22 @@ def _footprint_displacement(logger, d_m, az, h=10000.0):
     return out[0], out[1]
 
 
-FOOTPRINT_INT = known_issue('ATM-FOOTPRINT-INT', 'footprint offsets are truncated to whole pixels with int() (and the '
-                            'discretisation offset extra_s is never applied): the sub-pixel part of h tan(theta) is lost '
-                            '(dead zone of +-1 px)', 'Atmosphere.py:464-469')
+FOOTPRINT_PIX = 0.1           # layer pixel D / res of _footprint_displacement [m]
 
 
-@pytest.mark.parametrize('az', [pytest.param(a, marks=FOOTPRINT_INT) for a in (0, 90, 180, 270)])
+def footprint_model(d_m, az):
+    """Integer-pixel footprint model (owner's decision 2026-10-27): each component of h tan(theta) rounded to the nearest layer pixel."""
+    rad = np.deg2rad(az)
+    return (np.round(d_m * np.cos(rad) / FOOTPRINT_PIX) * FOOTPRINT_PIX, np.round(d_m * np.sin(rad) / FOOTPRINT_PIX) * FOOTPRINT_PIX)
+
+
+@pytest.mark.parametrize('az', (0, 90, 180, 270))
 def test_footprint_displacement_direction(logger, report, tolerances, az):
     """
     A source at 0.2 m of footprint offset (h tan(theta) at a 10 km layer, theta = 4.1 arcsec) samples the layer 0.2 m
     away along its azimuth: displacement (col, row) = d (cos az, sin az), measured on a prescribed linear phase ramp.
-    (0.2 m is two telescope pixels of 0.1 m, but arctan then the 206265 arcsec/rad conversion leave 1.99999.. pixel,
-    which int() truncates to one pixel.)
+    (0.2 m is two telescope pixels of 0.1 m, but arctan then the 206265 arcsec/rad conversion leave 1.99999.. pixel:
+    the footprint must round it to two pixels, not truncate it to one.)
     """
     tol = tolerances['atmosphere']['footprint']
     d = 0.2
@@ -397,30 +399,30 @@ def test_footprint_displacement_direction(logger, report, tolerances, az):
 
 
 @pytest.mark.parametrize('d_m,az', [(0.16, 0), (0.09, 90), (0.04, 37.0), (0.15, 215.0), (0.16, 127.0), (0.09, 300.0)])
-@FOOTPRINT_INT
 def test_footprint_displacement_fractional(logger, report, tolerances, d_m, az):
     """
     Fractional footprint displacement: d = 0.04-0.16 m at 10 km (0.4-1.6 telescope pixels of 0.1 m) along azimuths
-    from 0 to 300 deg. The footprint moves by exactly h tan(theta) = d, not by a whole number
-    of pixels: measured on a prescribed linear phase ramp along each axis.
+    from 0 to 300 deg (no component within 0.05 px of a half pixel). Integer-pixel model: each component of h tan(theta)
+    is rounded to the nearest layer pixel, so the displacement equals the rounded model exactly and lies within half a
+    pixel of the physical one, without bias. Measured on a prescribed linear phase ramp along each axis.
     """
     tol = tolerances['atmosphere']['footprint']
     rad = np.deg2rad(az)
     dc, dr = _footprint_displacement(logger, d_m, az)
-    report.check('footprint displacement along columns [m]', dc, expected=d_m * np.cos(rad), atol=tol['atol_m'])
-    report.check('footprint displacement along rows [m]', dr, expected=d_m * np.sin(rad), atol=tol['atol_m'])
+    mc, mr = footprint_model(d_m, az)
+    report.check('footprint displacement along columns - rounded model [m]', dc, expected=mc, atol=tol['atol_m'])
+    report.check('footprint displacement along rows - rounded model [m]', dr, expected=mr, atol=tol['atol_m'])
+    report.check('|displacement - h tan(theta)| / pixel, columns and rows (<= 0.5, integer-pixel model)',
+                 np.abs([dc - d_m * np.cos(rad), dr - d_m * np.sin(rad)]) / FOOTPRINT_PIX, lo=0, hi=0.5 + 1e-6)
     report.assert_ok()
 
 
-WIND_Y = known_issue('ATM-WIND-Y', 'wind moves the screen along -y (mirrored) w.r.t. the source azimuth frame',
-                     'Atmosphere.py:363-376')
-WIND_CAP = known_issue('ATM-WIND-CAP', 'screen motion capped at 1 px/step per axis', 'Atmosphere.py:371-376')
 
 
 @pytest.mark.parametrize('px_per_step,direction', [
     (0.5, 0), (0.5, 180),
-    pytest.param(0.5, 90, marks=WIND_Y), pytest.param(0.5, 270, marks=WIND_Y), pytest.param(0.5, 45, marks=WIND_Y),
-    pytest.param(2.5, 0, marks=WIND_CAP)])
+    (0.5, 90), (0.5, 270), (0.5, 45),
+    (2.5, 0)])
 def test_wind_motion(logger, report, px_per_step, direction):
     """
     Frozen flow: after N steps the layer content has moved by v N Ts / pixel along the wind direction, in the same
