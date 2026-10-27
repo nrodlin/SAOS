@@ -396,10 +396,10 @@ def _radial_errors(evaluator, n_values, rho):
 
 
 def test_zernike_radial_polynomial_low_orders(report, tolerances):
-    """SAOS radial polynomials (naive factorial sum, used to build the basis) match the Jacobi form for n <= 30."""
+    """SAOS radial polynomials (Jacobi form, the only evaluator, used to build the basis) match the reference for every n <= 30."""
     rho = np.linspace(0, 1, 501)
-    err = _radial_errors(ZernikeNaive(mask=[]).R_nm, range(0, 31), rho)
-    report.check('max |R_naive - R_ref|, n <= 30', err.max(), hi=tolerances['modal_basis']['zernike']['radial_abs_low_orders'])
+    err = _radial_errors(ZernikeNaive(mask=[]).R_nm_Jacobi, range(0, 31), rho)
+    report.check('max |R_jacobi - R_ref|, n <= 30', err.max(), hi=tolerances['modal_basis']['zernike']['radial_abs_low_orders'])
     report.assert_ok()
 
 
@@ -411,21 +411,14 @@ def test_zernike_radial_jacobi_evaluator(report, tolerances):
     report.assert_ok()
 
 
-@known_issue('MB-ZERN-RADIAL', 'the basis uses the naive factorial sum for the radial polynomial, which loses all '
-             'precision above n ~ 40 (EST ASM with nModes = nValidAct needs n = 49)', 'zernikeModes.py:207-222, 50')
 def test_zernike_radial_polynomial_est_orders(report, tolerances):
     """
     An EST-size DM (ASM, 37x37, Zernike up to n ~ 49) needs radial polynomials accurate to |R| <= 1 up to n = 49. The
     basis that SAOS generates (generate_zernike_modes) must equal, column by column, the same basis built with the
-    independent radial reference of this module (Jacobi form, scipy). The error of the naive factorial sum (still present
-    in ZernikeNaive.R_nm, no longer used by the basis) is recorded for information.
+    independent radial reference of this module (Jacobi form, scipy). (The naive factorial sum, which lost all precision
+    above n ~ 40, was removed from SAOS on 2026-10-27.)
     """
     tol = tolerances['modal_basis']['zernike']
-    rho = np.linspace(0, 1, 501)
-    n_values = np.arange(31, 50)
-    err = _radial_errors(ZernikeNaive(mask=[]).R_nm, n_values, rho)
-    report.metric('max |R_naive - R_ref|, 31 <= n <= 49 (naive sum, unused by the basis)', err.max())
-    report.metric('first n with naive error > 1e-3', int(n_values[np.argmax(err > 1e-3)]) if np.any(err > 1e-3) else -1)
 
     dm = cartesian_actuators(37, 0.7533)
     B_saos = generate_zernike_modes(dm)[dm.validAct]
@@ -441,11 +434,13 @@ def test_zernike_radial_polynomial_est_orders(report, tolerances):
     s = np.linalg.svd(B_saos, compute_uv=False)
     # Information: even exact Zernikes alias on the actuator grid at the highest orders (physical limit, not this bug)
     report.metric('37x37 basis numerical rank (s > 1e-8 s_max) / number of modes', int(np.sum(s > 1e-8 * s[0])) / B_saos.shape[1])
+    n_values = np.arange(31, 50)
+    err = _radial_errors(ZernikeNaive(mask=[]).R_nm_Jacobi, n_values, np.linspace(0, 1, 501))
     fig, ax = plt.subplots(figsize=(5, 3.2))
     ax.semilogy(n_values, np.maximum(err, 1e-17), 'o-')
     ax.axhline(tol['radial_abs'], color='k', lw=0.7)
-    ax.set_xlabel('radial order n'); ax.set_ylabel('max |R_naive - R_ref| (|R| <= 1)')
-    ax.set_title('Zernike radial polynomial, naive factorial sum (unused by the basis)', fontsize=9)
+    ax.set_xlabel('radial order n'); ax.set_ylabel('max |R_jacobi - R_ref| (|R| <= 1)')
+    ax.set_title('Zernike radial polynomial used by the basis (Jacobi form)', fontsize=9)
     ax.grid(True, which='both', color='0.9')
     report.figure(fig, 'radial_error_vs_order')
     report.assert_ok()

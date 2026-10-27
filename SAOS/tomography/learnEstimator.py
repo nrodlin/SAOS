@@ -198,10 +198,6 @@ class LearnEstimator:
     
     # Compute separations
 
-    def separations_to_torch(self, AB, Ab, aB, ab, dtype=torch.float64):
-        sep_stack = np.stack((AB, Ab, aB, ab), axis=0)
-        return torch.as_tensor(sep_stack, dtype=dtype, device=self.device)
-
     def compute_coordinate_differences(self, A_row, a_row, B_col, b_col):
         # A_row, a_row: shape (nLayers, N_row, 2)
         # B_col, b_col: shape (nLayers, N_col, 2)
@@ -210,15 +206,6 @@ class LearnEstimator:
         diff_aB = a_row[:, :, None, :] - B_col[:, None, :, :]
         diff_ab = a_row[:, :, None, :] - b_col[:, None, :, :]
         return np.stack((diff_AB, diff_Ab, diff_aB, diff_ab), axis=0)
-
-    def compute_separations_vectorized(self, A_row, a_row, B_col, b_col):
-        # A_row, a_row: shape (nLayers, N_row, 2)
-        # B_col, b_col: shape (nLayers, N_col, 2)
-        AB = np.linalg.norm(A_row[:, :, None, :] - B_col[:, None, :, :], axis=-1)
-        Ab = np.linalg.norm(A_row[:, :, None, :] - b_col[:, None, :, :], axis=-1)
-        aB = np.linalg.norm(a_row[:, :, None, :] - B_col[:, None, :, :], axis=-1)
-        ab = np.linalg.norm(a_row[:, :, None, :] - b_col[:, None, :, :], axis=-1)
-        return AB, Ab, aB, ab
 
     def compute_covariance_matrix_torch(self, diff_stack_torch, r0, L0, fractionalCn2, scale, constants, noise_var=None, row_sizes_tensor=None, diag_idx=None, Vx=None, Vy=None, dt=None):
         # diff_stack_torch: shape (4, nLayers, N_rows, N_cols, 2)

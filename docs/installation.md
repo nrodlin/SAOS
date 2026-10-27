@@ -78,8 +78,7 @@ pip install -e .
 pip install -r requirements.txt
 ```
 
-The runtime dependencies (astropy, h5py, joblib, jsonpickle, matplotlib, numpy, opencv-contrib-python, pvlib, pyzmq, scipy,
-torch) are declared in `setup.cfg` and installed by pip. A non-editable install (`pip install .` or a wheel built with
+The runtime dependencies (h5py, joblib, matplotlib, numpy, opencv-contrib-python, pvlib, pyzmq, scipy, torch) are declared in `setup.cfg` and installed by pip. A non-editable install (`pip install .` or a wheel built with
 `pip wheel . --no-deps`) contains every subpackage and the solar images (~90 MB compressed), so SAOS also works outside the
 repository.
 
