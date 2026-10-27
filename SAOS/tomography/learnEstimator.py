@@ -11,6 +11,8 @@ import time
 import matplotlib.pyplot as plt
 from ..LoggingHelper import get_logger
 
+R0_WAVELENGTH = 500e-9   # [m] reference wavelength of r0 (as in Atmosphere): the fitted r0 and covariances refer to it
+
 class LearnEstimator:
     """
     Estimate atmospheric parameters from WFS telemetry.
@@ -434,6 +436,8 @@ class LearnEstimator:
         what makes the reconstructor predictive. With estimate_wind=False Phase 2 is skipped (no delayed telemetry is
         loaded), windSpeedX/Y are left as None and build_reconstructor() then computes a non-predictive (L&A)
         reconstructor.
+        The slopes (in px) are converted to wavefront gradients (s ps / 206265, achromatic) and expressed as phase gradients
+        at R0_WAVELENGTH (500 nm), so the fitted r0 is the r0 at 500 nm, as in Atmosphere, whatever the WFS band.
         """
         orig_device = self.device
         try:
@@ -547,7 +551,9 @@ class LearnEstimator:
         self.logger.info('LearnEstimator::learn - Load slopes measurements for Phase 1.')
         meas_slopes_t, meas_slopes_tdelay = self.loadMeasurements(data_path, len(self.measWFSparams), subapsSel, selSamples, lp_indices=lp_indices, delay_frames=0)
         self.logger.info('LearnEstimator::learn - Compute experimental covariance for Phase 1.')
-        gain = (self.measWFSparams[0]['subap_size']*2*np.pi*2)/(206265.0*self.measWFSparams[0]['plate_scale']*self.measWFSparams[0]['wavelength'])
+        # Slope [px] -> wavefront (OPD) gradient s ps / 206265 [m/m] -> phase gradient at the r0 wavelength [rad/m]: the von Karman
+        # model is the phase structure function of r0 at R0_WAVELENGTH
+        gain = 2*np.pi*self.measWFSparams[0]['plate_scale']/(206265.0*R0_WAVELENGTH)
         cov_meas = self.compute_measurement_covariance(meas_slopes_t, meas_slopes_tdelay, gain, dtype)
         t3 = time.time()
         self.logger.info(f'Separation {t1-t0}, CovMat (1it):{t2-t1}, Experimental: {t3-t2}')

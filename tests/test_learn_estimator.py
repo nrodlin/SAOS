@@ -309,11 +309,12 @@ def write_slopes(path, slopes):
 
 
 def synth_slopes_px(lp, n_samples, r0, L0, rng):
-    """Slopes [px] of one 6x6 WFS from independent screens: px = gradient [rad/m] * lambda / (2 pi) * 206265 / plate_scale."""
+    """Slopes [px] of one 6x6 WFS from independent screens of phase at 500 nm (r0 at 500 nm): OPD gradient = phase gradient
+    [rad/m] * 500 nm / (2 pi), px = OPD gradient * 206265 / plate_scale (achromatic, independent of the WFS wavelength)."""
     N, h = 256, lp.tel.D / lp.wfs.nSubap / 4
     rows = ref_rows([lp], [0.0])
     sl = np.concatenate([screen_slopes(vk_screens(50, N, h, r0, L0, rng), rows, N, h) for _ in range(n_samples // 100)])
-    return sl * lp.src.wavelength / (2 * np.pi) * ARCSEC / lp.wfs.plate_scale
+    return sl * 500e-9 / (2 * np.pi) * ARCSEC / lp.wfs.plate_scale
 
 
 def run_learn(est, atm, tmp, spy=None, **kw):
@@ -335,14 +336,12 @@ class _GainSpy:
 
 
 @pytest.mark.fast
-@known_issue('LEARN-GAIN-UNITS', 'slope-to-phase-gradient factor in learn() is d 4 pi / (206265 ps lambda) instead of '
-             '2 pi ps / (206265 lambda) (plate scale in the denominator, extra subaperture size and factor 2)', 'SAOS/tomography/learnEstimator.py:557')
 def test_gain_slopes_to_phase_gradient(logger, report, tolerances, rng):
     """
-    A slope of s px moves the spot by s ps arcsec = s ps / 206265 rad, i.e. a phase gradient of
-    2 pi / lambda * s ps / 206265 rad/m. The factor passed by learn() to compute_measurement_covariance must be
-    2 pi ps / (206265 lambda). Plate scale 0.5 arcsec/px, d = 0.5 m, lambda = 640 nm (the code factor depends on d and
-    1/ps, the correct one on ps only: the two differ by 2 d / ps^2 = 4).
+    A slope of s px moves the spot by s ps arcsec = s ps / 206265 rad, the wavefront (OPD) gradient (achromatic); the von Karman
+    model is the phase structure function of r0 at 500 nm (Atmosphere convention), so the factor passed by learn() to
+    compute_measurement_covariance must be 2 pi ps / (206265 x 500 nm), independent of the WFS wavelength (640 nm here),
+    and of the subaperture size (0.5 m); plate scale 0.5 arcsec/px.
     """
     tol = tolerances['learn_estimator']['gain']
     lp = make_lp()
@@ -353,16 +352,16 @@ def test_gain_slopes_to_phase_gradient(logger, report, tolerances, rng):
         write_slopes(path, np.random.default_rng(1).standard_normal((50, 72)))
         np.random.seed(0)
         est.learn({'r0': 0.15, 'L0': 25.0, 'fractionalCn2': [1.0]}, path, tmp, selSubaps=1.0, selSamples=1.0, max_iters=1, estimate_wind=False)
-    expected = 2 * np.pi * lp.wfs.plate_scale / (ARCSEC * lp.src.wavelength)
+    expected = 2 * np.pi * lp.wfs.plate_scale / (ARCSEC * 500e-9)
     report.metric('gain used by learn()', spy.gains[0], 'rad/m per px')
-    report.check('gain / (2 pi ps / (206265 lambda))', spy.gains[0] / expected, 1.0, rtol=tol['rtol'])
+    report.check('gain / (2 pi ps / (206265 x 500 nm))', spy.gains[0] / expected, 1.0, rtol=tol['rtol'])
     report.assert_ok()
 
 
 def phase1_fit(logger, rng, replace_gain, r0=0.15, L0=10.0, n_samples=1000):
     lp = make_lp()
     est = make_est(logger, [lp], [lp], [0.0])
-    gain = 2 * np.pi * lp.wfs.plate_scale / (ARCSEC * lp.src.wavelength)
+    gain = 2 * np.pi * lp.wfs.plate_scale / (ARCSEC * 500e-9)
     spy = _GainSpy(est, replace=gain if replace_gain else None)
     sl_px = synth_slopes_px(lp, n_samples, r0, L0, rng)
     with tempfile.TemporaryDirectory() as tmp:
@@ -378,7 +377,7 @@ def test_phase1_recovers_r0(logger, report, tolerances, rng):
     """
     Phase 1 on slopes from independent von Karman screens (r0 = 0.15 m, L0 = 10 m, 1 layer, 1000 samples, noise free,
     start from 1.3 r0). To be independent of the gain test, the slope-to-gradient factor is replaced by the correct
-    2 pi ps / (206265 lambda) in this test. Criterion: |r0_fit / r0 - 1| <= r0_rtol (3.5 sigma of the estimator over seeds).
+    2 pi ps / (206265 x 500 nm) in this test. Criterion: |r0_fit / r0 - 1| <= r0_rtol (3.5 sigma of the estimator over seeds).
     """
     tol = tolerances['learn_estimator']['phase1']
     out = phase1_fit(logger, rng, True)
@@ -389,7 +388,6 @@ def test_phase1_recovers_r0(logger, report, tolerances, rng):
 
 
 @pytest.mark.nightly
-@known_issue('LEARN-GAIN-UNITS', 'end-to-end: with the gain of learn() the fitted r0 is wrong for slopes in px', 'SAOS/tomography/learnEstimator.py:557')
 def test_phase1_recovers_r0_end_to_end(logger, report, tolerances, rng):
     """Same as test_phase1_recovers_r0 with the unmodified gain of learn(): r0 must be recovered from slopes in px."""
     tol = tolerances['learn_estimator']['phase1']
