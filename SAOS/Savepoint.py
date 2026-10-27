@@ -242,8 +242,7 @@ class Savepoint:
             If True, only the long exposure frame is saved. By default, False.
         metadata : dict, optional
             User metadata of the simulation (case, draw, controller settings...), stored in /metadata/user (as attributes; values
-            above 16 kB as datasets). More can be
-            added with add_metadata().
+            above 16 kB as datasets). More can be added with add_metadata().
         logger : logging.Logger, optional
             External logger to use. If None, initializes internal logging.
 
