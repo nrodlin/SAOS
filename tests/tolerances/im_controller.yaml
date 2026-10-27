@@ -21,6 +21,6 @@ joint:
   same_matrix: 1.0e-9       # same linear algebra in float64
   identity: 1.0e-3          # R_joint H = I with beta = 1e-9 (stacked ground DMs may be rank deficient)
 polc:
-  match: 1.0e-8             # POLC command vs the open-loop leaky filter
+  match: 1.0e-8             # POLC command vs the POLC filter c = (1-g) c_prev + g (-R s_pol)
   differs: 0.05             # POLC must differ from the closed-loop law by more than 5 % of the command
   sign: 1.0e-8

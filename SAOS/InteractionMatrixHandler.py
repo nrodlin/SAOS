@@ -14,8 +14,7 @@ from SAOS.modalBasis.discHarmonicModes import generate_dh_modes
 from SAOS.modalBasis.hadamardModes import generate_hadamard_modes
 
 import logging
-import logging.handlers
-from queue import Queue
+from .LoggingHelper import get_logger
 
 """
 Interaction Matrix Module
@@ -35,12 +34,7 @@ class InteractionMatrixHandler:
         logger : logging.Logger
             Logger instance to record operations.
         """
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -568,32 +562,4 @@ class InteractionMatrixHandler:
                 
         self.logger.info('InteractionMatrixHandler::load_modalBasis - Ended succesfully.')
 
-        return True 
-
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
-    
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()
+        return True

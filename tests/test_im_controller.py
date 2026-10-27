@@ -816,13 +816,12 @@ def _polc_runs(sysm, logger, D=1, K=60):
     return IM, a, out
 
 
-@known_issue('CTRL-POLC-NOOP', 'operationType = polc computes the pseudo-open-loop slopes (slopes_polc) but the control law '
-             'is fed with error_res: POLC runs the closed-loop law', 'Controller.py:620-636')
 def test_polc_reconstructs_the_open_loop_turbulence(sysm, logger, report, tolerances):
     """
-    POLC (tikhonov, leaky, pure delay D = 1 = Controller delay) feeds the integrator with the pseudo-open-loop slopes
-    s_pol = s - IM c(k-D) = IM a: the command is the leaky filter of -R IM a, independent of the loop, so it differs
-    from the closed-loop law. Reference: recursion c(k) = g (-R IM a(k)) + d c(k-1).
+    POLC (tikhonov, leaky configuration, pure delay D = 1 = Controller delay) reconstructs from the pseudo-open-loop slopes
+    s_pol = s - IM c(k-D) = IM a with the POLC law (Ellerbroek & Vogel 2003) c(k) = (1 - g) c(k-1) + g (-R s_pol(k)) (unit DC
+    gain; the decay of the configuration is not used): the command is that filter of -R IM a, independent of the loop, so it
+    differs from the closed-loop law. Reference: the recursion with g = 0.3.
     """
     tol = tolerances['im_controller']['polc']
     IM, a, out = _polc_runs(sysm, logger)
@@ -831,18 +830,15 @@ def test_polc_reconstructs_the_open_loop_turbulence(sysm, logger, report, tolera
     ref = np.zeros_like(a)
     prev = np.zeros(NM)
     for k in range(a.shape[0]):
-        prev = 0.3 * e[k] + 0.95 * prev
+        prev = 0.3 * e[k] + (1 - 0.3) * prev
         ref[k] = prev
     c_cl, c_polc = out['closed'][2], out['polc'][2]
     scale = np.max(np.abs(ref))
-    report.check('POLC command vs open-loop leaky filter of -R s_turb (max rel)', np.max(np.abs(c_polc - ref)) / scale, hi=tol['match'])
+    report.check('POLC command vs the POLC filter of -R s_turb (max rel)', np.max(np.abs(c_polc - ref)) / scale, hi=tol['match'])
     report.check('POLC command differs from the closed-loop command (max rel)', np.max(np.abs(c_polc - c_cl)) / scale, lo=tol['differs'])
     report.assert_ok()
 
 
-@known_issue('CTRL-POLC-SIGN', 'slopes_polc = error_res - IM c with error_res = -s: for s = s_turb + IM c this is '
-             '-s_turb - 2 IM c, the pseudo-open-loop slopes need error_res + IM c (the attribute is not used by the law)',
-             'Controller.py:629')
 def test_polc_slopes_attribute_is_minus_the_turbulence(sysm, logger, report, tolerances):
     """After each call controller.slopes_polc must be -s_turb (error sign convention), i.e. -IM a."""
     IM, a, out = _polc_runs(sysm, logger, K=30)

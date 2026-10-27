@@ -99,8 +99,6 @@ def physical_coords(tel):
 # Vibration
 # ----------------------------------------------------------------------------------------------------------------------
 
-@known_issue('VIB-GRID', 'Vibration tilt modes are linspace(-1, 1, N) per pixel (slope 2/(N-1) per pixel of pitch D/N): the tilt is N/(N-1) times '
-             'the file angle (1.6 % at N = 64); the pixel centres are at +-(N-1)/2 D/N, so the mode should span +-(N-1)/N', 'SAOS/Vibration.py:52')
 def test_vibration_one_step_tilt_moves_image_by_file_angle(logger, tmp_path, report, tolerances):
     """
     One-step tilt: iteration k injects (x_k, y_k) arcsec. With no atmosphere and no AO the ScienceCam image moves by
@@ -141,7 +139,7 @@ def test_vibration_wraps_with_different_length_series(lx, ly, logger, tmp_path, 
     """
     x and y series of different length: the sequence wraps around the shorter one, so that iteration k gives
     (x[k mod L], y[k mod L]), L = min(Lx, Ly), and never raises. The fitted tilts of the OPD (least squares on the
-    physical coordinates) follow the file; the overall scale (VIB-GRID, tested above) is calibrated at iteration 0.
+    physical coordinates) follow the file; the overall scale (tested above) is calibrated at iteration 0.
     """
     tol = tolerances['perturbations']['vibration']['index_rtol']
     tel = Telescope(resolution=32, diameter=1.0, samplingTime=1e-3, logger=logger)
@@ -169,8 +167,6 @@ def test_vibration_wraps_with_different_length_series(lx, ly, logger, tmp_path, 
     report.assert_ok()
 
 
-@known_issue('VIB-GRID', 'Vibration tilt modes are linspace(-1, 1, N): the tilt is N/(N-1) times the file angle, the PSD N^2/(N-1)^2 times the file PSD '
-             '(+6.6 % at N = 32)', 'SAOS/Vibration.py:52')
 def test_vibration_psd_equals_file_psd(logger, tmp_path, report, tolerances):
     """
     The image-motion series measured on the ScienceCam equals the file series (up to the exact scale 1 / plate_scale), so
@@ -577,12 +573,7 @@ LOG_SCRIPTS = {
 }
 
 
-LOG_HANG = known_issue('LOG-HANG', 'objects created with logger=None each start a QueueListener thread and join it in __del__ during interpreter shutdown '
-                       '(LoggingHelper.__del__ and the same pattern in every module); a script holding Telescope + Source + LightPath hangs at exit after an exception '
-                       '(futex wait)', 'SAOS/LoggingHelper.py:32-33')
-
-
-@pytest.mark.parametrize('name', [pytest.param('telescope'), pytest.param('lightpath_source', marks=LOG_HANG), pytest.param('logginghelper')])
+@pytest.mark.parametrize('name', ['telescope', 'lightpath_source', 'logginghelper'])
 def test_exit_after_exception_with_logger_none(name, report, tolerances, tmp_path):
     """
     A script that creates SAOS objects with logger=None and then raises an exception exits (non-zero status, traceback on
@@ -605,4 +596,25 @@ def test_exit_after_exception_with_logger_none(name, report, tolerances, tmp_pat
     if not hung:
         report.check('exit status (the exception propagates)', rc, expected=1, atol=0)
         report.check('traceback printed', 1.0 if 'RuntimeError: intentional failure' in err else 0.0, expected=1.0, atol=0)
+    report.assert_ok()
+
+
+def test_logger_none_prints_each_message_once(report, tolerances, tmp_path):
+    """
+    Several SAOS objects created with logger=None share one logging queue: a warning logged after creating Telescope, Source and
+    LightPath is printed exactly once, the process exits by itself with status 0 and no exception is reported from __del__ at exit.
+    """
+    timeout = tolerances['perturbations']['logging']['exit_timeout_s']
+    script = tmp_path / 'once.py'
+    script.write_text(LOG_SCRIPTS['lightpath_source'] + "import logging\nlogging.getLogger().warning('marker-message')\n")
+    env = dict(os.environ, PYTHONPATH=REPO_DIR + os.pathsep + os.environ.get('PYTHONPATH', ''))
+    try:
+        p = subprocess.run([sys.executable, str(script)], capture_output=True, text=True, timeout=timeout, env=env, cwd=str(tmp_path))
+        hung, rc, out = False, p.returncode, p.stdout + p.stderr
+    except subprocess.TimeoutExpired:
+        hung, rc, out = True, None, ''
+    report.check('process exited by itself (1 = yes)', 0.0 if hung else 1.0, expected=1.0, atol=0)
+    report.check('exit status', rc if rc is not None else -1, expected=0, atol=0)
+    report.check('times the warning is printed', out.count('marker-message'), expected=1, atol=0)
+    report.check('exceptions ignored in __del__ at exit', out.count('Exception ignored in'), expected=0, atol=0)
     report.assert_ok()

@@ -4,8 +4,7 @@ import torch
 import time
 
 import logging
-import logging.handlers
-from queue import Queue
+from .LoggingHelper import get_logger
 
 class Controller:
     def __init__(self,
@@ -30,7 +29,10 @@ class Controller:
         reconstructionMethod : String
             Type of reconstructor used, supported types are: {inversion, tikhonov, tomography}.        
         operationType : String
-            The type of operation that will be used, supported types are: {open, closed, polc}. By default, closed.            
+            The type of operation that will be used, supported types are: {open, closed, polc}. By default, closed.
+            polc: the reconstructor acts on the pseudo-open-loop slopes s_pol = s + IM c(k - delay). With inversion/tikhonov and the
+            leaky or PI controllers the law is c(k) = (1 - gain) c(k-1) + gain (-R s_pol) (decay and ki are not used); a stateSpace
+            controller receives -R s_pol as its input. With tomography, see the tomographic law.
         **kwargs
             rcond : list of length equal to nDMs or float
                 Percentage of the maximum singular value below witch the SV are discarded.
@@ -52,13 +54,7 @@ class Controller:
                 Feedforward matrix/matrices for the stateSpace controller. Shape (N_outputs, N_inputs).
         """        
         # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         # Define class attributes
         self.tag = 'controller'
@@ -616,8 +612,11 @@ class Controller:
         # ---------------------------------------------------------
         # Step 2: Compute POLC slopes if requested
         # ---------------------------------------------------------
+        # Pseudo-open-loop slopes: s_pol = s + IM c(k - d). error_res = -s (feedback sign), so -s_pol = error_res + IM c(k - d)
+        polc = self.operationType == 'polc' and self.reconstructionMethod != 'tomography'
         if self.operationType == 'polc':
             error_polc = []
+            global_pred = torch.zeros_like(global_slopes)
             for i in range(len(self.reconstructor)):
                 d_i = self.delay[i]
                 # command_history stores from oldest to newest. 
@@ -626,14 +625,22 @@ class Controller:
                 
                 # Predict slopes from delayed commands
                 pred_s = self.im_per_dm[i] @ cmd_delayed
-                error_polc.append(error_res[i] - pred_s)
+                error_polc.append(error_res[i] + pred_s)
+                if pred_s.shape[0] == global_slopes.shape[0]:
+                    global_pred = global_pred + pred_s
+                elif polc and any(R.shape[1] == global_slopes.shape[0] for R in self.reconstructor):
+                    raise ValueError(f'Controller - POLC with a joint reconstructor needs the IM of every DM on the global slopes: '
+                                     f'DM {i} predicts {pred_s.shape[0]} slopes, the global vector has {global_slopes.shape[0]}.')
             self.slopes_polc = error_polc
         else:
             self.slopes_polc = None
 
-        # Determine the error to feed to the controllers
-        # We use error_res for standard PI/Leaky to prevent windup.
-        error = error_res
+        # Error fed to the reconstructor: -s_pol in POLC (tomography builds its own below), -s otherwise
+        if polc:
+            error = error_polc
+            global_slopes = global_slopes + global_pred
+        else:
+            error = error_res
 
         # ---------------------------------------------------------
         # Step 3: Control Action
@@ -652,7 +659,14 @@ class Controller:
                     raise ValueError(f"Shape mismatch: reconstructor[{i}] has shape {self.reconstructor[i].shape}, "
                                      f"but global_slopes has shape {global_slopes.shape} and error[{i}] has shape {error[i].shape}")
 
-                if self.controllerType == 'leaky':
+                if polc and self.controllerType in ('leaky', 'forwardPI', 'backwardPI'):
+                    # POLC law (Ellerbroek & Vogel 2003): c(k) = (1 - g) c(k-1) + g (-R s_pol). Unit DC gain, stable for 0 < g <= 1;
+                    # decay and ki are not used (an integrator fed with s_pol has no feedback and winds up)
+                    if self.controllerType != 'leaky' and not getattr(self, '_warned_polc_pi', False):
+                        self.logger.warning('Controller - POLC uses the law c = (1-g) c_prev + g (-R s_pol): ki is ignored.')
+                        self._warned_polc_pi = True
+                    modal_cmd.append((1 - self.gain[i]) * self.command_previous[i] + self.gain[i] * modal_error[i])
+                elif self.controllerType == 'leaky':
                     modal_cmd.append(self.gain[i]*modal_error[i] + self.decay[i] * self.command_previous[i])
                 elif self.controllerType == 'forwardPI':
                     modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[i]-self.error_previous[i]) + self.ki[i]*self.error_previous[i])
@@ -750,34 +764,3 @@ class Controller:
         self.command_history.append(modal_cmd.copy())
 
         return dm_cmd
-
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
-    
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

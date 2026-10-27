@@ -10,8 +10,7 @@ from datetime import datetime
 from scipy import signal
 
 import logging
-import logging.handlers
-from queue import Queue
+from .LoggingHelper import get_logger
 
 """
 Savepoint Module
@@ -101,13 +100,7 @@ class Savepoint:
         logger : logging.Logger, optional
             External logger to use. If None, initializes internal logging.        
         """
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
         
         self.file_path = file_path
         self.atm = atm
@@ -648,30 +641,4 @@ class Savepoint:
                                     sci_frame_grp = group.create_group('sci_frame_longExp')
                                     self.custom_create_dataset('sci_frame', sci_frame_grp, iteration, lp.long_exposure_frame, None, lp)                                
 
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
     
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

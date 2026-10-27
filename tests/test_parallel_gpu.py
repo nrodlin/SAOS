@@ -187,8 +187,6 @@ class ThreadSampler:
         self.t.join()
 
 
-@known_issue('ATM-NESTED', 'Atmosphere.getOPD opens its own joblib thread pool (up to 0.7 cpu_count threads, once per stage) inside every LightPath thread: '
-             'the pools nest (outer n_jobs x inner n_jobs) and the thread count exceeds os.cpu_count()', 'SAOS/Atmosphere.py:410-422')
 def test_thread_count_inside_threaded_lightpaths_within_cpu_count(logger, report, tolerances):
     """
     Resource criterion: 8 LightPaths of an extended (sun-like, 9 point directions) source are propagated with 8 joblib threads;

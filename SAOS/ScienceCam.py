@@ -5,8 +5,6 @@ Created on March 26 2025
 """
 
 import logging
-import logging.handlers
-from queue import Queue
 
 import time
 
@@ -17,6 +15,7 @@ from joblib import delayed, Parallel
 
 
 from .Detector import Detector
+from .LoggingHelper import get_logger
 
 """
 Science Camera Module
@@ -88,13 +87,7 @@ class ScienceCam:
             randomState : int, optional
                 Detector parameter. Seed for the random number generator. Default is None.          
         """        
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger    
+        self.logger = logger if logger is not None else get_logger()
 
         self.fieldOfView         = fieldOfView
         self.plate_scale         = plate_scale
@@ -398,33 +391,3 @@ class ScienceCam:
 
 
         return image
-
-    def setup_logging(self, logging_level=logging.INFO):
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
-    
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()
