@@ -20,7 +20,11 @@ fi
 if [ ! -d "$WT" ]; then
     git -C "$REPO" worktree add --detach "$WT" "$SHA" || exit 1
 else
-    git -C "$WT" checkout -q --detach "$SHA" && git -C "$WT" clean -qfdx
+    git -C "$WT" checkout -q --force --detach "$SHA" && git -C "$WT" clean -qfdx || { echo "checkout of $SHA failed" >&2; exit 1; }
+fi
+# Never test (and stamp) another commit than the requested one
+if [ "$(git -C "$WT" rev-parse HEAD)" != "$SHA" ]; then
+    echo "worktree is not at $SHA, aborting" >&2; exit 1
 fi
 
 # The worktree's SAOS must be the one imported
