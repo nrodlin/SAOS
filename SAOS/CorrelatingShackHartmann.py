@@ -65,15 +65,8 @@ class CorrelatingShackHartmann:
             Number of pixels between subapertures.
         fft_fieldOfView_oversampling : float, optional
             Extra FoV in [arcsec] that is taken for the FFT computation, in order to reduce wrapping effects.
-        pupil_oversampling : int, optional (keyword)
-            Pupil samples per subaperture used to form the spots, as a multiple k of the sun patch size. Default (None):
-            the smallest number that keeps the bias of the spot second moment, ~1.22 (u / n)^2 with u the half-width of the
-            sun patch in lambda/d, below 1%. The cost of the spot computation grows roughly as n^2.
         use_brightest : int, optional
             Picks the n brightest pixels as threshold for center-of-gravity spot detection.
-        n_reference_frames : int, optional (keyword)
-            Detector frames averaged to acquire the pseudo-reference image and then the reference slopes when noiseFlag is
-            True, as in operation (residual noise = single-frame noise / sqrt(n)). Default 100. Without noise one frame is used.
         threshold_convolution : float, optional
             Cut-off threshold for Gaussian convolution.
         unit_in_rad : bool, optional
@@ -84,6 +77,14 @@ class CorrelatingShackHartmann:
             Logger for WFS diagnostics.
         **kwargs : dict, optional
             Additional keyword arguments.
+
+            n_reference_frames : int, optional
+                Detector frames averaged to acquire the pseudo-reference image and then the reference slopes when noiseFlag is
+                True, as in operation (residual noise = single-frame noise / sqrt(n)). Default 100. Without noise one frame is used.
+            pupil_oversampling : int, optional
+                Pupil samples per subaperture used to form the spots, as a multiple k of the sun patch size. Default (None):
+                the smallest number that keeps the bias of the spot second moment, ~1.22 (u / n)^2 with u the half-width of the
+                sun patch in lambda/d, below 1%. The cost of the spot computation grows roughly as n^2.
 
             validSubapThreshold : float, optional
                 Minimum fraction of the subaperture area inside the pupil to be a valid subaperture. Default 0.5. The partially

@@ -446,6 +446,8 @@ class Controller:
         release_R_tomo : bool, optional
             Free R_tomo once the products are computed (it is not used online any more).
 
+        Notes
+        -----
         The tomography control law of computeControlAction() needs modal_error_i = R_i (R_tomo s_pol - sum_j D_j c_j),
         which is evaluated as M1_i s_pol - M2_i c with M1_i = R_i R_tomo [n_modes_i x N_meas_slopes] and
         M2_i = R_i [D_1 ... D_n]: two small products per iteration instead of R_tomo [N_target x N_meas] on the CPU.

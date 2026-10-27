@@ -634,9 +634,12 @@ class DeformableMirror:
             Shift [m] in the DM plane.
         rotation : float
             Rotation [deg] around the centre, same sense as misReg (clockwise for a positive angle with x right and y up).
-        Note: the shifts are in metres; the DM grid step is the telescope pixel D/resolution, the same one misReg uses.
         radialScaling : float
             Magnification (1 = none).
+
+        Notes
+        -----
+        The shifts are in metres; the DM grid step is the telescope pixel D/resolution, the same one misReg uses.
         """
         if getattr(self, 'custom_IFs', False):
             raise NotImplementedError('DeformableMirror::set_actuator_misregistration - only for analytic influence functions.')
