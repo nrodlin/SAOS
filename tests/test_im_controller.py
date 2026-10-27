@@ -373,6 +373,66 @@ def test_regression_save_load_im_with_science_lightpath_first(logger, tmp_path, 
     report.assert_ok()
 
 
+def test_load_im_identical_dms_and_light_paths(logger, tmp_path, report):
+    """
+    Two identical light paths, each with its own DM of identical properties: after save_IM + load_IM every IM goes back to
+    its own (DM, light path) entry, found by the group indices (the IMs are made different before saving to tell them apart).
+    """
+    tel = make_tel(logger)
+    src = Source('R', 0, logger=logger)
+    dms = [make_dm(logger, tel), make_dm(logger, tel)]
+    lps = [make_lp(logger, tel, src, dm, make_wfs(logger, tel, src)) for dm in dms]
+    h = InteractionMatrixHandler(logger)
+    h.initialize_im_class(lps)
+    h.measure('zonal', STROKE, nModes=[10, 10])
+    h.interaction_matrix_warehouse[1][1]['IM'] = 2 * h.interaction_matrix_warehouse[1][1]['IM']
+    ref = [[None if e['IM'] is None else e['IM'].copy() for e in row] for row in h.interaction_matrix_warehouse]
+    h.save_IM(str(tmp_path / 'im_twin.h5'))
+    h2 = InteractionMatrixHandler(logger)
+    h2.initialize_im_class(lps)
+    h2.load_IM(str(tmp_path / 'im_twin.h5'))
+    _compare_warehouse(h2, ref, report)
+    report.assert_ok()
+
+
+def test_im_and_modal_basis_convention(logger, tmp_path, report):
+    """
+    The IM and modal basis files carry the basis convention (BASIS_CONVENTION). A legacy IM (no attribute, convention 1:
+    old sign of the sine Zernikes) cannot be used with a basis of the current convention, and vice versa: load raises.
+    A legacy IM with the legacy basis of the same measurement loads.
+    """
+    from SAOS.InteractionMatrixHandler import BASIS_CONVENTION
+    lps = _two_lp_system(logger, science_first=False)
+    h = InteractionMatrixHandler(logger)
+    h.initialize_im_class(lps)
+    h.measure('zernike', STROKE, nModes=[10])
+    im_file, mb_file = str(tmp_path / 'im.h5'), str(tmp_path / 'mb.h5')
+    h.save_IM(im_file)
+    h.save_modalBasis(mb_file)
+    with h5py.File(im_file, 'r') as f:
+        report.check('IM file: basis_convention', int(f.attrs['basis_convention']), BASIS_CONVENTION, atol=0)
+    with h5py.File(mb_file, 'r') as f:
+        report.check('modal basis file: basis_convention', int(f.attrs['basis_convention']), BASIS_CONVENTION, atol=0)
+    # Legacy IM (attribute removed) on a handler whose basis has the current convention
+    with h5py.File(im_file, 'a') as f:
+        del f.attrs['basis_convention']
+    try:
+        h.load_IM(im_file)
+        raised = 0.0
+    except ValueError:
+        raised = 1.0
+    report.check('legacy IM + current basis: load_IM raises', raised, 1.0, atol=0)
+    # Legacy IM + legacy basis: consistent
+    with h5py.File(mb_file, 'a') as f:
+        del f.attrs['basis_convention']
+    h3 = InteractionMatrixHandler(logger)
+    h3.initialize_im_class(lps)
+    h3.load_modalBasis(mb_file)
+    h3.load_IM(im_file)
+    report.check('legacy IM + legacy basis: loaded', h3.interaction_matrix_warehouse[0][0]['IM'] is not None, 1.0, atol=0)
+    report.assert_ok()
+
+
 def test_regression_per_dm_modal_basis_list(logger, report, tolerances):
     """REGRESSION (equal path): measure(['zonal'], ...) for a one-DM system is accepted and equals measure('zonal', ...)."""
     tel = make_tel(logger)
