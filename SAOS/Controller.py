@@ -319,9 +319,9 @@ class Controller:
                         nModes_i = min(nModes_i, n_m)
                 self.im_per_dm.append(torch.zeros((0, nModes_i), dtype=torch.float64, device=self.device))
             else:
-                im_measured_tensor = torch.as_tensor(np.vstack(interaction_matrix_per_DM), dtype=torch.float64, device=self.device).squeeze()
-                if im_measured_tensor.ndim == 1:
-                    im_measured_tensor = im_measured_tensor.unsqueeze(0)
+                # (n_slopes, n_modes) also for a single mode: squeezing a (n, 1) IM would transpose it
+                im_measured_tensor = torch.as_tensor(np.vstack([np.atleast_2d(np.asarray(im).T).T for im in interaction_matrix_per_DM]),
+                                                     dtype=torch.float64, device=self.device)
                 self.im_per_dm.append(im_measured_tensor)
 
         # Identify active WFS LightPaths (excluding science cameras with no sensor)
@@ -338,6 +338,9 @@ class Controller:
                 user_n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
                 if user_n_m is not None:
                     n_m = min(n_m, user_n_m)
+            # Never more modes than the measured IM has (an IM measured with fewer modes than the basis)
+            if self.im_per_dm[i].shape[0] > 0:
+                n_m = min(n_m, self.im_per_dm[i].shape[1])
             n_modes_target.append(n_m)
 
         # Slope dimensions per active WFS
@@ -410,9 +413,8 @@ class Controller:
                     self.logger.warning(f'Controller - DM {i} has no associated WFS in the target mask. Setting reconstructor to zero.')
                     reconstructor.append(torch.zeros((n_modes_target[i], 0), dtype=torch.float64, device=self.device))
                 else:
-                    im_target_tensor = torch.as_tensor(np.vstack(im_target_list), dtype=torch.float64, device=self.device).squeeze()
-                    if im_target_tensor.ndim == 1:
-                        im_target_tensor = im_target_tensor.unsqueeze(0)
+                    im_target_tensor = torch.as_tensor(np.vstack([np.atleast_2d(np.asarray(im).T).T for im in im_target_list]),
+                                                       dtype=torch.float64, device=self.device)
                     if reconstructionMethod == 'inversion':
                         temp_reconstructor = torch.linalg.pinv(im_target_tensor, self.rcond[i])
                     elif reconstructionMethod == 'tikhonov' or reconstructionMethod == 'tomography':

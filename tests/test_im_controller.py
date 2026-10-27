@@ -286,9 +286,6 @@ def test_im_linear_in_stroke_and_push_pull(logger, report, tolerances):
     report.assert_ok()
 
 
-@known_issue('IM-DEDUP', 'two distinct DM objects with the same (nActs, altitude, nValidAct, mechCoupling) are merged '
-             'into one scanned DM: the second one is never poked and its light path gets an all-zero IM',
-             'InteractionMatrixHandler.py:103-106')
 def test_identical_dms_in_two_lightpaths_both_measured(logger, report, tolerances):
     """
     Two light paths, each with its own DM object and WFS (DMs with identical properties, identical optics). Expected:
@@ -371,9 +368,6 @@ def test_regression_save_load_im_round_trip(logger, tmp_path, report):
     report.assert_ok()
 
 
-@known_issue('IM-LOAD', 'load_IM looks the light paths up as LP0..LP(n-1) in the file, but save_IM names the groups with the '
-             'light-path index: a science-only light path placed first leaves the file without LP0 -> KeyError', 
-             'InteractionMatrixHandler.py:440-451')
 def test_regression_save_load_im_with_science_lightpath_first(logger, tmp_path, report):
     """REGRESSION (round trip): a science-only light path (no WFS) before the WFS light path must not break the save/load round trip."""
     lps = _two_lp_system(logger, science_first=True)
@@ -382,9 +376,6 @@ def test_regression_save_load_im_with_science_lightpath_first(logger, tmp_path, 
     report.assert_ok()
 
 
-@known_issue('IM-LIST', 'measure() documents a per-DM list of modal bases but tests `modal_basis not in self.modal_list` '
-             'with the list itself, so every list raises ValueError (Unsupported modal basis)',
-             'InteractionMatrixHandler.py:239')
 def test_regression_per_dm_modal_basis_list(logger, report, tolerances):
     """REGRESSION (equal path): measure(['zonal'], ...) for a one-DM system is accepted and equals measure('zonal', ...)."""
     tel = make_tel(logger)
@@ -768,8 +759,6 @@ def test_coupled_joint_reconstruction_beats_per_dm(logger, report):
 # Controller sizing
 # ----------------------------------------------------------------------------------------------------------------------
 
-@known_issue('CTRL-NMODES1', 'with nModes = 1 the IM block (n, 1) is squeezed to (n,) and unsqueezed to (1, n): im_per_dm '
-             '(POLC prediction) and the per-DM reconstructor have the transposed shape', 'Controller.py:326-328, 417')
 def test_single_mode_shapes(sysm, logger, report):
     """nModes = 1: the IM of the DM is (nSignal, 1), the reconstructor (1, nSignal), for joint and per-DM reconstruction."""
     n = sysm.IM.shape[0]
@@ -785,9 +774,6 @@ def test_single_mode_shapes(sysm, logger, report):
     report.assert_ok()
 
 
-@known_issue('CTRL-SIZING', 'the joint reconstructor sizes every DM block with the modal basis (minus discarded modes) '
-             'instead of the number of modes of the measured IM: an IM with fewer modes than the basis cannot be used '
-             'unless nModes is also given', 'Controller.py:340-345, failing at 366-391')
 def test_joint_sizing_with_fewer_im_modes_than_basis(sysm, logger, report):
     """IM measured with 10 modes of a 37-mode basis: the controller works with 10 modes (reconstructor (10, nSignal))."""
     h = InteractionMatrixHandler(logger)

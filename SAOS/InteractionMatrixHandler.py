@@ -93,11 +93,9 @@ class InteractionMatrixHandler:
                     for j in range(len(light_path_list[i].dm)):
                         # Check if the DM is in the list
                         for k in range(len(self.dm_scanned_list)):
-                            # Compare the properties of this DM with the ones already listed
-                            if ((self.dm_scanned_list[k].nActs        == light_path_list[i].dm[j].nActs)     and
-                                (self.dm_scanned_list[k].altitude     == light_path_list[i].dm[j].altitude)  and
-                                (self.dm_scanned_list[k].nValidAct    == light_path_list[i].dm[j].nValidAct) and
-                                (self.dm_scanned_list[k].mechCoupling == light_path_list[i].dm[j].mechCoupling)):
+                            # The same DM object shared by several light paths is scanned once; two distinct DM objects are
+                            # always scanned separately, even with identical properties
+                            if self.dm_scanned_list[k] is light_path_list[i].dm[j]:
                                 
                                 dm_already_listed = True
                                 # The DM is listed, so we will simply register the relation of this DM to the Light Path analysed.
@@ -262,7 +260,7 @@ class InteractionMatrixHandler:
                 nModes_per_DM = [self.dm_scanned_list[i].nValidAct for i in range(self.im_boolean_matrix.shape[1])]
             else:
                 raise TypeError('InteractionMatrixHandler::measure - None or list were expected.')
-        if modal_basis not in self.modal_list:
+        if any(b not in self.modal_list for b in modal_basis_per_DM):
             self.logger.error(f'InteractionMatrixHandler::measure Modal basis ({modal_basis}) unrecognised, supported types are: {self.modal_list}')
             raise ValueError('InteractionMatrixHandler::measure - Unsupported modal basis.')
         # Before measuring the IMs, we need to have all the modal basis available
@@ -463,33 +461,35 @@ class InteractionMatrixHandler:
                 if np.sum(self.im_boolean_matrix[i,:]) > 0: # This LP has a WFS
                     # Find the match in the file
                     lp_match_key = None
-                    for j in range(len(f.keys())):
-                        if (f['LP' + str(j)].attrs['wavelength'] == self.light_path_list[i].src.wavelength) and \
-                           (f['LP' + str(j)].attrs['zenith']       == np.round(self.light_path_list[i].src.coordinates[0], 2)) and \
-                           (f['LP' + str(j)].attrs['azimuth']      == np.round(self.light_path_list[i].src.coordinates[1], 2)) and \
-                           (f['LP' + str(j)].attrs['nSignal']      == self.light_path_list[i].wfs.nSignal):
-                           lp_match_key = 'LP' + str(j)
+                    # The groups are named after the light-path index of the saving setup (LP<i>, not contiguous when a
+                    # science-only light path has no IM): iterate over the groups present
+                    for lp_key in [k for k in f.keys() if k.startswith('LP')]:
+                        if (f[lp_key].attrs['wavelength'] == self.light_path_list[i].src.wavelength) and \
+                           (f[lp_key].attrs['zenith']       == np.round(self.light_path_list[i].src.coordinates[0], 2)) and \
+                           (f[lp_key].attrs['azimuth']      == np.round(self.light_path_list[i].src.coordinates[1], 2)) and \
+                           (f[lp_key].attrs['nSignal']      == self.light_path_list[i].wfs.nSignal):
+                           lp_match_key = lp_key
                            break
                     if lp_match_key is None:
                         self.logger.error('InteractionMatrixHandler::load_IM - There is no match for the curent LP in the IM file.')
                         raise ValueError('There is no match for the curent LP in the IM file.')
                     # Then, access the IMs and find the DM match
-                    for j in range(len(f[lp_match_key].keys())):
+                    for im_key in [k for k in f[lp_match_key].keys() if k.startswith('IM')]:
                         dm_match_idx = None
                         for k in range(len(self.dm_scanned_list)):
                             if self.im_boolean_matrix[i,k]: # DM with an interaction with the current LP
                                 # Check the parameters
-                                if (f[lp_match_key]['IM' + str(j)].attrs['nValidAct'] == self.dm_scanned_list[k].nValidAct) and \
-                                   (f[lp_match_key]['IM' + str(j)].attrs['altitude']  == self.dm_scanned_list[k].altitude) and \
-                                   (f[lp_match_key]['IM' + str(j)].attrs['nAct'] == self.dm_scanned_list[k].nActs):
+                                if (f[lp_match_key][im_key].attrs['nValidAct'] == self.dm_scanned_list[k].nValidAct) and \
+                                   (f[lp_match_key][im_key].attrs['altitude']  == self.dm_scanned_list[k].altitude) and \
+                                   (f[lp_match_key][im_key].attrs['nAct'] == self.dm_scanned_list[k].nActs):
                                     # We have a match with the current DM
                                     dm_match_idx = k
                                     # Store the IM
-                                    self.interaction_matrix_warehouse[dm_match_idx][i]['modalBasis'] = f[lp_match_key]['IM' + str(j)].attrs['modalBasis']
-                                    self.interaction_matrix_warehouse[dm_match_idx][i]['discarded_modes'] = f[lp_match_key]['IM' + str(j)].attrs.get('discarded_modes', 0)
-                                    self.interaction_matrix_warehouse[dm_match_idx][i]['IM'] = np.array(f[lp_match_key]['IM' + str(j)]['data'])
+                                    self.interaction_matrix_warehouse[dm_match_idx][i]['modalBasis'] = f[lp_match_key][im_key].attrs['modalBasis']
+                                    self.interaction_matrix_warehouse[dm_match_idx][i]['discarded_modes'] = f[lp_match_key][im_key].attrs.get('discarded_modes', 0)
+                                    self.interaction_matrix_warehouse[dm_match_idx][i]['IM'] = np.array(f[lp_match_key][im_key]['data'])
 
-                                    self.max_displacement[j, i] = f[lp_match_key]['IM' + str(j)].attrs['maxDisplacement']
+                                    self.max_displacement[dm_match_idx, i] = f[lp_match_key][im_key].attrs['maxDisplacement']
 
                                     # Break to continue with the next IM                                    
                                     break                        
