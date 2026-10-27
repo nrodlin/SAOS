@@ -72,11 +72,22 @@ cd SAOS
 git checkout develop
 
 # Install SAOS (editable) with its runtime dependencies
-pip install -e .
+pip install --prefer-binary -e .
 
 # Optional: documentation and validation-suite tools
-pip install -r requirements.txt
+pip install --prefer-binary -r requirements.txt
 ```
+
+> **Free-threaded builds and wheels:** use `--prefer-binary`. On a free-threaded Python the newest release of several
+> dependencies is often published only as source (e.g. scipy 1.18, matplotlib 3.11.2, pyzmq 27.2 at the time of writing),
+> and pip would try to compile it (scipy then fails without a Fortran compiler). `--prefer-binary` picks the newest version
+> with a free-threaded wheel instead (checked on 2026-10-27 for 3.13t: numpy 2.4, scipy 1.17.1, matplotlib 3.11.1,
+> pyzmq 27.1.0, torch 2.12).
+>
+> **Packages built from source:** `opencv-contrib-python` and `h5py` have no free-threaded wheels, so pip compiles them.
+> OpenCV is the long one (of the order of one hour on a 12-core laptop); it needs the build tools of section 1, `cmake`,
+> and the `CMAKE_ARGS="-DPYTHON3_LIMITED_API=OFF"` exported in section 2. For h5py, see the optional HDF5 build below.
+> The compiled wheels stay in pip's cache, so later environments install them in seconds.
 
 The runtime dependencies (h5py, joblib, matplotlib, numpy, opencv-contrib-python, pvlib, pyzmq, scipy, torch) are declared in `setup.cfg` and installed by pip. A non-editable install (`pip install .` or a wheel built with
 `pip wheel . --no-deps`) contains every subpackage and the solar images (~90 MB compressed), so SAOS also works outside the
