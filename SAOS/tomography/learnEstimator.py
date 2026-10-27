@@ -822,7 +822,9 @@ class LearnEstimator:
         windSpeedY: array-like, optional
             Wind speed along Y for delay compensation. If None, uses self.windSpeedY.
         dt: float, optional
-            Time delay in seconds. If None, computes from target LP delay. Ignored without wind speeds.
+            Prediction horizon in seconds. If None, the total pure delay of the target light path, (delay + 1) Ts (SAOS
+            convention: the slopes of frame k reach the controller after `delay` frames and the command acts from the next
+            frame). Ignored without wind speeds.
         chunk_size: int, optional
             Chunk size along the rows for memory-efficient computation.
         device: str or torch.device, optional
@@ -848,7 +850,7 @@ class LearnEstimator:
             # Check target LPs delay
             delay_frames = self.targetLPs[0].delay if hasattr(self, 'targetLPs') and len(self.targetLPs) > 0 else 0
             sampling_time = self.targetLPs[0].tel.samplingTime if hasattr(self, 'targetLPs') and len(self.targetLPs) > 0 else 0.001
-            dt = delay_frames * sampling_time
+            dt = (delay_frames + 1) * sampling_time
 
         dtype = torch.float64
         calc_device = device if device is not None else self.device

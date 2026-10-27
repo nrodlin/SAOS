@@ -488,8 +488,6 @@ def test_reconstructor_zero_wind_ignores_dt(multi, report, tolerances):
 
 
 @pytest.mark.fast
-@known_issue('LEARN-DT', 'default dt of build_reconstructor is delay * Ts; the SAOS total pure delay of a light path with '
-             'delay d is (d + 1) Ts', 'SAOS/tomography/learnEstimator.py:856-858')
 def test_default_dt_is_delay_plus_one(logger, report, tolerances):
     """
     SAOS convention (tests/test_timing.py): a light path with delay d frames has a total pure delay (d + 1) Ts. With
