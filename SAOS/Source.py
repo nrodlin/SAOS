@@ -86,9 +86,9 @@ class Source:
                  optBand:str,
                  magnitude:float,
                  coordinates:list = [0,0],
-                 altitude:float = np.inf, 
-                 laser_coordinates:list = [0,0],
-                 Na_profile:float = None,
+                 altitude:float = np.inf,
+                 laser_coordinates:list = None,
+                 Na_profile:np.ndarray = None,
                  FWHM_spot_up:float = None,
                  chromatic_shift:list = None,
                  logger = None):
@@ -110,14 +110,10 @@ class Source:
             Apparent magnitude of the star.
         coordinates : list, optional
             Sky coordinates [zenith, azimuth] in [arcsec, degrees], by default [0, 0].
-        altitude : float, optional
-            Altitude of the source in meters. Defaults to infinity (NGS).
-        laser_coordinates : list, optional
-            Launch coordinates for a laser source [x, y] in meters.
-        Na_profile : float, optional
-            Sodium layer profile [altitudes, values]. Required for LGS.
-        FWHM_spot_up : float, optional
-            FWHM of the LGS spot in arcsec.
+        altitude, laser_coordinates, Na_profile, FWHM_spot_up : optional
+            Laser guide star parameters (finite altitude, launch telescope coordinates, sodium profile, uplink spot FWHM).
+            LGS are not implemented in SAOS: giving any of them raises NotImplementedError. The source is always natural
+            (altitude = infinity).
         chromatic_shift : list, optional
             Shift per atmospheric layer due to chromatic dispersion, in arcsec.
         logger : logging.Logger, optional
@@ -138,22 +134,18 @@ class Source:
         self.phase_no_pupil      = []                           # phase of the source (no pupil)
         self.fluxMap    = []                                    # 2D flux map of the source
         self.flux       = self.zeroPoint*10**(-0.4*magnitude)   # flux [photons/m²/s]
+        # Laser guide stars are not implemented: refuse any LGS parameter instead of simulating the source as a natural one
+        if np.isfinite(altitude) or laser_coordinates is not None or Na_profile is not None or FWHM_spot_up is not None:
+            self.logger.error('Source::__init__ - Laser guide stars (finite altitude, Na_profile, FWHM_spot_up, laser_coordinates) '
+                              'are not implemented in SAOS.')
+            raise NotImplementedError('Laser guide stars (finite altitude, Na_profile, FWHM_spot_up, laser_coordinates) are not '
+                                      'implemented in SAOS: only natural sources (altitude = infinity) are supported.')
         self.tag        = 'source'                              # tag of the object
-        self.altitude   = altitude                              # altitude of the source object in m    
+        self.altitude   = np.inf                                # natural source at infinity
         self.coordinates = coordinates                          # polar coordinates [r,theta] 
-        self.laser_coordinates = laser_coordinates              # Laser Launch Telescope coordinates in [m] 
         self.chromatic_shift = chromatic_shift                             # shift in arcsec to be applied to the atmospheric phase screens (one value for each layer) to simulate a chromatic effect
-        if Na_profile is not None and FWHM_spot_up is not None:
-            self.Na_profile = Na_profile
-            self.FWHM_spot_up = FWHM_spot_up
-            
-            # consider the altitude weigthed by Na profile
-            self.altitude = np.sum(Na_profile[0,:]*Na_profile[1,:])
-            self.type     = 'LGS'
-        else:
-            
-            self.type     = 'NGS'
-            
+        self.type     = 'NGS'
+
         self.is_initialized = True   
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% SOURCE PHOTOMETRY %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 

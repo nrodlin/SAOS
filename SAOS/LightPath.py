@@ -103,7 +103,7 @@ class LightPath:
         Parameters
         ----------
         src : Source
-            Light source (NGS, LGS, or Sun).
+            Light source (natural source or Sun; LGS are not implemented).
         tel : Telescope
             Telescope instance.
         atm : Atmosphere, optional

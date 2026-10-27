@@ -19,7 +19,6 @@ import h5py
 import logging
 
 from .MisRegistration import MisRegistration
-from .tools.interpolateGeometricalTransformation import interpolate_cube
 from .tools.tools import pol2cart
 from .LoggingHelper import get_logger
 
@@ -57,11 +56,7 @@ class DeformableMirror:
                  modes:np.ndarray = None,
                  misReg = None,
                  typeDM:str = 'cartesian',
-                 floating_precision:int = 64,
                  altitude:float = None,
-                 flip = False,
-                 flip_lr = False,
-                 sign = 1,
                  valid_act_thresh_outer = None,
                  logger = None,
                  **kwargs):
@@ -86,16 +81,8 @@ class DeformableMirror:
             Misregistration object for geometrical offsets.
         typeDM : str, optional
             Type of the DM: {cartesian, radial, custom}. By default, cartesian. If 'custom', the `coordinates` parameter must be provided.
-        floating_precision : int, optional
-            Use 32 or 64-bit floats, by default 64.
         altitude : float, optional
             Conjugation altitude of the DM in meters.
-        flip : bool, optional
-            Flip the influence functions vertically.
-        flip_lr : bool, optional
-            Flip the influence functions left-right.
-        sign : int, optional
-            Sign of actuation.
         valid_act_thresh_outer : float, optional
             Threshold for validating actuators outside pupil.
         logger : logging.Logger, optional
@@ -118,10 +105,6 @@ class DeformableMirror:
         # Define class attributes
         self.tag = 'deformableMirror'
 
-        self.floating_precision = floating_precision
-        self.flip_= flip
-        self.flip_lr = flip_lr 
-        self.sign = sign
         self.altitude = altitude
         self.nActs = nActs
 
@@ -471,29 +454,8 @@ class DeformableMirror:
         # Select only the region of the DM that is affecting to the source.
         OPD = np.zeros([self.dm_layer.telescope_resolution, self.dm_layer.telescope_resolution])
         OPD = opd_misregistered[pupil==1].reshape(self.dm_layer.telescope_resolution, self.dm_layer.telescope_resolution)
-        # Depending on the source type, certain action may differ
-        if source.tag == 'LGS':
-            # This code considers the impact of having an object at a finite altitude (typ. LGS). 
-            sub_im = np.atleast_3d(OPD)
-                
-            alpha_cone = np.arctan(self.dm_layer.telescope_D/2/source.altitude)
-            h = source.altitude-self.dm_layer.altitude
-
-            if np.isinf(h):
-                r = self.dm_layer.telescope_D/2
-            else:
-                r = h*np.tan(alpha_cone)
-
-            ratio = self.dm_layer.telescope_D/r/2
-            
-            cube_in = sub_im.T
-            pixel_size_in   = self.dm_layer.pixel_size
-            pixel_size_out  = pixel_size_in/ratio
-            
-            output_OPD = np.asarray(np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, self.dm_layer.telescope_resolution)))
-        
-        else: # NGS and Sun types can be handled equally. The sun is simplified, only considering the projection of the centrar subdir
-            output_OPD = OPD * self.dm_layer.pupil
+        # Natural sources and the sun (only the projection of the central sub-direction is considered)
+        output_OPD = OPD * self.dm_layer.pupil
 
         output_phase = output_OPD * (2*np.pi / source.wavelength)       
 

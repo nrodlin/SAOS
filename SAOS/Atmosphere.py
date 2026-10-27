@@ -24,7 +24,6 @@ import torch
 # Self dependencies
 from .infinitePhaseScreen import PhaseScreenVonKarman
 from .tools.tools import pol2cart
-from .tools.interpolateGeometricalTransformation import interpolate_cube
 from .Layer import LayerClass
 from .LoggingHelper import get_logger
 
@@ -529,27 +528,7 @@ class Atmosphere:
         np.ndarray
             Phase screen for the layer.
         """
-        if src.tag == 'LGS':
-            sub_im = np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])
-
-            alpha_cone = np.arctan(self.D/2/src.altitude)
-            h = src.altitude-layer.altitude
-
-            if np.isinf(h):
-                r =self.D/2
-            else:
-                r = h*np.tan(alpha_cone)
-
-            ratio = self.D/r/2
-
-            cube_in = np.atleast_3d(sub_im).T
-            
-            pixel_size_in   = layer.D/layer.resolution
-            pixel_size_out  = pixel_size_in/ratio
-            resolution_out  = self.resolution
-            return np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out)).T* np.sqrt(layer.fractionalR0) * (self.wavelength/src.wavelength)
-        else:
-            return np.reshape(layer.screen.scrn[np.where(pupil_footprint==1)],[self.resolution,self.resolution]) * (self.wavelength/src.wavelength)
+        return np.reshape(layer.screen.scrn[np.where(pupil_footprint==1)],[self.resolution,self.resolution]) * (self.wavelength/src.wavelength)
     
     def get_opd_per_src(self, src, phase):
         """

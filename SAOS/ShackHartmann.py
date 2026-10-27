@@ -56,7 +56,7 @@ class ShackHartmann:
         telescope : Telescope
             Telescope object to which the WFS is attached.
         src : Source
-            Source object (NGS or LGS).
+            Source object (natural source).
         lightRatio : float
             Fraction of the source photons that reaches the WFS (photon budget). The valid subapertures are selected with
             validSubapThreshold.
@@ -271,15 +271,6 @@ class ShackHartmann:
         pix = np.arange(self.npix_subap)
         self.subap_rows = (init_x[:, None] + pix[None, :])[:, :, None]
         self.subap_cols = (init_y[:, None] + pix[None, :])[:, None, :]
-
-        # LGS spot   
-        if src.type == 'LGS':
-            self.is_LGS                 = True
-        else:
-            self.is_LGS                 = False
-        
-        if self.is_LGS:
-            self.get_convolution_spot(src) 
 
         # WFS initialization
         self.initialize_wfs(telescope, src)       
@@ -613,126 +604,6 @@ class ShackHartmann:
 
         return subaps
             
-    #%% LGS
-    def get_convolution_spot(self, src): 
-        """
-        Compute LGS spot convolution kernel based on sodium profile.
-
-        Parameters
-        ----------
-        src : Source
-            Laser guide star source object.
-
-        Returns
-        -------
-        None
-        """
-        # compute the projection of the LGS on the subaperture to simulate 
-        #  the spots elongation using a convulotion with gaussian spot
-        [X0,Y0]             = [src.laser_coordinates[1],-src.laser_coordinates[0]]     # coordinates of the LLT in [m] from the center (sign convention adjusted to match display position on camera)
-        
-        # 3D coordinates
-        coordinates_3D           = np.zeros([3,len(src.Na_profile[0,:])])
-        coordinates_3D_ref       = np.zeros([3,len(src.Na_profile[0,:])])
-        delta_dx                 = np.zeros([2,len(src.Na_profile[0,:])])
-        delta_dy                 = np.zeros([2,len(src.Na_profile[0,:])])
-        
-        # coordinates of the subapertures
-        
-        x_subap                 = np.linspace(-self.telescope.D//2,self.telescope.D//2,self.nSubap)
-        y_subap                 = np.linspace(-self.telescope.D//2,self.telescope.D//2,self.nSubap)  
-        # pre-allocate memory for shift x and y to apply to the gaussian spot
-
-        # number of pixel
-        n_pix                   = self.npix_lenslet
-        # size of a pixel in m
-        d_pix                   = (self.telescope.D/self.nSubap)/self.npix_lenslet
-        v                       = np.linspace(-n_pix*d_pix/2,n_pix*d_pix/2,n_pix)
-        [alpha_x,alpha_y]       = np.meshgrid(v,v)
-        
-        # FWHM of gaussian converted into pixel in arcsec
-        sigma_spot              = src.FWHM_spot_up/(2*np.sqrt(np.log(2)))
-        for i in range(len(src.Na_profile[0,:])):
-                        coordinates_3D[:2,i]           = (self.telescope.D/4)*([X0,Y0]/src.Na_profile[0,i])
-                        coordinates_3D[2,i]            = self.telescope.D**2./(8.*src.Na_profile[0,i])/(2.*np.sqrt(3.))
-                        coordinates_3D_ref[:,i]        = coordinates_3D[:,i]-coordinates_3D[:,len(src.Na_profile[0,:])//2]
-        C_elung                       = []
-        C_gauss                       = []
-        shift_x_buffer                = []
-        shift_y_buffer                = []
-
-        C_gauss                       = []
-        criterion_elungation          = self.npix_lenslet*(self.telescope.D/self.nSubap)/self.npix_lenslet
-
-        valid_subap_1D = np.copy(self.valid_subapertures_1D[:])
-        count = -1
-        # gaussian spot (for calibration)
-        I_gauss  = (src.Na_profile[1,:][0]/(src.Na_profile[0,:][0]**2)) * np.exp(- ((alpha_x)**2 + (alpha_y)**2)/(2*sigma_spot**2))
-        I_gauss /= I_gauss.sum()
-
-        for i_subap in range(len(x_subap)):
-            for j_subap in range(len(y_subap)):
-                count += 1
-                if valid_subap_1D[count]:
-                    I = np.zeros([n_pix,n_pix],dtype=(complex))
-                    # I_gauss = np.zeros([n_pix,n_pix],dtype=(complex))
-                    shift_X                 = np.zeros(len(src.Na_profile[0,:]))
-                    shift_Y                 = np.zeros(len(src.Na_profile[0,:]))
-                    for i in range(len(src.Na_profile[0,:])):
-                        coordinates_3D[:2,i]           = (self.telescope.D/4)*([X0,Y0]/src.Na_profile[0,i])
-                        coordinates_3D[2,i]            = self.telescope.D**2./(8.*src.Na_profile[0,i])/(2.*np.sqrt(3.))
-                        
-                        coordinates_3D_ref[:,i]        = coordinates_3D[:,i]-coordinates_3D[:,len(src.Na_profile[0,:])//2]
-
-                        delta_dx[0,i]   = coordinates_3D_ref[0,i]*(4/self.telescope.D)
-                        delta_dy[0,i]   = coordinates_3D_ref[1,i]*(4/self.telescope.D)
-            
-                        delta_dx[1,i]   = coordinates_3D_ref[2,i]*(np.sqrt(3)*(4/self.telescope.D)**2)*x_subap[i_subap]
-                        delta_dy[1,i]   = coordinates_3D_ref[2,i]*(np.sqrt(3)*(4/self.telescope.D)**2)*y_subap[j_subap]
-                        
-                        # resulting shift + conversion from radians to pixels in m
-                        shift_X[i]          = 206265*self.fov_pixel_arcsec*(delta_dx[0,i] + delta_dx[1,i])
-                        shift_Y[i]          = 206265*self.fov_pixel_arcsec*(delta_dy[0,i] + delta_dy[1,i])
-     
-        
-                        I_tmp               = (src.Na_profile[1,:][i]/(src.Na_profile[0,:][i]**2))*np.exp(- ((alpha_x-shift_X[i])**2 + (alpha_y-shift_Y[i])**2)/(2*sigma_spot**2))
-                                                
-                        I                   += I_tmp
-                        
-                    # truncation of the wings of the gaussian
-                    I[I<self.threshold_convolution*I.max()] = 0 
-                    # normalization to conserve energy
-                    I /= I.sum()
-                    # save 
-                    shift_x_buffer.append(shift_X)
-                    shift_y_buffer.append(shift_Y)
-
-                    C_elung.append((np.fft.fft2(I)))
-                    C_gauss.append((np.fft.fft2(I_gauss)))
-                    
-        self.shift_x_buffer = np.asarray(shift_x_buffer)
-        self.shift_y_buffer = np.asarray(shift_y_buffer)
-
-        self.shift_x_max_arcsec = np.max(shift_x_buffer,axis=1)
-        self.shift_y_max_arcsec = np.max(shift_y_buffer,axis=1)
-        
-        self.shift_x_min_arcsec = np.min(shift_x_buffer,axis=1)
-        self.shift_y_min_arcsec = np.min(shift_y_buffer,axis=1)
-
-        self.max_elung_x = np.max(self.shift_x_max_arcsec-self.shift_x_min_arcsec)
-        self.max_elung_y = np.max(self.shift_y_max_arcsec-self.shift_y_min_arcsec)
-        self.elungation_factor = np.max([self.max_elung_x,self.max_elung_y])/criterion_elungation
-
-        if self.max_elung_x>criterion_elungation or self.max_elung_y>criterion_elungation:            
-            self.logger.warning(f'ShackHartmann::get_convolution_spot - The largest spot elongation is {+str(np.round(self.elungation_factor,3))} times \
-                                larger than a subaperture! Consider increasing the Field of view parameter')
-
-        self.C = np.asarray(C_elung.copy())
-        self.C_gauss = np.asarray(C_gauss)
-        self.C_elung = np.asarray(C_elung)
-        
-        return
-    
 #%% SH Measurement
     def wfs_integrate(self, ideal_frame, subaps, nPhoton, stream=None):
         """
@@ -841,11 +712,7 @@ class ShackHartmann:
         # compute the PSF intensity
         I = self.get_psf(phase_in, fwhm)
         # reduce to valid subaperture
-        I = I[self.valid_subapertures_1D,:,:]    
-                
-        # in case of LGS sensor, convolve with LGS spots to create spot elungation
-        if self.is_LGS:
-            I = np.fft.fftshift(np.abs((np.fft.ifft2(np.fft.fft2(I)*self.C))),axes = [1,2])
+        I = I[self.valid_subapertures_1D,:,:]
 
         # fill camera frame with computed intensity (only valid subapertures)
 
@@ -868,8 +735,6 @@ class ShackHartmann:
         self.logger.info('{: ^20s}'.format('Subapertue FoV')       + '{: ^18s}'.format(str(np.round(self.fieldOfView,2)))        +'{: ^18s}'.format('[arcsec]'))
         self.logger.info('{: ^20s}'.format('Valid Subaperture')    + '{: ^18s}'.format(str(str(self.nValidSubaperture))))                   
 
-        if self.is_LGS:    
-            self.logger.info('{: ^20s}'.format('Spot Elungation')    + '{: ^18s}'.format(str(100*np.round(self.elungation_factor,3)))      +'{: ^18s}'.format('% of a subap' ))
         
       
     

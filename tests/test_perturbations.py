@@ -618,3 +618,12 @@ def test_logger_none_prints_each_message_once(report, tolerances, tmp_path):
     report.check('times the warning is printed', out.count('marker-message'), expected=1, atol=0)
     report.check('exceptions ignored in __del__ at exit', out.count('Exception ignored in'), expected=0, atol=0)
     report.assert_ok()
+
+
+@pytest.mark.parametrize('kw', [dict(altitude=90e3), dict(Na_profile=np.array([[90e3], [1.0]])), dict(FWHM_spot_up=1.0),
+                                dict(laser_coordinates=[1.0, 0.0])], ids=['altitude', 'Na_profile', 'FWHM_spot_up', 'laser_coordinates'])
+def test_lgs_source_not_implemented(kw, logger):
+    """Laser guide stars are not implemented: any LGS parameter of Source raises NotImplementedError (never a silent NGS)."""
+    with pytest.raises(NotImplementedError, match='Laser guide stars'):
+        Source('Na', 8, logger=logger, **kw)
+
