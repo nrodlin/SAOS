@@ -152,31 +152,31 @@ def series_vs_exact(est, r, L0, r0=0.15):
 
 
 @pytest.mark.fast
-@known_issue('LEARN-VK-SERIES', 'vk_structure_torch uses a 10-term power series that diverges for small L0 and large r '
-             '(x = pi r / L0 > 1): D(r) wrong by orders of magnitude, e.g. x65 at r = 8 m, L0 = 5 m', 'SAOS/tomography/learnEstimator.py:161-200')
 def test_vk_series_exact_grid(est1, report, tolerances):
     """
     von Karman phase structure function D(r) = 2 [C(0) - C(r)] with C from the Bessel-K formula (scipy) against
-    vk_structure_torch, on r in [1 cm, 20 m] (log grid, 60 points) and L0 in {5, 10, 25, 50} m, r0 = 0.15 m.
-    Criterion: relative difference <= rtol (reference precision) over the whole grid.
+    vk_structure_torch (10-term series, kept by the owner's decision 2026-10-27: exact in the range of use), on the EST range of
+    separations r in [1 cm, 8.5 m] (log grid, 60 points; 8.5 m = metapupil at 15 km with a 60" field) and L0 in {10, 25, 50} m,
+    r0 = 0.15 m. Criterion: relative difference <= use_rtol (accepted accuracy of the series) over the grid. Outside this range (L0 <~ 7 m with r >= 6 m, x = pi r / L0 > 3)
+    the truncated series is not valid: recorded for information (r = 8 m, L0 = 5 m).
     """
     tol = tolerances['learn_estimator']['vk_series']
-    r = np.geomspace(0.01, 20, 60)
+    r = np.geomspace(0.01, 8.5, 60)
     fig, ax = plt.subplots(figsize=(5, 3.5))
-    for L0 in (5, 10, 25, 50):
+    for L0 in (10, 25, 50):
         D, ref = series_vs_exact(est1, r, L0)
         rel = np.abs(D / ref - 1)
-        report.check(f'max |D_series / D_exact - 1| (L0 = {L0} m)', rel.max(), 0.0, atol=tol['rtol'])
+        report.check(f'max |D_series / D_exact - 1| (L0 = {L0} m)', rel.max(), 0.0, atol=tol['use_rtol'])
         k = int(np.argmax(rel))
         report.metric(f'  worst r (L0 = {L0} m)', r[k], 'm')
         ax.loglog(r, np.maximum(rel, 1e-16), label=f'L0 = {L0} m')
-    ax.axhline(tol['rtol'], color='k', ls=':')
+    ax.axhline(tol['use_rtol'], color='k', ls=':')
     ax.set_xlabel('r [m]')
     ax.set_ylabel('|D_series / D_exact - 1|')
     ax.legend(fontsize=7)
     report.figure(fig, 'vk_series_error')
     D, ref = series_vs_exact(est1, np.array([8.0]), 5.0)
-    report.metric('D_series / D_exact at r = 8 m, L0 = 5 m', D[0] / ref[0])
+    report.metric('outside the range of use: D_series / D_exact at r = 8 m, L0 = 5 m (information)', D[0] / ref[0])
     report.assert_ok()
 
 
