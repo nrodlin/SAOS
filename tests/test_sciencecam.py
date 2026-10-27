@@ -326,6 +326,16 @@ def test_long_exposure_frame_count(fs, logger, report):
     report.assert_ok()
 
 
+def test_long_exposure_non_integral_ratio(logger, report):
+    """
+    T_int not a multiple of Ts: the exposure is rounded up, never shorter than T_int (2.4 Ts -> 3 frames, 35.7 Ts at 56 Hz and
+    2 kHz -> 36 frames).
+    """
+    report.check('2.4 Ts', frames_until_long_exposure(logger, 1000.0, 2.4), 3, atol=0)
+    report.check('1/56 s at 2 kHz', frames_until_long_exposure(logger, 2000.0, 2000.0 / 56), 36, atol=0)
+    report.assert_ok()
+
+
 def test_long_exposure_mean_and_energy(logger, tolerances, rng, report):
     """
     Noise-free long exposure = mean of the unit-energy short-exposure frames of the exposure, scaled to the collected

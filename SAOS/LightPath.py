@@ -293,8 +293,9 @@ class LightPath:
                 # Incorporate the decimation factor since we only acquire a frame every decimation steps
                 decimation_factor = max(1, self.sci.decimation) if self.sci.decimation > 0 else 1
                 # Number of frames of the exposure, counted as an integer (comparing accumulated float times added one extra
-                # frame when k * Ts rounded below k / fs, e.g. 1500 or 1800 Hz)
-                n_frames_exposure = max(1, int(round(self.sci.integrationTime / (decimation_factor * self.tel.samplingTime))))
+                # frame when k * Ts rounded below k / fs, e.g. 1500 or 1800 Hz). A non-integral ratio is rounded up: the
+                # exposure is never shorter than integrationTime (2.4 frames -> 3, not 2)
+                n_frames_exposure = max(1, int(np.ceil(self.sci.integrationTime / (decimation_factor * self.tel.samplingTime) - 1e-6)))
                 # Check if we have exposed the required time
                 if len(self.long_exp_cumulative) >= n_frames_exposure:
                     # Add the frames accumulated
