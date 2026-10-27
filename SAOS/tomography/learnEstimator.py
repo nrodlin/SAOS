@@ -957,11 +957,13 @@ class LearnEstimator:
                 a_row_t_chunk = a_row_t[:, i:end_idx, :]
                 scale_ts_chunk = scale_ts[i:end_idx, :]
                 
-                # Compute Cts chunk: shape (chunk_rows, N_sensed)
+                # Compute Cts chunk: shape (chunk_rows, N_sensed). Rows = target at t + dt, columns = sensed slopes at t: with frozen
+                # flow phi(r, t) = phi0(r - V t) the covariance is C(r_t - r_s - V dt), so the displacement is -V dt (prediction).
+                # (In learn(), Phase 2, the rows are at t and the columns at t + tau: there the displacement is +V tau.)
                 Cts_chunk = self.compute_covariance_matrix_chunked_torch(
                     A_row_t_chunk, a_row_t_chunk, A_row_s, a_row_s, r0_torch, L0_torch, fractionalCn2_torch,
                     scale_ts_chunk, constants, noise_var=None,
-                    Vx=windSpeedX_torch, Vy=windSpeedY_torch, dt=dt, chunk_size=chunk_size, device=calc_device, label="Cts_chunk"
+                    Vx=windSpeedX_torch, Vy=windSpeedY_torch, dt=-dt, chunk_size=chunk_size, device=calc_device, label="Cts_chunk"
                 )
                 
                 # Solve for Rtomo_chunk

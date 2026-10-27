@@ -451,8 +451,6 @@ DT = 0.02
 
 
 @pytest.mark.fast
-@known_issue('LEARN-WIND-SIGN', 'build_reconstructor shifts C_ts by +V dt (retrodiction: estimates the target at t - dt) '
-             'instead of -V dt (prediction at t + dt)', 'SAOS/tomography/learnEstimator.py (build_reconstructor, Cts displacement)')
 def test_reconstructor_predicts_future(multi, report, tolerances):
     """
     Frozen flow phi(r, t) = phi0(r - V t): the covariance between the target at t + dt and the sensed slopes at t is
