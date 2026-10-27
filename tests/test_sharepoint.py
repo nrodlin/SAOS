@@ -161,7 +161,6 @@ def test_atmosphere_layers_decimation(link, rng, report):
     report.check('atm publications per topic', len(seen['atmosphere_1/layer_1']), expected=3)
 
 
-@known_issue('SHARE-DM-DECIM', 'DM publish sits outside the decimation if and uses topics[-1]', 'SAOS/Sharepoint.py:306-308')
 def test_dm_command_decimation(link, rng, report):
     """DM 1D command (valid actuators only): published only when (it+1) % dm == 0, topic dm_<i>/1D_command."""
     lk = link(dm=2)
@@ -176,7 +175,6 @@ def test_dm_command_decimation(link, rng, report):
     assert all(its == [1, 3, 5] for its in seen.values())
 
 
-@known_issue('SHARE-DM-DECIM', 'DM publish sits outside the decimation if and uses topics[-1]', 'SAOS/Sharepoint.py:306-308')
 def test_dm_command_does_not_hijack_atmosphere_topic(link, rng):
     """With atm and dm active, a non-DM iteration must not publish the DM command under an atmosphere topic."""
     lk = link(atm=1, dm=2)
@@ -268,7 +266,6 @@ def test_topics_catalogue(link, rng):
         assert catalogue == exp, f'iteration {it}'
 
 
-@known_issue('SHARE-DM-TOPIC', 'the dm_phase topic sends dm_opd', 'SAOS/Sharepoint.py:334, 340')
 def test_dm_per_dir_phase_topic_sends_phase(link, rng):
     """dm_per_dir with several directions: dm_opd_<j> carries dm_opd[j] and dm_phase_<j> carries dm_phase[j]."""
     lk = link(dm_per_dir=2)
@@ -284,7 +281,6 @@ def test_dm_per_dir_phase_topic_sends_phase(link, rng):
             assert_equal_payload(got[f'lightPath0/dm_phase_{j + 1}'], lp.dm_phase[j], 'dm_phase')
 
 
-@known_issue('SHARE-DM-TOPIC', 'the dm_phase topic sends dm_opd', 'SAOS/Sharepoint.py:334, 340')
 def test_dm_per_dir_single_direction_phase_topic(link, rng):
     """dm_per_dir with one direction (2D buffers) at iterations where it is due: dm_phase topic carries dm_phase."""
     lk = link(dm_per_dir=1)
@@ -295,8 +291,6 @@ def test_dm_per_dir_single_direction_phase_topic(link, rng):
     assert_equal_payload(got['lightPath0/dm_phase'], lp.dm_phase, 'dm_phase')
 
 
-@known_issue('SHARE-DMDIR-DECIM', 'single-direction dm_opd/dm_phase publish ignores dm_per_dir decimation '
-             '(new, same pattern as SHARE-DM-DECIM)', 'SAOS/Sharepoint.py:336-341')
 def test_dm_per_dir_single_direction_decimation(link, rng):
     """dm_per_dir=3 with one direction: nothing may be published at iterations 0, 1, 3, 4; both topics at 2, 5."""
     lk = link(dm_per_dir=3)

@@ -117,9 +117,9 @@ class Sharepoint:
         if self.dm > 0 and len(dm_list) > 0:
             for i in range(len(dm_list)):
                 dm_name = 'dm_' + str(i+1)
+                topics.append(dm_name + '/1D_command')
                 if ((iteration+1)%self.dm) == 0:
-                    topics.append(dm_name + '/1D_command')
-                self.socket.send_multipart([topics[-1].encode(), pickle.dumps(dm_list[i].dm_layer.cmd_1D[dm_list[i].validAct])])
+                    self.socket.send_multipart([topics[-1].encode(), pickle.dumps(dm_list[i].dm_layer.cmd_1D[dm_list[i].validAct])])
 
         # Check Light Path dimensions:
         nNameSpaces = len(light_path)
@@ -145,13 +145,14 @@ class Sharepoint:
                         topics.append(topic_name + 'dm_phase_' + str(j+1))
                         if ((iteration+1) % self.dm_per_dir) == 0:
                             self.socket.send_multipart([topics[-2].encode(), pickle.dumps(light_path[i].dm_opd[j])])
-                            self.socket.send_multipart([topics[-1].encode(), pickle.dumps(light_path[i].dm_opd[j])])
+                            self.socket.send_multipart([topics[-1].encode(), pickle.dumps(light_path[i].dm_phase[j])])
                 else:
                     ndirs = 1
                     topics.append(topic_name + 'dm_opd')
                     topics.append(topic_name + 'dm_phase')
-                    self.socket.send_multipart([topics[-2].encode(), pickle.dumps(light_path[i].dm_opd)])
-                    self.socket.send_multipart([topics[-1].encode(), pickle.dumps(light_path[i].dm_opd)])
+                    if ((iteration+1) % self.dm_per_dir) == 0:
+                        self.socket.send_multipart([topics[-2].encode(), pickle.dumps(light_path[i].dm_opd)])
+                        self.socket.send_multipart([topics[-1].encode(), pickle.dumps(light_path[i].dm_phase)])
             if (self.slopes > 0) and (light_path[i].wfs is not None):
                 topics.append(topic_name + 'slopes_1D')
                 topics.append(topic_name + 'slopes_2D')
