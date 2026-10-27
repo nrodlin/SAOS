@@ -494,8 +494,6 @@ def test_save_load_initial_state(logger, report, tmp_path):
     report.assert_ok()
 
 
-@known_issue('ATM-IO-STATE', 'save/load does not store the RNG state nor the sub-pixel displacement buffer',
-             'Atmosphere.py:235-310')
 def test_save_load_continues_identically(logger, report, tmp_path):
     """A loaded atmosphere evolves exactly as the original one would have (same OPD after k updates)."""
     src = Source('V', 0, coordinates=[0, 0], logger=logger)
@@ -511,8 +509,6 @@ def test_save_load_continues_identically(logger, report, tmp_path):
     report.assert_ok()
 
 
-@known_issue('ATM-IO-ORDER', 'load iterates the h5 groups alphabetically: with >= 10 layers, layer_10 is loaded as layer 2',
-             'Atmosphere.py:288')
 def test_save_load_many_layers_order(logger, report, tmp_path):
     """With 11 layers, every loaded layer keeps its altitude (layer order preserved)."""
     n = 11
@@ -528,3 +524,58 @@ def test_save_load_many_layers_order(logger, report, tmp_path):
     loaded = [getattr(atm2, f'layer_{i + 1}').altitude for i in range(n)]
     report.check('loaded altitude - original altitude [m]', np.array(loaded) - np.array(alt), expected=0, atol=1e-6)
     report.assert_ok()
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Edge cases and chromatic shift (C.8, C.10)
+# ----------------------------------------------------------------------------------------------------------------------
+
+def test_odd_resolution_and_zero_cn2_layer(logger, report):
+    """
+    An odd pupil sampling (31 px) gives a 31 x 31 OPD for an off-axis source, and a layer with zero Cn2 fraction is a layer
+    without turbulence (phase identically 0, finite OPD) instead of a crash.
+    """
+    tel = Telescope(resolution=31, diameter=1.0, samplingTime=1e-3, fov=20, logger=logger)
+    atm = Atmosphere(r0=R0, L0=L0, fractionalR0=[1.0, 0.0], altitude=[0.0, 5000.0], windDirection=[0, 90], windSpeed=[5, 10],
+                     telescope=tel, zenith=0, logger=logger)
+    atm.initializeAtmosphere(randomState=3)
+    for _ in range(5):
+        atm.update()
+    opd = np.array(atm.getOPD(Source('V', 0, coordinates=[5, 30], logger=logger)))
+    report.check('OPD shape == (31, 31)', float(opd.shape == (31, 31)), 1.0, atol=0)
+    report.check('OPD finite', float(np.isfinite(opd).all()), 1.0, atol=0)
+    report.check('max |phase| of the zero-Cn2 layer', float(np.abs(np.array(atm.layer_2.screen.scrn)).max()), 0.0, atol=0)
+    report.assert_ok()
+
+
+def test_random_seed_when_not_given(logger, report):
+    """Without randomState two atmospheres differ, and the seed used is stored, so that it reproduces the same screens."""
+    tel = Telescope(resolution=16, diameter=1.0, samplingTime=1e-3, logger=logger)
+    kw = dict(r0=R0, L0=L0, fractionalR0=[1.0], altitude=[0.0], windDirection=[0], windSpeed=[1], telescope=tel, zenith=0, logger=logger)
+    a, b = Atmosphere(**kw), Atmosphere(**kw)
+    a.initializeAtmosphere()
+    b.initializeAtmosphere()
+    c = Atmosphere(**kw)
+    c.initializeAtmosphere(randomState=a.randomState)
+    sa, sb, sc = (np.array(x.layer_1.screen.scrn) for x in (a, b, c))
+    report.check('two unseeded atmospheres differ (1 = yes)', float(not np.array_equal(sa, sb)), 1.0, atol=0)
+    report.check('stored seed reproduces the screen: max |diff|', float(np.abs(sa - sc).max()), 0.0, atol=0)
+    report.assert_ok()
+
+
+def test_chromatic_shift_is_a_common_vector(logger, report):
+    """
+    The chromatic shift is an on-sky vector per layer added to the source direction: an on-axis source shifted by (4, 0)"
+    on the 5 km layer samples the same footprint as a source at 4" azimuth 0, and the shift moves every source alike (a
+    source at 4" azimuth 90 shifted by (4, 0)" samples the footprint of a source at (4, 4)").
+    """
+    tel = Telescope(resolution=32, diameter=1.6, samplingTime=1e-3, fov=40, logger=logger)
+    atm = Atmosphere(r0=R0, L0=L0, fractionalR0=[0.5, 0.5], altitude=[0.0, 5000.0], windDirection=[0, 0], windSpeed=[1, 1],
+                     telescope=tel, zenith=0, logger=logger)
+    atm.initializeAtmosphere(randomState=1)
+    shift = [[0.0, 0.0], [4.0, 0.0]]
+    fp = lambda coords, cs=None: atm.get_pupil_footprint(Source('V', 0, coordinates=coords, chromatic_shift=cs, logger=logger))[1]
+    report.check('shifted on-axis == source at (4", 0 deg)', float(np.array_equal(fp([0, 0], shift), fp([4, 0]))), 1.0, atol=0)
+    report.check('shifted (4", 90 deg) == source at (4 sqrt2", 45 deg)', float(np.array_equal(fp([4, 90], shift), fp([4 * np.sqrt(2), 45]))), 1.0, atol=0)
+    report.assert_ok()
+

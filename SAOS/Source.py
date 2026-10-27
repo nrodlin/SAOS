@@ -114,8 +114,9 @@ class Source:
             Laser guide star parameters (finite altitude, launch telescope coordinates, sodium profile, uplink spot FWHM).
             LGS are not implemented in SAOS: giving any of them raises NotImplementedError. The source is always natural
             (altitude = infinity).
-        chromatic_shift : list, optional
-            Shift per atmospheric layer due to chromatic dispersion, in arcsec.
+        chromatic_shift : array-like, optional
+            Chromatic dispersion: one on-sky shift vector (dx, dy) [arcsec] per atmospheric layer, shape (nLayer, 2), x = +column
+            and y = +row; it is added to the direction of the source (common to all the sources of this wavelength).
         logger : logging.Logger, optional
             Logger instance for logging.
         """

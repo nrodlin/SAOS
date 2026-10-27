@@ -12,6 +12,7 @@ import time
 import logging
 
 import h5py
+import json
 import os
 import threading
 
@@ -141,7 +142,8 @@ class Atmosphere:
         Parameters
         ----------
         randomState : int or None, optional
-            Seed for reproducible random number generation, by default None.
+            Seed for reproducible random number generation (layer i uses randomState + 1000 i). None: a random seed, logged
+            and stored in self.randomState so that the atmosphere can be reproduced.
 
         Returns
         -------
@@ -153,6 +155,11 @@ class Atmosphere:
         if self.hasNotBeenInitialized:
             self.initial_r0 = self.r0
             self.logger.debug('Atmosphere::initializeAtmosphere - Creating layers...')
+            if randomState is None:
+                # Random base seed (not the time of day), logged so that the atmosphere can be reproduced
+                randomState = int(np.random.default_rng().integers(0, 2**31 - 1000*self.nLayer))
+                self.logger.info(f'Atmosphere::initializeAtmosphere - randomState not given: using {randomState}.')
+            self.randomState = randomState
             results_layers = Parallel(n_jobs=self._n_jobs(self.nLayer), prefer="threads")(delayed(self.buildLayer)(i_layer, randomState) for i_layer in range(self.nLayer))
             for i_layer in range(self.nLayer):
                 setattr(self,'layer_'+str(i_layer+1),results_layers[i_layer])
@@ -185,9 +192,8 @@ class Atmosphere:
         layer               = LayerClass()
         layer.id            = i_layer
         # Seed for the random phase generation  
-        if seed is None:      
-            t = time.localtime()
-            seed = t.tm_hour*3600 + t.tm_min*60 + t.tm_sec
+        if seed is None:
+            seed = int(np.random.default_rng().integers(0, 2**31 - 1000*self.nLayer))
         layer.seed          = seed + i_layer*1000
         
         # gather properties of the atmosphere
@@ -204,7 +210,9 @@ class Atmosphere:
 
         self.logger.debug('Atmosphere::buildLayer - Creating layer '+str(i_layer+1))    
 
-        layer.fractionalR0 = self.r0*(np.cos(self.zenith)**0.6)*(self.fractionalR0[i_layer]**(-3/5))
+        # Fried parameter of the layer (a layer with zero Cn2 fraction has r0 = infinity: no turbulence)
+        frac = float(self.fractionalR0[i_layer])
+        layer.fractionalR0 = self.r0*(np.cos(self.zenith)**0.6)*(frac**(-3/5)) if frac > 0 else np.inf
 
         layer.screen = PhaseScreenVonKarman(nx_size=layer.npix, pixel_scale=layer.spatial_res, r0 = layer.fractionalR0, 
                                             L0 = self.L0, random_seed = layer.seed, n_columns=2, logger=self.logger)
@@ -264,6 +272,11 @@ class Atmosphere:
                 # Common variables
                 group.create_dataset('phase', data=getattr(self,'layer_'+str(i_layer+1)).screen.scrn)
                 group.attrs['n_columns'] = getattr(self,'layer_'+str(i_layer+1)).screen.n_columns
+                # Evolution state: random generator of the extrusion and sub-pixel displacement buffers, so that a loaded
+                # atmosphere continues exactly as the saved one would have
+                group.attrs['rng_state'] = json.dumps(getattr(self,'layer_'+str(i_layer+1)).screen._R.bit_generator.state)
+                group.attrs['displ_buffer_x'] = getattr(self,'layer_'+str(i_layer+1)).displ_buffer_x
+                group.attrs['displ_buffer_y'] = getattr(self,'layer_'+str(i_layer+1)).displ_buffer_y
         
         self.logger.info('Atmosphere::save - Saved.')
     
@@ -288,7 +301,9 @@ class Atmosphere:
             filename += ".h5"        
 
         with h5py.File(filename, 'r') as f:
-            for i_layer, grp_name in enumerate(f.keys()):
+            # Layers in their numeric order (the h5 groups are listed alphabetically: layer_10 before layer_2)
+            layer_names = sorted([k for k in f.keys() if k.startswith('layer_')], key=lambda k: int(k.split('_')[1]))
+            for i_layer, grp_name in enumerate(layer_names):
                 layer = LayerClass()
                 layer.id = f[grp_name].attrs['id']
                 layer.seed = f[grp_name].attrs['seed']
@@ -307,6 +322,11 @@ class Atmosphere:
                                'phase': np.array(f[grp_name]['phase'])}
                 layer.screen = PhaseScreenVonKarman(nx_size=layer.npix, pixel_scale=layer.spatial_res, r0=layer.fractionalR0, L0=self.L0, 
                                                     random_seed=layer.seed, n_columns=f[grp_name].attrs['n_columns'], from_file=True, screen_file=screen_dict, logger=self.logger)
+                # Evolution state (files saved before 2026-10-27 do not have it: the generator restarts from the seed)
+                if 'rng_state' in f[grp_name].attrs:
+                    layer.screen._R.bit_generator.state = json.loads(f[grp_name].attrs['rng_state'])
+                layer.displ_buffer_x = float(f[grp_name].attrs.get('displ_buffer_x', 0.0))
+                layer.displ_buffer_y = float(f[grp_name].attrs.get('displ_buffer_y', 0.0))
                 
                 setattr(self, 'layer_'+str(i_layer+1), layer)
 
@@ -458,13 +478,16 @@ class Atmosphere:
         for i_layer in range(self.nLayer):
             layer = getattr(self,'layer_'+str(i_layer+1))
 
-            # If defined, chromatic shift shall be define per layer. We need to check its format
+            # Chromatic shift: one on-sky vector (dx, dy) [arcsec] per layer, x = +column, y = +row, common to every source of
+            # this wavelength (atmospheric dispersion moves all the lines of sight alike); added to the source direction
             if src.chromatic_shift is None:
-                chromatic_shift = 0
+                chromatic_shift = np.zeros(2)
             else:
-                if len(src.chromatic_shift) != self.nLayer:
-                    raise ValueError('Atmosphere::get_pupil_footprint - If defined, the chromatic shift shall be defined per layer.')
-                chromatic_shift = src.chromatic_shift[i_layer]  
+                chromatic_shift = np.asarray(src.chromatic_shift, dtype=float)
+                if chromatic_shift.shape != (self.nLayer, 2):
+                    raise ValueError(f'Atmosphere::get_pupil_footprint - chromatic_shift must be one (dx, dy) [arcsec] per layer, '
+                                     f'shape ({self.nLayer}, 2); got {chromatic_shift.shape}.')
+                chromatic_shift = chromatic_shift[i_layer]
 
             # The source coordinates are defined as: [elevation, azimuth] taking as reference the Zenith, i.e. [0,x] has the telescope pointing to the sky vertically.
             # Elevation is measured in arcsec, azimuth in degrees.
@@ -472,7 +495,11 @@ class Atmosphere:
             # The polar coordinates, at an altiudue z_i are: r = z_i*tan(elevation), theta = azimuth. Then, we convert to cartesian coordinates.
             # Note that before changing coordinates, the radius in meters is converted to px using the layer diameter (layer.D) and phase screen size (layer.resolution)
             D = layer.npix * (self.D/ self.resolution)
-            [x_z,y_z] = pol2cart(layer.altitude*np.tan((src.coordinates[0]+chromatic_shift)/206265) * layer.npix / D, np.deg2rad(src.coordinates[1]))
+            # On-sky direction vector [arcsec] of the line of sight (source + chromatic shift), then its footprint h tan(|v|) along v
+            v = np.array(pol2cart(src.coordinates[0], np.deg2rad(src.coordinates[1]))) + chromatic_shift
+            ang = np.hypot(v[0], v[1])
+            r_px = layer.altitude*np.tan(ang/206265) * layer.npix / D
+            [x_z, y_z] = (r_px * v / ang) if ang > 0 else (0.0, 0.0)
             # [x_z, y_z] are the cartesian coordinates in px w.r.t zenith. 
             # Rounded to the nearest layer pixel (integer-pixel model)
             center_x = int(np.round(y_z))+layer.npix//2
@@ -480,8 +507,8 @@ class Atmosphere:
 
             # Finally, create the pupil and set the points inside the pupil to 1
             pupil_footprint = np.zeros([layer.npix,layer.npix])
-            pupil_footprint[center_x-self.resolution//2:center_x+self.resolution//2,
-                            center_y-self.resolution//2:center_y+self.resolution//2 ] = 1
+            row0, col0 = center_x - self.resolution//2, center_y - self.resolution//2      # resolution pixels, odd or even
+            pupil_footprint[row0:row0 + self.resolution, col0:col0 + self.resolution] = 1
             
             footprint_per_layer.append(pupil_footprint)
         return footprint_per_layer
