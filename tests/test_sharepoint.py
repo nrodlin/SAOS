@@ -409,7 +409,6 @@ def test_reception_timeout_returns_none_and_recovers(logger, buffer_type):
             srv.close()
 
 
-@known_issue('RECV-CLOSED-SOCKETS', 'closed sockets stay registered in the poller after a timeout', 'SAOS/ReceptionPoint.py:101-104')
 def test_reception_poller_only_holds_live_socket(logger):
     """After a timeout the socket is rebuilt: the poller must hold exactly the current socket, none of the closed ones."""
     rp = ReceptionPoint(logger, port=free_port(), ip='127.0.0.1', timeout=200)
@@ -421,7 +420,6 @@ def test_reception_poller_only_holds_live_socket(logger):
         close_rp(rp)
 
 
-@known_issue('RECV-CLOSED-SOCKETS', 'closed sockets stay registered in the poller after a timeout', 'SAOS/ReceptionPoint.py:101-104')
 def test_reception_second_timeout_returns_none_in_bounded_time(logger):
     """Two consecutive timeouts must each return None after about `timeout` ms (guarded by a thread deadline so that a
     hang is reported as a failure instead of blocking the suite)."""

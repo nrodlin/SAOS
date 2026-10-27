@@ -84,18 +84,7 @@ class ReceptionPoint:
                     break
                 else:
                     result = None
-                    
-                    # Reset socket
-                    try:
-                        self.socket.setsockopt(zmq.LINGER,0)
-                        self.socket.close()
-                    except Exception:
-                        pass
-					
-                    self.socket = self.context.socket(zmq.REQ)
-                    self.socket.connect(self.protocol + '://' + self.ip + ':' + str(self.port))
-                    
-                    self.poller.register(self.socket, zmq.POLLIN)
+                    self._reset_socket()
                     self.logger.error('ReceptionPoint::sendRequest - Timeout.')
                     break
         
@@ -121,15 +110,7 @@ class ReceptionPoint:
                         break
                     else:
                         result = None
-                        # Reset socket
-                        try:
-                            self.socket.setsockopt(zmq.LINGER, 0)
-                            self.socket.close()
-                        except Exception:
-                            pass
-                        self.socket = self.context.socket(zmq.REQ)
-                        self.socket.connect(self.protocol + "://" + self.ip + ":" + str(self.port))
-                        self.poller.register(self.socket, zmq.POLLIN)
+                        self._reset_socket()
                         self.logger.error("ReceptionPoint::sendRequest - loop_cmd timeout.")
                         break
                 except Exception as e:
@@ -143,6 +124,24 @@ class ReceptionPoint:
         return result
     
     
+    def _reset_socket(self):
+        """
+        Replace the REQ socket after a timeout (a REQ socket that sent a request without a reply cannot send again): the old
+        socket is removed from the poller before being closed, so that the poller never waits on closed sockets.
+        """
+        try:
+            self.poller.unregister(self.socket)
+        except KeyError:
+            pass
+        try:
+            self.socket.setsockopt(zmq.LINGER, 0)
+            self.socket.close()
+        except Exception:
+            pass
+        self.socket = self.context.socket(zmq.REQ)
+        self.socket.connect(self.protocol + '://' + self.ip + ':' + str(self.port))
+        self.poller.register(self.socket, zmq.POLLIN)
+
     def __del__(self):
         if self.socket is not None and self.context is not None:
             self.socket.close()
