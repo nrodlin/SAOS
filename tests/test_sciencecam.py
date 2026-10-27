@@ -314,12 +314,8 @@ def frames_until_long_exposure(logger, fs, k, decimation=1, max_iter=200):
 
 @pytest.mark.parametrize('fs', [
     1000.0, 2000.0,
-    pytest.param(1500.0, marks=known_issue('LP-LE-FLOAT', 'exposure test len(frames) * dec * Ts >= T_int in floating '
-                                           'point: one extra frame when k * (1/fs) < k / fs by rounding (k = 5, 10 '
-                                           'at 1500 Hz)', 'LightPath.py:293-295')),
-    pytest.param(1800.0, marks=known_issue('LP-LE-FLOAT', 'exposure test len(frames) * dec * Ts >= T_int in floating '
-                                           'point: one extra frame when k * (1/fs) < k / fs by rounding (k = 3, 6, 12 '
-                                           'at 1800 Hz)', 'LightPath.py:293-295')),
+    1500.0,
+    1800.0,
 ])
 def test_long_exposure_frame_count(fs, logger, report):
     """

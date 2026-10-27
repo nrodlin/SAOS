@@ -7,7 +7,7 @@ import h5py
 import os
 from datetime import datetime
 
-from scipy import signal
+from scipy import ndimage, signal
 
 import logging
 from .LoggingHelper import get_logger
@@ -413,8 +413,10 @@ class Savepoint:
             dict_stats['rms'] = np.array([[np.sqrt(np.mean(data[0:data.shape[0]//2]**2)), np.sqrt(np.mean(data[data.shape[0]//2:]**2))]])
 
         elif data_type == 'slopes_2D':
-            dict_stats['min'] = np.array([[np.min(data[0:data.shape[1]//2,:]), np.min(data[0,data.shape[1]//2:,:])]])
-            dict_stats['max'] = np.array([[np.max(data[0:data.shape[1]//2,:]), np.max(data[0,data.shape[1]//2:,:])]])
+            # data is (1, 2 n, n): the x block is rows [0, n) and the y block rows [n, 2 n) of the 2D map
+            n_rows = data.shape[1]//2
+            dict_stats['min'] = np.array([[np.min(data[0, :n_rows, :]), np.min(data[0, n_rows:, :])]])
+            dict_stats['max'] = np.array([[np.max(data[0, :n_rows, :]), np.max(data[0, n_rows:, :])]])
         
         elif data_type == 'sci_frame' and (lp is not None):
             if lp.src.tag == 'sun':
@@ -430,7 +432,8 @@ class Savepoint:
                 if mean_intensity != 0:
                     squeezed_data = squeezed_data / mean_intensity
                 # Get median filtered image
-                med = signal.medfilt(squeezed_data, kernel_size=3)
+                # (reflected borders: zero padding biased the border medians low and created spurious gradients)
+                med = ndimage.median_filter(squeezed_data, size=3, mode='reflect')
                 # Create Gradient filters
                 kx = np.array(([-3, 0, 3], [-10, 0, 10], [-3, 0, 3]))
                 ky = np.rot90(kx)

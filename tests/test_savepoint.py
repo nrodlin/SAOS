@@ -147,8 +147,6 @@ def test_slopes_1d_statistics_split_xy(savepoint, rng, report):
     report.assert_ok()
 
 
-@known_issue('SAV-SLOPES2D', 'slopes_2D x min/max use data[0:n] on the leading axis of size 1 (the 2D map is '
-             'expanded to 3D), so they are taken over all x and y slopes', 'Savepoint.py:381-382')
 def test_slopes_2d_statistics_split_xy(savepoint, rng, report):
     """slopes_2D = [x block (n rows); y block (n rows)] as saved by LightPath: min/max per axis."""
     n = 8
@@ -245,14 +243,14 @@ def test_strehl_in_field_convention(savepoint, rng, tolerances, report):
 def mfgs_reference(img):
     """
     Independent MFGS (mean fraction of gradient similarity) written from its definition with explicit loops: image
-    divided by its mean; M = 3x3 median filter (zero padding at the border); gradient magnitude of the image and of M
+    divided by its mean; M = 3x3 median filter (symmetric border extension, as the gradients); gradient magnitude of the image and of M
     with the 3x3 kernel [[-3, 0, 3], [-10, 0, 10], [-3, 0, 3]] and its transpose (symmetric border extension);
     similarity (2 g_I g_M + C) / (g_I^2 + g_M^2 + C), C = 1e-10; MFGS = mean over pixels.
     """
     a = np.asarray(img, dtype=float)
     a = a / a.mean()
     n0, n1 = a.shape
-    pz = np.pad(a, 1, mode='constant')
+    pz = np.pad(a, 1, mode='symmetric')
     med = np.array([[np.sort(pz[i:i + 3, j:j + 3].ravel())[4] for j in range(n1)] for i in range(n0)])
     kx = np.array([[-3, 0, 3], [-10, 0, 10], [-3, 0, 3]], dtype=float)
     ky = kx.T
@@ -276,8 +274,8 @@ def test_contrast_and_mfgs(savepoint, report):
     Solar-image metrics on small deterministic images. Contrast = std/mean: 1 + a sin(2 pi m x / N) over whole periods
     gives a/sqrt(2). MFGS: a deterministic 12 x 12 texture (smooth waves + a hot pixel + a pseudo-random pattern) must equal the
     independent loop implementation `mfgs_reference` for several amplitudes of the high-frequency pattern, with
-    contrast and MFGS invariant to the image scale (frames are saved in photons or DN). The border convention of the
-    median filter is zero padding (the documented behaviour of scipy.signal.medfilt that SAOS uses).
+    contrast and MFGS invariant to the image scale (frames are saved in photons or DN). The border of the median filter is
+    extended symmetrically (zero padding biased the border medians low, SAV-MFGS-BORDER).
     """
     sp = savepoint()
     lp = types.SimpleNamespace(src=types.SimpleNamespace(tag='sun'))
@@ -307,9 +305,6 @@ def test_contrast_and_mfgs(savepoint, report):
     report.assert_ok()
 
 
-@known_issue('SAV-MFGS-BORDER', 'the 3x3 median filter pads with zeros (scipy.signal.medfilt) on an image normalised to '
-             'mean 1: the border median is biased low, creating gradients that do not exist and lowering MFGS of a '
-             'featureless image', 'Savepoint.py:398')
 def test_mfgs_constant_image(savepoint, report):
     """An image without any structure has no gradients in either image, so every pixel is similar: MFGS = 1."""
     lp = types.SimpleNamespace(src=types.SimpleNamespace(tag='sun'))

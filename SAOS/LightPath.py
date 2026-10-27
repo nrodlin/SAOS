@@ -292,9 +292,11 @@ class LightPath:
                 # Now, manage the long exposure frame --> The number of frames accumulated let us know the time exposed
                 # Incorporate the decimation factor since we only acquire a frame every decimation steps
                 decimation_factor = max(1, self.sci.decimation) if self.sci.decimation > 0 else 1
-                exposured_time = len(self.long_exp_cumulative) * decimation_factor * self.tel.samplingTime
+                # Number of frames of the exposure, counted as an integer (comparing accumulated float times added one extra
+                # frame when k * Ts rounded below k / fs, e.g. 1500 or 1800 Hz)
+                n_frames_exposure = max(1, int(round(self.sci.integrationTime / (decimation_factor * self.tel.samplingTime))))
                 # Check if we have exposed the required time
-                if exposured_time >= self.sci.integrationTime:
+                if len(self.long_exp_cumulative) >= n_frames_exposure:
                     # Add the frames accumulated
                     longExp = np.sum(self.long_exp_cumulative, 0)
                     # Normalize energy to 1
