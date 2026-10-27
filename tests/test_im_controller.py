@@ -212,9 +212,6 @@ def test_im_columns_vs_independent_forward_model(sysm, report, tolerances):
 
 
 @pytest.mark.parametrize('mode,label', [(2, 'defocus'), (9, 'spherical')])
-@known_issue('WFS-SUBAP-GRID', 'split_subapertures samples subaperture k on phase pixels [k np, k np + np] (one duplicated border '
-             'row/column, centre shifted +0.5 px from the pupil grid), so a mirror-symmetric phase gives slope maps that are not '
-             'mirror-antisymmetric along the gradient axis (x-mirror of s_x; the y-mirror of s_y alike)', 'ShackHartmann.py:365-405')
 def test_im_symmetry_of_symmetric_modes(mode, label, sysm, report, tolerances):
     """
     A DM shape with the symmetry of the sensor (defocus and spherical aberration: even under x -> -x, y -> -y and x <-> y)

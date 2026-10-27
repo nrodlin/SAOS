@@ -497,10 +497,6 @@ def _footprint_figure(report, expd, meas):
     report.figure(fig, 'b2_footprint_offsets')
 
 
-@known_issue('EXT-TRANSPOSE', 'Atmosphere.get_pupil_footprint puts the sky x (r cos az) on the layer column and y on the row '
-             '(center_x = int(y_z), center_y = int(x_z)) while ScienceCam places the sub-direction (row block i, col block j) at '
-             'image row i = sky x: the patch at sky (x, y) is observed through the footprint of (y, x)',
-             'SAOS/Atmosphere.py:464-465 (vs SAOS/ScienceCam.py:235-246)')
 def test_b2_subdirection_footprint_orientation(altitude_case, report):
     """
     One layer at 15 km. The sub-direction i of the extended source is imaged in row block i // 3 and column block i % 3 of
@@ -616,9 +612,6 @@ def _peak_diff(a, b):
     return np.array([np.abs(x - y).max() / y.max() for x, y in zip(a, b)])
 
 
-@known_issue('EXT-TRANSPOSE', 'sub-directions are observed through the transposed layer footprint (see test_b2_subdirection_'
-             'footprint_orientation): the stars of the anti-diagonal and of the axes between patches see the wrong patch phase',
-             'SAOS/Atmosphere.py:464-465 (vs SAOS/ScienceCam.py:235-246)')
 def test_b4_altitude_layer_orientation(b4_expect, tolerances, report):
     """
     One frozen layer at 15 km (r0 0.6 m). The extended source sees, in each patch, the phase of the line of sight to the

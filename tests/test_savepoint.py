@@ -192,8 +192,6 @@ def test_strehl_known_phase(savepoint, rng, tolerances, report):
     report.assert_ok()
 
 
-@known_issue('SAV-STREHL-PEAK', 'strehl = peak pixel / energy without sub-pixel interpolation: a perfect PSF centred '
-             'between pixels scores 0.73 at Nyquist', 'Savepoint.py:417-425')
 def test_strehl_subpixel_tilt(savepoint, tolerances, report):
     """
     A pure tilt does not change the Strehl ratio: a diffraction-limited PSF shifted by 0, 0.25 and 0.5 px (both axes)

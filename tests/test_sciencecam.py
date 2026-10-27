@@ -227,9 +227,6 @@ def test_image_motion_tilt(logger, tolerances, report):
     report.assert_ok()
 
 
-@known_issue('SCI-SCALE', 'compute_psf resamples phase and pupil with align_corners=True from res to n_pix samples: '
-             'the effective plate scale is off by n_pix (res-1) / ((n_pix-1) res) (-0.94% for res 64, n_pix 160; '
-             '-0.28% for EST red 216 -> 555)', 'ScienceCam.py:323-326')
 def test_plate_scale_with_resampled_pupil(logger, tolerances, report):
     """
     Camera field with n_pix != res (the usual case: EST red 555 px vs 216). Image motion and FWHM must still follow
@@ -253,9 +250,6 @@ def test_plate_scale_with_resampled_pupil(logger, tolerances, report):
 # Strehl ratio of the PSF
 # ----------------------------------------------------------------------------------------------------------------------
 
-@known_issue('SCI-SR-RESAMPLE', 'compute_psf interpolates the phase bilinearly from the pupil grid to n_pix samples, '
-             'smoothing the high-order phase: SR overestimated (here, 64 -> 160 px: +7% at SR 0.78, +23% at SR 0.44; '
-             'EST 200 -> 555: +5% at 0.78, +16% at 0.45)', 'ScienceCam.py:323-326')
 def test_strehl_vs_native_grid(logger, tolerances, rng, report):
     """
     On-axis intensity of the PSF relative to the aberration-free one must equal |<exp(i phi)>|^2 over the pupil grid

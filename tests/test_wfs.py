@@ -117,9 +117,6 @@ def test_tilt_axes_isotropy_cross_term(logger, report, tolerances):
 
 
 @pytest.mark.parametrize('fov_px', [15, 30])
-@known_issue('WFS-SCALE', 'subaperture phase interpolated with align_corners=True: N samples span d, the FFT pixel is '
-             '(N-1)/N of the plate scale and slopes are N/(N-1) too large (+7 % at N=15, +3.4 % at N=30)',
-             'ShackHartmann.py:423-433, 458')
 def test_tilt_scale_vs_exact_geometry(logger, report, tolerances, fov_px):
     """
     Small tilt (0.05 px) on a square pupil: the SAOS slope must equal the ideal centroid of the window (propagate_cog)
@@ -165,9 +162,6 @@ def test_reference_converged(report, tolerances):
 # C3/C4: linearity, odd symmetry, continuity at 0
 # ----------------------------------------------------------------------------------------------------------------------
 
-@known_issue('WFS-SCALE', 'slopes are N/(N-1) too large (align_corners=True interpolation of the subaperture phase) and the '
-             'zero-tilt spot is off the window centre (WFS-SPOT-OFFCENTRE), which makes the response asymmetric',
-             'ShackHartmann.py:423-433, 452-458')
 def test_linearity_sweep(logger, report, tolerances):
     """
     Absolute response s(theta) for spot motions of 0.01 ... 6 px (both signs) on a square pupil, 31 px window, compared
@@ -203,8 +197,6 @@ def test_linearity_sweep(logger, report, tolerances):
 
 
 @pytest.mark.parametrize('fov_px', [15, 16])
-@known_issue('WFS-SPOT-OFFCENTRE', 'the zero-tilt spot is not at the window centre (+1 px with an odd window, +0.5 px '
-             'with an even one), so the dynamic range is asymmetric', 'ShackHartmann.py:452-456, 487')
 def test_spot_centred_in_window(logger, report, tolerances, fov_px):
     """The unaberrated spot must sit at the centre of its subaperture window: |CoG - (n-1)/2| <= 0.05 px."""
     wfs, tel, src = make_wfs(logger, fov_px=fov_px)
@@ -304,8 +296,6 @@ def quadratic_expected(wfs, axx, ayy, axy, M=128):
 
 @pytest.mark.parametrize('c', [0.002, 0.01, 0.03], ids=['c0.002', 'c0.01', 'c0.03'])
 @pytest.mark.parametrize('mode', ['defocus', 'astig_xy', 'astig_x2y2'])
-@known_issue('WFS-SCALE', 'slopes are N/(N-1) too large (align_corners=True), the subaperture grid is shifted (WFS-SUBAP-GRID) '
-             'and the zero-tilt spot is off the window centre (WFS-SPOT-OFFCENTRE)', 'ShackHartmann.py:365-395, 423-433, 452-458')
 def test_quadratic_phase_absolute_slopes(logger, report, tolerances, mode, c):
     """
     Absolute slopes for quadratic phases of amplitude c [rad/px^2] (defocus c(x^2+y^2), astigmatism c x y and
@@ -326,9 +316,6 @@ def test_quadratic_phase_absolute_slopes(logger, report, tolerances, mode, c):
     report.assert_ok()
 
 
-@known_issue('WFS-SUBAP-GRID', 'split_subapertures samples subaperture k on phase pixels [k np, k np + np] (centre '
-             'shifted +0.5 px from the pupil grid) and the last one on [res-np-1, res-1] (pitch np-1)',
-             'ShackHartmann.py:365-395')
 def test_defocus_subaperture_geometry(logger, report, tolerances):
     """
     Geometry of the subaperture grid, independent of the angular scale: for defocus phi = c (x^2 + y^2) the mean gradient
@@ -388,9 +375,6 @@ def _fwhm_cut(profile, up=16):
 # C6: centroid noise
 # ----------------------------------------------------------------------------------------------------------------------
 
-@known_issue('WFS-SPOT-OFFCENTRE', 'the zero-tilt spot is +1 px (odd window) off the window centre and the spot is stretched by '
-             'N/(N-1) (WFS-SCALE), so the window second moment M2 is 7 % below the ideal one (1.55 vs 1.66 px^2) and the '
-             'centroid noise is 7 % below M2/N', 'ShackHartmann.py:423-433, 452-458')
 def test_cog_photon_noise(logger, report, tolerances):
     """
     Photon-noise-limited CoG (QE 1, 1 e-/DN, no readout/dark noise, centroid over all pixels of the window): for N
@@ -512,10 +496,6 @@ def partial_energy_discrepancy(logger, res, samp=2.0, fov_px=31, M=None):
 
 
 @pytest.mark.parametrize('res', PUP_RES, ids=[f'res{r}' for r in PUP_RES])
-@known_issue('WFS-SUBAP-GRID', 'split_subapertures takes the phase/pupil of subaperture k on pixels [k np, k np + np] '
-             '(shifted +0.5 px, the last one on [res-np-1, res-1]), so the energy of an edge subaperture is not that of its '
-             'own pixels and a symmetric pupil gives asymmetric energies; error ~ 1/np (the bilinear resampling of the '
-             'binary mask, align_corners=True, also blurs its edges)', 'ShackHartmann.py:131-133, 365-395')
 def test_partial_subaperture_energy(logger, report, tolerances, res):
     """
     Circular pupil with a 20 % central obstruction, flat phase, 31 px window at 2 px per lambda/d: the energy of each
