@@ -58,6 +58,7 @@ def peak_subpixel(img, half_width=1.0, step=1.0 / 32):
 
 
 _MAX_ATTR_SIZE = 10000                                     # larger arrays are not stored as metadata
+_MAX_ATTR_BYTES = 16384                                    # larger values go to datasets (HDF5 attributes are limited to 64 kB per object header)
 
 _RUN_INFO = None
 
@@ -134,8 +135,13 @@ def _attr_value(value):
 def _write_attrs(group, values):
     for key, value in values.items():
         value = _attr_value(value)
-        if value is not None:
+        if value is None:
+            continue
+        size = value.nbytes if isinstance(value, np.ndarray) else len(value.encode()) if isinstance(value, str) else 0
+        if size <= _MAX_ATTR_BYTES:
             group.attrs[key] = value
+        elif key not in group:                              # written once; never replaces a data member of the group
+            group.create_dataset(key, data=value)
 
 
 def _pick(obj, names):
@@ -235,7 +241,8 @@ class Savepoint:
         only_long_exp : bool
             If True, only the long exposure frame is saved. By default, False.
         metadata : dict, optional
-            User metadata of the simulation (case, draw, controller settings...), stored in /metadata/user. More can be
+            User metadata of the simulation (case, draw, controller settings...), stored in /metadata/user (as attributes; values
+            above 16 kB as datasets). More can be
             added with add_metadata().
         logger : logging.Logger, optional
             External logger to use. If None, initializes internal logging.

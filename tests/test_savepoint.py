@@ -432,6 +432,24 @@ def test_metadata_provenance_and_config(logger, savepoint, rng, report):
     report.assert_ok()
 
 
+def test_metadata_large_values_as_datasets(logger, savepoint, rng, report):
+    """
+    User metadata above the attribute size limit (a 10000-element float array: 80 kB > 64 kB of an HDF5 object header) is
+    stored as a dataset of /metadata/user and the save does not fail; small values stay attributes.
+    """
+    lp, _ = small_lightpath(logger, rng, 1)
+    big = np.arange(10000, dtype=float)
+    sp = savepoint(sci=1, only_metrics=True, metadata=dict(big=big, small=[1, 2, 3]))
+    lp.propagate(True)
+    sp.save([lp], 0)
+    with h5py.File(sp.file_path, 'r') as f:
+        u = f['metadata/user']
+        report.check('large array stored as a dataset', int('big' in u and 'big' not in u.attrs), 1, atol=0)
+        report.check('large array values', np.abs(u['big'][()] - big).max(), 0.0, atol=0)
+        report.check('small list stored as an attribute', u.attrs['small'], [1, 2, 3], atol=0)
+    report.assert_ok()
+
+
 def test_metadata_of_modules(logger, report):
     """module_metadata of a telescope with spiders, an atmosphere and a DM: the parameters they were created with."""
     import json

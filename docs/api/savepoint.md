@@ -14,7 +14,9 @@ Every file has a group `/metadata`, written at the first `save()`:
 | `/metadata/telescope`, `/metadata/atmosphere`, `/metadata/dm_<i>` | Configuration of the modules of the first light path that has them, whatever is saved |
 | `LightPath_<k>`, `Atmosphere_<i>`, `DeformableMirror_<i>` attributes | Configuration of the module: source (`src_*`), WFS (`wfs_*`), science camera (`sci_*`), delay, DM altitudes... |
 
-Values are scalars, small numeric arrays or JSON strings (dicts, mixed lists).
+Values are scalars, numeric arrays (up to 10000 elements) or JSON strings (dicts, mixed lists). They are attributes, except
+those above 16 kB, which are stored as datasets of the same name in the same group (HDF5 limits the attributes of an
+object to 64 kB).
 
 ```python
 sp = Savepoint(file_path='res.h5', sci_frame={'long': 1}, only_metrics=True,
