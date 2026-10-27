@@ -365,14 +365,12 @@ def test_hdf5_roundtrip(logger, savepoint, rng, tolerances, report):
     report.assert_ok()
 
 
-@known_issue('SAV-DECIM', 'ScienceCam takes frames at iterations i % decimation == 0, Savepoint saves them at '
-             '(i + 1) % rate == 0 only if a frame exists: with rate = decimation > 1 only the first frame is saved',
-             'LightPath.py:277-280 + Savepoint.py:592-599')
 def test_saved_frames_match_decimation(logger, savepoint, rng, tolerances, report):
     """
     Science camera decimated by 3 and frames saved every 3 iterations: the 4 frames taken in 12 iterations (at
-    iterations 0, 3, 6, 9: the camera takes a frame when i % 3 == 0) must be saved, with the iteration index of the
-    OPD they come from and the content of the independent FFT frame of that OPD.
+    iterations 2, 5, 8, 11: the camera takes a frame at the last iteration of every decimation window, (i + 1) % 3 == 0, the
+    Savepoint convention) must be saved, with the iteration index of the OPD they come from and the content of the
+    independent FFT frame of that OPD.
     """
     tol = tolerances['savepoint']
     n_it, dec = 12, 3
@@ -381,7 +379,7 @@ def test_saved_frames_match_decimation(logger, savepoint, rng, tolerances, repor
     for i in range(n_it):
         lp.propagate(True)
         sp.save([lp], i)
-    want = np.arange(0, n_it, dec)
+    want = np.arange(dec - 1, n_it, dec)
     with h5py.File(sp.file_path, 'r') as f:
         has = 'sci_frame_shortExp' in f['LightPath_0']
         n_saved = f['LightPath_0/sci_frame_shortExp/data'].shape[0] if has else 0

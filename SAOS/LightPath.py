@@ -273,10 +273,12 @@ class LightPath:
         # Generate the Science frame, if the time advances
         if (self.sci is not None) and (not interaction_matrix) and (temporal_tick):
             get_frame = False
-            # Check Science cam decimation
+            # Check Science cam decimation: the frame is taken at the last iteration of every window of `decimation` iterations
+            # (iterations decimation-1, 2 decimation-1, ...), the convention of Savepoint ((iteration + 1) % rate == 0); with
+            # decimation 1 every iteration
             if self.sci.decimation > 0:
                 # Then, we have to check the decimation
-                if (self.decimation_counter % self.sci.decimation) == 0:
+                if ((self.decimation_counter + 1) % self.sci.decimation) == 0:
                     get_frame = True
             else:
                 get_frame = True
