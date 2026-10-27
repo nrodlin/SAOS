@@ -181,6 +181,27 @@ def test_vk_series_exact_grid(est1, report, tolerances):
 
 
 @pytest.mark.fast
+def test_phase1_L0_lower_bound(logger, report, rng):
+    """
+    learn() bounds L0 to the validity of the von Karman series, L0 >= pi r_max / 3 (r_max: largest separation of the problem,
+    from the subaperture geometry of the 6x6 WFS of 3 m: ~3.5-4.3 m): started from L0 = 1 m, the fit starts above the bound
+    and returns L0 >= the bound.
+    """
+    lp = make_lp()
+    est = make_est(logger, [lp], [lp], [0.0])
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, 's.h5')
+        write_slopes(path, synth_slopes_px(lp, 100, 0.15, 10.0, rng))
+        np.random.seed(0)
+        est.learn({'r0': 0.15, 'L0': 1.0, 'fractionalCn2': [1.0]}, path, tmp, selSubaps=1.0, selSamples=1.0, max_iters=5, estimate_wind=False)
+    report.metric('L0 lower bound [m]', est.L0_min)
+    report.metric('fitted L0 [m]', est.L0)
+    report.check('bound pi r_max / 3 for r_max in [3, 4.5] m', est.L0_min, lo=np.pi * 3 / 3, hi=np.pi * 4.5 / 3)
+    report.check('fitted L0 - bound [m]', est.L0 - est.L0_min, lo=0)
+    report.assert_ok()
+
+
+@pytest.mark.fast
 def test_vk_series_convergent_region(est1, report, tolerances):
     """
     Control: where the series converges (x = pi r / L0 <= 1) it must equal the exact Bessel-K D(r); r in [1 cm, L0/pi],

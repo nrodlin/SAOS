@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 from ..LoggingHelper import get_logger
 
 R0_WAVELENGTH = 500e-9   # [m] reference wavelength of r0 (as in Atmosphere): the fitted r0 and covariances refer to it
+VK_SERIES_X_MAX = 3.0    # validity of the 10-term von Karman series (vk_structure_torch): x = pi r / L0 <= 3 (relative error <~ 1e-4);
+                         # learn() bounds L0 >= pi r_max / VK_SERIES_X_MAX, r_max the largest separation of the problem
 
 class LearnEstimator:
     """
@@ -516,6 +518,14 @@ class LearnEstimator:
         
         diff_stack = self.compute_coordinate_differences(A_row, a_row, A_row, a_row)
         diff_stack_torch = torch.as_tensor(diff_stack, dtype=dtype, device=self.device)
+        # Lower bound of L0 in the fit: the von Karman series is valid for pi r / L0 <= VK_SERIES_X_MAX
+        r_max = float(np.max(np.linalg.norm(diff_stack, axis=-1)))
+        L0_min = np.pi * r_max / VK_SERIES_X_MAX
+        self.L0_min = L0_min
+        if initial_L0 <= L0_min:
+            self.logger.warning(f'LearnEstimator::learn - initial L0 {initial_L0:.2f} m below the validity bound of the von Karman '
+                                f'series ({L0_min:.2f} m for separations up to {r_max:.2f} m): starting from {1.5 * L0_min:.2f} m.')
+            initial_L0 = 1.5 * L0_min
         
         # Compute theoretical covariance matrix
         t1 = time.time()        
@@ -561,7 +571,7 @@ class LearnEstimator:
         # Phase 1: Atmosphere & Noise Estimation
         self.logger.info("LearnEstimator::learn - Starting Phase 1: Atmosphere & Noise Estimation...")
         raw_r0 = torch.nn.Parameter(torch.log(torch.expm1(initial_r0_torch)))
-        raw_L0 = torch.nn.Parameter(torch.log(torch.expm1(initial_L0_torch)))
+        raw_L0 = torch.nn.Parameter(torch.log(torch.expm1(initial_L0_torch - L0_min)))     # L0 = L0_min + softplus(raw_L0)
         raw_cn2 = torch.nn.Parameter(torch.log(initial_fractionalCn2_torch + 1e-12))
 
         # Setup noise optimization if requested
@@ -588,7 +598,7 @@ class LearnEstimator:
             optimizer.zero_grad()
 
             r0 = torch.nn.functional.softplus(raw_r0) + 1e-6
-            L0 = torch.nn.functional.softplus(raw_L0) + 1e-6
+            L0 = torch.nn.functional.softplus(raw_L0) + L0_min
             fractionalCn2 = torch.nn.functional.softmax(raw_cn2, dim=0)
             
             if optimize_noise:
@@ -646,7 +656,7 @@ class LearnEstimator:
         # Compute and assign final optimized parameters
         with torch.no_grad():
             r0_opt = torch.nn.functional.softplus(raw_r0) + 1e-6
-            L0_opt = torch.nn.functional.softplus(raw_L0) + 1e-6
+            L0_opt = torch.nn.functional.softplus(raw_L0) + L0_min
             fractionalCn2_opt = torch.nn.functional.softmax(raw_cn2, dim=0)
             if optimize_noise:
                 noise_opt = torch.nn.functional.softplus(raw_noise) + 1e-8
@@ -655,6 +665,9 @@ class LearnEstimator:
 
         self.r0 = r0_opt.item()
         self.L0 = L0_opt.item()
+        if self.L0 < 1.05 * L0_min:
+            self.logger.warning(f'LearnEstimator::learn - fitted L0 = {self.L0:.2f} m is at the lower bound {L0_min:.2f} m '
+                                f'(validity of the von Karman series for separations up to {r_max:.2f} m): L0 is not constrained by the data.')
         self.fractionalCn2 = fractionalCn2_opt.detach().cpu().numpy()
         if optimize_noise:
             self.noise_var = noise_opt.detach().cpu().numpy()
