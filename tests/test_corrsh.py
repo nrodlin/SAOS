@@ -585,6 +585,22 @@ def test_unit_in_rad_constructs(logger, report):
     report.assert_ok()
 
 
+def test_unit_in_rad_reference_slopes(logger, report):
+    """
+    With unit_in_rad=True the reference slopes of initialize_wfs are in rad, as the measurements: a null phase measured against
+    them gives zero slopes, and a 0.5 px tilt gives the px/rad ratio of the same tilt measured in px (unit_in_rad=False).
+    """
+    wfs, tel, src = make_csh(logger, unit_in_rad=True)
+    wfs_px, _, _ = make_csh(logger)
+    ref, ref_px = wfs.initialize_wfs(tel, src), wfs_px.initialize_wfs(tel, src)
+    sx0, sy0 = measure(wfs, tel, src, ref, np.zeros((RES, RES)))
+    report.check('null phase: max |slope| [rad]', max(np.abs(sx0).max(), np.abs(sy0).max()), 0.0, atol=1e-9)
+    sx, _ = measure(wfs, tel, src, ref, tilt_phase(0.5, 'x'))
+    sx_px, _ = measure(wfs_px, tel, src, ref_px, tilt_phase(0.5, 'x'))
+    report.check('0.5 px tilt: slope [rad] x slopes_units / slope [px]', sx.mean() * wfs.slopes_units / sx_px.mean(), 1.0, rtol=1e-6)
+    report.assert_ok()
+
+
 def test_photons_scale_with_fov_squared(logger, report, tolerances):
     """
     The photons collected scale with the sky area observed: (fieldOfView / src.fov)^2 times the flux of the source (src.fov

@@ -816,7 +816,8 @@ class CorrelatingShackHartmann:
         if reference_slopes is None:
             signal_2D                           = np.concatenate((sx, sy)) - self.geometric_references
         else:
-            signal_2D                           = np.concatenate((sx, sy)) - reference_slopes
+            # The reference slopes come from initialize_wfs in output units (rad with unit_in_rad): back to px before subtracting
+            signal_2D                           = np.concatenate((sx, sy)) - reference_slopes*self.slopes_units
 
         signal_2D[~self.valid_slopes_maps]  = 0
         
