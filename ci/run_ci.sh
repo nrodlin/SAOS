@@ -27,6 +27,7 @@ mkdir -p "$OUT"
 export SAOS_CI_OUT="$OUT" SAOS_CI_TIER="$TIER"
 export OMP_NUM_THREADS=${SAOS_CI_THREADS:-4} MKL_NUM_THREADS=${SAOS_CI_THREADS:-4} OPENBLAS_NUM_THREADS=${SAOS_CI_THREADS:-4}
 export MPLBACKEND=Agg PYTHONDONTWRITEBYTECODE=1
+export PYTHON_GIL=${PYTHON_GIL:-0}                  # free-threaded run as documented (OpenCV does not declare free-threading support)
 
 echo "SAOS validation, tier $TIER ($MARK), commit $SHA -> $OUT"
 cd "$REPO"

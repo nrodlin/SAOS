@@ -31,26 +31,26 @@ jobs:
     runs-on: [self-hosted, saos, gpu]
     timeout-minutes: 100
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: ci/run_ci.sh nightly -q
   fast:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tier == 'fast')
     runs-on: [self-hosted, saos]
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: ci/run_ci.sh fast -q
   nightly:
     if: github.event_name == 'workflow_dispatch' && inputs.tier == 'nightly'
     runs-on: [self-hosted, saos, gpu]
     timeout-minutes: 100
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: ci/run_ci.sh nightly -q
   heavy:
     if: github.event_name == 'workflow_dispatch' && inputs.tier == 'heavy'
     runs-on: [self-hosted, saos, gpu]
     timeout-minutes: 130
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: ci/run_ci.sh heavy -q
