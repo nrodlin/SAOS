@@ -83,7 +83,7 @@ The validation suite is described in `ci/README.md` (`ci/run_ci.sh fast`, or `py
 > **Free-threaded builds and wheels:** use `--prefer-binary`. On a free-threaded Python the newest release of several
 > dependencies is often published only as source (e.g. scipy 1.18, matplotlib 3.11.2, pyzmq 27.2 at the time of writing),
 > and pip would try to compile it (scipy then fails without a Fortran compiler). `--prefer-binary` picks the newest version
-> with a free-threaded wheel instead (checked on 2026-10-27 for 3.13t: numpy 2.4, scipy 1.17.1, matplotlib 3.11.1,
+> with a free-threaded wheel instead (checked for 3.13t: numpy 2.4, scipy 1.17.1, matplotlib 3.11.1,
 > pyzmq 27.1.0, torch 2.12).
 >
 > **Packages built from source:** `opencv-contrib-python` and `h5py` have no free-threaded wheels, so pip compiles them.

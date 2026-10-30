@@ -71,7 +71,7 @@ $$
 - **Tier:** fast.
 - **What it checks:** a fixed high-order residual phase (0.3 rad rms) makes the subaperture images differ so the pseudo-reference (subaperture `pseudoref_index`) is a genuinely different image; that subaperture is excluded. A global tilt scans 41 shifts over $[-R,R]$, $R=4"/0.4=10$ px (80 % of the half window), along x and then y. Linearity: RMS of the mean slopes about a fitted line $gs+b$, relative to $R$. Cross coupling: maximum over shifts of the RMS over subapertures of the other-axis slopes, relative to $R$. The gain, offset and worst-subaperture errors are recorded as information. An independent least-squares registration of the images (shifts up to 3 px) is also recorded to separate image from estimator errors.
 - **Theory / assumptions:** ideal response is the unit-gain line $s=\text{shift}$; the gain is absorbed by the interaction matrix so only departure from a line is penalised. Correlation-peak estimator (Michau, Rousset & Fontanella 1993; Löfdahl 2010) on extended scenes.
-- **Tolerance:** `linearity.lin_frac` = 0.02 and `linearity.cross_frac` = 0.03 of full scale, the owner's specification of 2026-10-27 (the yaml notes 4.25" fails cross coupling only at the window-edge point; `use_brightest` 16 was tried and was worse).
+- **Tolerance:** `linearity.lin_frac` = 0.02 and `linearity.cross_frac` = 0.03 of full scale, the specified linearity and cross-coupling bounds (cross coupling is only exceeded at the window-edge point of 4.25").
 - **References:** Michau, Rousset & Fontanella 1993; Löfdahl 2010, A&A 524:A90.
 
 ## `test_reference_averaged`

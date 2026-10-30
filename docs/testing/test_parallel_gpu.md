@@ -27,7 +27,7 @@ The `Multi` fixture builds a telescope (48 px, $D=0.6$ m), a 3-layer atmosphere 
 - **Tier:** nightly.
 - **What it checks:** four light paths sharing one WFS are propagated with `n_jobs` = 1 and 8; a reproducible simulator should give the same noisy slopes for the same path regardless of scheduling, and two runs with `n_jobs` = 8 should coincide. The maximum slope difference is recorded.
 - **Theory / assumptions:** reproducibility with a shared random state; the test fails if the order of noise draws from the shared Detector random state depends on thread scheduling.
-- **Tolerance:** `threads.exact` = 0.0 (no `known_issue` marker in the code).
+- **Tolerance:** `threads.exact` = 0.0.
 - **References:** none.
 
 ## `test_thread_count_inside_threaded_lightpaths_within_cpu_count`
@@ -73,7 +73,7 @@ The `Multi` fixture builds a telescope (48 px, $D=0.6$ m), a 3-layer atmosphere 
 ## `test_vram_peak_within_budget`
 - **Module:** whole GPU path (`ShackHartmann`, `ScienceCam`, `DeformableMirror`, `Atmosphere`, `LightPath`) on CUDA.
 - **Tier:** nightly + gpu.
-- **What it checks:** for a fixed small configuration (64 px pupil, $8\times8$ SH with 2x oversampled 16 px windows, $9\times9$ DM, 64 px science camera, 5 steps) the peak `torch.cuda.max_memory_allocated` above the baseline is (i) at least the analytic size of the dominant tensor, the complex64 field cube of the SH, and (ii) below the recorded budget times a headroom (regression guard against a leak or per-step copy). The final allocated memory is recorded.
+- **What it checks:** for a fixed small configuration (64 px pupil, $8\times8$ SH with 2x oversampled 16 px windows, $9\times9$ DM, 64 px science camera, 5 steps) the peak `torch.cuda.max_memory_allocated` above the baseline is (i) at least the analytic size of the dominant tensor, the complex64 field cube of the SH, and (ii) below the recorded budget times a headroom (guard against a leak or per-step copy). The final allocated memory is recorded.
 - **Theory / assumptions:** analytic size of the SH field cube,
 
 $$
@@ -81,5 +81,5 @@ V_{cube}=n_{subap}^2\,n_{FFT}^2\times 8\ \text{B},\qquad n_{FFT}=\mathrm{round}\
 $$
 
 (8 bytes per complex64 element); the peak must be at least this.
-- **Tolerance:** `vram.budget_mib` = 8.7 MiB (re-recorded 2026-10-27 after the WFS change that samples the pupil at `npix_pupil > npix_lenslet` to remove spot aliasing, #54; peak was 8.62 MiB, previously 6.69 MiB, GTX 1660) times `vram.headroom` = 1.25.
+- **Tolerance:** `vram.budget_mib` = 8.7 MiB (measured peak 8.62 MiB, GTX 1660) times `vram.headroom` = 1.25.
 - **References:** none.

@@ -40,9 +40,6 @@ shifted so that zero displacement is at pixel `npix_subap//2`. If $S(\mathbf{x})
 
 The peak position is the thresholded CoG of the correlation image, with the same weights as in `ShackHartmann`, $w_p = \max(C_p-T,0)$, but with $T$ the $n_b$-th largest value (default `use_brightest` $=9$), so the $n_b$-th pixel has zero weight and 8 pixels contribute. The slopes are $(\bar{x}-\bar{x}_{ref})/u$ in px or rad (for `unit_in_rad=True`, $u$ is calibrated like in `ShackHartmann` with tip/tilt ramps measured against the unaberrated pseudo-reference and reference slopes).
 
-!!! note "Known gain below 1"
-    The thresholded CoG over a few pixels around the correlation peak is not an unbiased estimator of the peak position: it is attracted towards the centre of the selected pixels and the measured shift is a fraction of the true one. Measured with this code the gain is between about 0.75 and 0.98 depending on the amplitude of the shift (it is closer to 1 for small amplitudes and falls for larger ones). The `unit_in_rad` calibration fits a single gain over its calibration amplitudes, so the residual gain at other amplitudes is not corrected. In closed loop the loop gain is scaled by this factor. The NGS `ShackHartmann` with all pixels does not have this issue.
-
 ### Limitations
 
 - Isoplanatic patches are blended, not propagated through a full volume: the number of sub-directions limits the angular resolution of the anisoplanatism.

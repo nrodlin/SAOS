@@ -52,7 +52,7 @@ w_p = \max(I_p - T,\,0), \qquad
 \bar{y} = \frac{\sum_p w_p\,y_p}{\sum_p w_p},
 $$
 
-where $T$ is the $(n_b+1)$-th largest intensity of the subaperture and $n_b$ = `use_brightest` (default 50). A pixel enters or leaves the group with zero weight, so the response is continuous; a hard selection of the $n_b$ brightest pixels jumps whenever ties at the threshold break (for instance around zero tilt, for a symmetric spot). With $n_b$ equal to the number of window pixels the plain CoG is used (recommended for linearity tests). Non-finite centroids (empty weights) are set to 0 with a warning. The thresholded CoG is biased towards the window centre for large displacements and by truncation of the wings; the response is linear only for small shifts compared with the spot size.
+where $T$ is the $(n_b+1)$-th largest intensity of the subaperture and $n_b$ = `use_brightest` (default 50). A pixel enters or leaves the group with zero weight, so the response is continuous, including around zero tilt for a symmetric spot. With $n_b$ equal to the number of window pixels the plain CoG is used (recommended for linearity tests). Non-finite centroids (empty weights) are set to 0 with a warning. The thresholded CoG is biased towards the window centre for large displacements and by truncation of the wings; the response is linear only for small shifts compared with the spot size.
 
 ### Reference slopes and units
 

@@ -60,7 +60,7 @@ $$C(r) = \int_0^\infty 2\pi f\,\Phi(f)\,J_0(2\pi f r)\,\mathrm{d}f .$$
 - **Module:** `PhaseScreenVonKarman.add_row`.
 - **Tier:** fast.
 - **What it checks:** $D(r)$ at $r = n_x/8, n_x/4, n_x/2$ px along ($y$) and across ($x$) the extrusion, for a 32 px (2 m) screen, averaged over 16 independent screens of 40000 rows each (sampled every $n_x$ rows), against $D_{vK}$. Per-lag standard errors of the mean are recorded.
-- **Theory / assumptions:** regression intent: an earlier 4000-row test hinted at a $-4\,\%$ deficit at $n_x/2$ (about $3\sigma$); this ensemble (standard error about 0.009) resolves whether the extrusion truncates low frequencies.
+- **Theory / assumptions:** the ensemble (standard error about 0.009) resolves whether the extrusion truncates low frequencies.
 - **Tolerance:** `atmosphere.extruded_lowfreq.atol` = 0.031 = $3.5\times$ the largest standard error of the mean with 16 screens ($0.035/\sqrt{16}$ = 0.0088, $D_x$ at $n_x/2$); measured means 0.999 to 1.008.
 - **References:** none specific.
 
@@ -107,7 +107,7 @@ $$r_{0,i} = r_0\,(\cos z)^{3/5} f_i^{-3/5},\qquad \sum_i r_{0,i}^{-5/3} = \left(
 ## `test_footprint_displacement_direction`
 - **Module:** `Atmosphere.getOPD` / `get_pupil_footprint` (off-axis footprint on a layer).
 - **Tier:** fast. Parametrised over azimuth `az` = 0, 90, 180, 270 deg.
-- **What it checks:** a source at an angle giving $h\tan\theta = 0.2$ m at a 10 km layer ($\theta\approx 4.1$ arcsec) samples the layer 0.2 m away along its azimuth, $(\Delta_{col},\Delta_{row}) = d(\cos az,\sin az)$. Measured on a prescribed linear phase ramp $\varphi = g\,x$ (or $g\,y$, $g = 0.05$ rad/m): the mean OPD difference between the off-axis and on-axis source gives the displacement independently of SAOS's pixel policy. The layer is made exactly $2D$ wide by tuning the field of view. Regression intent from the docstring: 0.2 m is two 0.1 m pixels, but the arctan and the 206265 conversion leave 1.99999.. px, so the footprint must be rounded and not truncated to one pixel.
+- **What it checks:** a source at an angle giving $h\tan\theta = 0.2$ m at a 10 km layer ($\theta\approx 4.1$ arcsec) samples the layer 0.2 m away along its azimuth, $(\Delta_{col},\Delta_{row}) = d(\cos az,\sin az)$. Measured on a prescribed linear phase ramp $\varphi = g\,x$ (or $g\,y$, $g = 0.05$ rad/m): the mean OPD difference between the off-axis and on-axis source gives the displacement independently of SAOS's pixel policy. The layer is made exactly $2D$ wide by tuning the field of view. The displacement 0.2 m is two 0.1 m pixels, so the footprint is rounded to the nearest layer pixel.
 - **Theory / assumptions:** frozen layer at altitude $h$ is seen along the line of sight displaced by $h\tan\theta$; a linear ramp makes the OPD difference proportional to the displacement, $\Delta\mathrm{OPD}\cdot 2\pi/\lambda_{atm} = g\,\Delta$.
 - **Tolerance:** `atmosphere.footprint.atol_m` = $10^{-6}$ m (float precision of the OPD difference, about $10^{-5}$ px).
 - **References:** none.
@@ -115,7 +115,7 @@ $$r_{0,i} = r_0\,(\cos z)^{3/5} f_i^{-3/5},\qquad \sum_i r_{0,i}^{-5/3} = \left(
 ## `test_footprint_displacement_fractional`
 - **Module:** `Atmosphere.getOPD` / `get_pupil_footprint`.
 - **Tier:** fast. Parametrised over $(d, az)$ = (0.16, 0), (0.09, 90), (0.04, 37), (0.15, 215), (0.16, 127), (0.09, 300) (metres, degrees).
-- **What it checks:** fractional footprint offsets (0.4 to 1.6 layer pixels of 0.1 m, no component within 0.05 px of a half pixel) follow the integer-pixel model adopted on 2026-10-27, $\mathrm{round}(d\cos az/p)\,p$ and $\mathrm{round}(d\sin az/p)\,p$ with $p = 0.1$ m, exactly; and lie within half a pixel of the physical $h\tan\theta$ (unbiased rounding). Same linear-ramp measurement as above.
+- **What it checks:** fractional footprint offsets (0.4 to 1.6 layer pixels of 0.1 m, no component within 0.05 px of a half pixel) follow the integer-pixel model, $\mathrm{round}(d\cos az/p)\,p$ and $\mathrm{round}(d\sin az/p)\,p$ with $p = 0.1$ m, exactly; and lie within half a pixel of the physical $h\tan\theta$ (unbiased rounding). Same linear-ramp measurement as above.
 - **Tolerance:** `atmosphere.footprint.atol_m` = $10^{-6}$ m for the model comparison; $|\Delta-h\tan\theta|/p\le 0.5+10^{-6}$ for the physical comparison.
 - **References:** none (SAOS design decision documented in the test).
 

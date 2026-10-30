@@ -26,8 +26,8 @@ $$
 - **Module:** `LearnEstimator.vk_structure_torch`, `prepare_vk_constants_torch`.
 - **Tier:** fast.
 - **What it checks:** the 10-term series for the von Karman structure function against the exact Bessel-K $D(r)=2[C(0)-C(r)]$ on the EST range of separations $r\in[1\,\mathrm{cm},8.5\,\mathrm{m}]$ (60 log-spaced points; 8.5 m = metapupil at 15 km with a 60" field), for $L_0\in\{10,25,50\}$ m, $r_0=0.15$ m. The value at $r=8$ m, $L_0=5$ m, outside the range of use, is recorded for information.
-- **Theory / assumptions:** series is exact in the range of use (owner's decision 2026-10-27); it is invalid for $L_0\lesssim7$ m with $r\ge6$ m ($x=\pi r/L_0>3$).
-- **Tolerance:** `vk_series.use_rtol` = $10^{-4}$ (owner's accepted accuracy; measured $6.1\times10^{-5}$ at $L_0=10$ m, $r=8.5$ m; $\le10^{-8}$ for $L_0\ge15$ m).
+- **Theory / assumptions:** series is exact in the range of use; it is invalid for $L_0\lesssim7$ m with $r\ge6$ m ($x=\pi r/L_0>3$).
+- **Tolerance:** `vk_series.use_rtol` = $10^{-4}$ (measured $6.1\times10^{-5}$ at $L_0=10$ m, $r=8.5$ m; $\le10^{-8}$ for $L_0\ge15$ m).
 - **References:** von Karman covariance as in Roddier, "Adaptive Optics in Astronomy" (chapter on atmospheric turbulence); not further specified in the code.
 
 ## `test_phase1_L0_lower_bound`

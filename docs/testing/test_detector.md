@@ -31,7 +31,7 @@ Covers `SAOS.Detector` (`integrate(frame, photons, stream)`, `register_stream`):
 ## `test_readout_noise_dark_frame`
 - **Module:** `Detector.integrate` (readout noise, clipping at 0).
 - **Tier:** fast.
-- **What it checks:** with no signal, $\sigma_{RON}$ = 5 e- and quantisation 0.01 e-/DN (fine, so that quantisation is negligible), the frame follows a zero-mean Gaussian clipped at 0: mean $\sigma/\sqrt{2\pi}$ and variance $\sigma^2(1/2-1/(2\pi))$. Records the SAOS convention (owner's decision 2026-10-27, DET-RON-CLIP accepted): no bias pedestal and unsigned output, so negative excursions are clipped.
+- **What it checks:** with no signal, $\sigma_{RON}$ = 5 e- and quantisation 0.01 e-/DN (fine, so that quantisation is negligible), the frame follows a zero-mean Gaussian clipped at 0: mean $\sigma/\sqrt{2\pi}$ and variance $\sigma^2(1/2-1/(2\pi))$. Records the SAOS convention: no bias pedestal and unsigned output, so negative excursions are clipped.
 - **Theory / assumptions:** for $x=\max(0,\mathcal N(0,\sigma^2))$:
 
 $$\mathrm{E}[x] = \frac{\sigma}{\sqrt{2\pi}},\qquad \mathrm{Var}[x] = \sigma^2\left(\frac12-\frac1{2\pi}\right).$$

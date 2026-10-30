@@ -54,7 +54,7 @@ where the $C$ are blocks of the covariance matrix $C_\phi(|\mathbf{r}_a-\mathbf{
 - the `n_columns` lines adjacent to the new one (all $n$ pixels each; SAOS uses `n_columns=2`, Assémat et al. report that two are adequate);
 - if `far_rows=True` (default) sparse far lines at distances (in lines from the screen edge) $d = \max(4, 2\,n_{col}), 2d, 4d, \dots < n$, each sampled every $\max(2, d/2)$ pixels across (edges included), plus the farthest line $n-1$. This follows the idea of the Fried & Clark (2008) stencil: with only adjacent lines the large scales along the direction of motion are lost (tilt of about 0.7 of the theory along it).
 
-For motion in $-$row (new row at the top) the screen is used as is; for $+$row it is flipped, so that the same $A$, $B$ serve both signs (the covariance is stationary and isotropic). The same holds for the columns. Because the new line is predicted from a finite stencil, the conditional statistics are approximate: the spatial structure function of the extended screen is only approximately the theoretical one. Screens saved without far rows (A matrices of the old size) are loaded with `far_rows=False`.
+For motion in $-$row (new row at the top) the screen is used as is; for $+$row it is flipped, so that the same $A$, $B$ serve both signs (the covariance is stationary and isotropic). The same holds for the columns. Because the new line is predicted from a finite stencil, the conditional statistics are approximate: the spatial structure function of the extended screen is only approximately the theoretical one. Screens saved without far rows are loaded with `far_rows=False`.
 
 ### Cost and limitations
 

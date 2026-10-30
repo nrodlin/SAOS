@@ -32,7 +32,7 @@ Covers `PhaseScreenVonKarman` (initial and extruded screens), `Atmosphere` (mult
 - **Module:** `Atmosphere` (3 layers at 0/5/12 km, 60/30/10 % Cn$^2$, total $r_0$ = 0.12 m, winds 0/90/0 deg), `Atmosphere.updateLayer`, `getOPD`.
 - **Tier:** nightly.
 - **What it checks:** the same Z2 to Z11 variance ratios and whitened covariance as above for the on-axis OPD, after burn-in, with 1000 samples from 4 independent atmospheres spaced 1000 rows (19 m, decorrelated beyond $L_0$).
-- **Theory / assumptions:** a sum of independent layers with $\sum r_{0,i}^{-5/3} = r_0^{-5/3}$ and a common $L_0$ has the von Kármán covariance of $r_0$. Regression/known behaviour: the measured mean ratio is about 0.96 (Z4 about 0.78, Z10 about 0.88), so the tolerances were set from the observed spread and are not claimed to be $\pm0$.
+- **Theory / assumptions:** a sum of independent layers with $\sum r_{0,i}^{-5/3} = r_0^{-5/3}$ and a common $L_0$ has the von Kármán covariance of $r_0$. The measured mean ratio is about 0.96 (Z4 about 0.78, Z10 about 0.88), so the tolerances are set from the observed spread.
 - **Tolerance:** `atmosphere_t2.zernike.atmosphere`: `mode` 0.16, `mean` 0.033, `offdiag` 0.14, $n$ = 1000.
 - **References:** Noll 1976, JOSA 66:207.
 

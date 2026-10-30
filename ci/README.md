@@ -17,8 +17,7 @@ Validation section of the docs (`docs/testing/`).
 
 Every test compares SAOS with an independent physical or mathematical expectation. Tolerances only cover the statistical
 uncertainty of the estimator (about 3.5 sigma, measured over seeds) or the numerical precision of the reference; they
-never absorb a measured SAOS discrepancy. Known SAOS bugs are labelled with `citools.known_issue(ID, description,
-location)`: those tests fail until the bug is fixed (no xfail), and the report groups the failures by issue.
+never absorb a measured SAOS discrepancy. A failing test is reported with its measured value and tolerance, and the report groups the failures.
 
 ## Running
 

@@ -55,7 +55,7 @@ $$
 ## `test_strehl_in_field_convention`
 - **Module:** `Savepoint.compute_stats` (`strehl`).
 - **Tier:** fast.
-- **What it checks:** documents the convention (owner's decision 2026-10-27) that the saved Strehl is the measured SR in the camera field. For a 1 rad rms high-order phase and fields of 32 $\lambda/D$ and 6 $\lambda/D$ the saved value must equal $SR_{peak}\,f_0/f$. Independent terms: $SR_{peak}$ is the maximum of the aberrated PSF sampled 16x finer (unit ideal peak); $f/f_0$ from the independent frames' sums. The exact $|\langle e^{i\phi}\rangle|^2$ is recorded.
+- **What it checks:** documents the convention that the saved Strehl is the measured SR in the camera field. For a 1 rad rms high-order phase and fields of 32 $\lambda/D$ and 6 $\lambda/D$ the saved value must equal $SR_{peak}\,f_0/f$. Independent terms: $SR_{peak}$ is the maximum of the aberrated PSF sampled 16x finer (unit ideal peak); $f/f_0$ from the independent frames' sums. The exact $|\langle e^{i\phi}\rangle|^2$ is recorded.
 - **Theory / assumptions:**
 
 $$
@@ -69,7 +69,7 @@ with $f$ and $f_0$ the fractions of the total energy inside the field for the ab
 ## `test_contrast_and_mfgs`
 - **Module:** `Savepoint.compute_stats` for solar frames (`contrast`, `MFGS`).
 - **Tier:** fast.
-- **What it checks:** contrast $=\sigma/\mu$: $1+a\sin(2\pi m x/N)$ over whole periods gives $a/\sqrt2$; a constant image gives 0. MFGS (mean fraction of gradient similarity) of a deterministic $12\times12$ texture (smooth waves, a hot pixel, a pseudo-random pattern at amplitudes 0, 0.05, 0.3) equals the independent loop implementation `mfgs_reference`, and both contrast and MFGS are invariant to image scale (scales 1, $10^{-6}$, $10^6$, as frames are saved in photons or DN). Regression: the median-filter border is extended symmetrically (zero padding biased border medians low, SAV-MFGS-BORDER).
+- **What it checks:** contrast $=\sigma/\mu$: $1+a\sin(2\pi m x/N)$ over whole periods gives $a/\sqrt2$; a constant image gives 0. MFGS (mean fraction of gradient similarity) of a deterministic $12\times12$ texture (smooth waves, a hot pixel, a pseudo-random pattern at amplitudes 0, 0.05, 0.3) equals the independent loop implementation `mfgs_reference`, and both contrast and MFGS are invariant to image scale (scales 1, $10^{-6}$, $10^6$, as frames are saved in photons or DN). The median-filter border is extended symmetrically.
 - **Theory / assumptions:** MFGS definition as implemented in the reference: image divided by its mean; $M$ = $3\times3$ median filter (symmetric border); Sobel-like gradient with kernel $[[-3,0,3],[-10,0,10],[-3,0,3]]$ (Scharr) and its transpose, magnitude $g=\sqrt{g_x^2+g_y^2}$;
 
 $$
@@ -77,7 +77,7 @@ $$
 $$
 
 - **Tolerance:** contrast $a/\sqrt2$ and constant image: `rtol` = $10^{-12}$ / `atol` = $10^{-12}$; MFGS and contrast vs reference: `rtol` = $10^{-9}$ (hard-coded).
-- **References:** none specific (the metric is the one used by the owner's solar-image code; no citation in the test).
+- **References:** none specific (no citation in the test).
 
 ## `test_mfgs_constant_image`
 - **Module:** `Savepoint.compute_stats` (`MFGS`).

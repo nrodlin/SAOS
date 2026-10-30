@@ -31,11 +31,11 @@ see `ci/README.md` for the nightly timer, the git hooks and the GitHub workflow.
 
 Tolerances (`tests/tolerances/*.yaml`) only cover the statistical uncertainty of the estimator (about 3.5 sigma, measured
 over several seed sets) or the numerical precision of the reference. They never absorb a measured SAOS discrepancy: a
-systematic offset is a bug to fix or an explicit, documented convention.
+systematic offset is either corrected or an explicit, documented convention.
 
 ## Conventions and common theory
 
-Conventions used by every test (from `tests/citools.py`): `report.check(name, value, expected, rtol, atol, lo, hi)` passes when $|v-e| \le \mathrm{atol} + \mathrm{rtol}\,|e|$ (expected given) or $\mathrm{lo}\le v\le \mathrm{hi}$ (bounds given), element-wise for arrays; `report.assert_ok()` fails the test with all out-of-tolerance metrics after every metric has been recorded. `report.metric` records a value with no pass/fail criterion. Statistical tolerances in the YAML files are, unless stated otherwise, $3.5\sigma$ of the estimator measured over several seeds. Phase screens are in rad at 500 nm; OPD in m, and $\varphi = 2\pi\,\mathrm{OPD}/500\,\mathrm{nm}$. The tests marked `known_issue` are not used in these files (the helper is imported in some of them, but no test carries the mark).
+Conventions used by every test (from `tests/citools.py`): `report.check(name, value, expected, rtol, atol, lo, hi)` passes when $|v-e| \le \mathrm{atol} + \mathrm{rtol}\,|e|$ (expected given) or $\mathrm{lo}\le v\le \mathrm{hi}$ (bounds given), element-wise for arrays; `report.assert_ok()` fails the test with all out-of-tolerance metrics after every metric has been recorded. `report.metric` records a value with no pass/fail criterion. Statistical tolerances in the YAML files are, unless stated otherwise, $3.5\sigma$ of the estimator measured over several seeds. Phase screens are in rad at 500 nm; OPD in m, and $\varphi = 2\pi\,\mathrm{OPD}/500\,\mathrm{nm}$.
 
 Analytic references (`tests/theory.py`, independent of SAOS) used by the atmosphere tests:
 

@@ -47,7 +47,7 @@ Helper estimator used for image shifts: sub-pixel peak position by 16x (or 8x) F
 ## `test_localseeing_input_not_modified_by_interaction_matrix_propagate`
 - **Module:** `LocalSeeing.localSeeing_input`, `LightPath.propagate(interaction_matrix=True)`.
 - **Tier:** nightly.
-- **What it checks:** the user's OPD sequence is data: after a normal step and an interaction-matrix step (which suppresses the path disturbances) the stored input is unchanged and still equals the file, and the next normal step injects file frame 0. Regression intent: the IM propagate must not zero or overwrite the user's array in place.
+- **What it checks:** the user's OPD sequence is data: after a normal step and an interaction-matrix step (which suppresses the path disturbances) the stored input is unchanged and still equals the file, and the next normal step injects file frame 0. The interaction-matrix propagate does not zero or overwrite the user's array in place.
 - **Tolerance:** exact (0).
 - **References:** none.
 
@@ -73,7 +73,7 @@ $$A(r) = \tfrac{w}{2}\sqrt{r^2-\tfrac{w^2}{4}} + r^2\arcsin\!\frac{w}{2r},$$
 ## `test_spider_single_arm_is_one_half_strip`
 - **Module:** `Telescope.apply_spiders`.
 - **Tier:** nightly. Parametrised over `angle` = 30, 0, 357 deg.
-- **What it checks:** one arm removes a single connected half-strip beyond the central obstruction (count of connected components = 1). Known-issue intent from the docstring: an arm whose direction lies just below a multiple of 90 deg (357 deg) is split by the quadrant clipping into two pieces on opposite sides of the centre (total area unchanged but geometry wrong), so the 357 deg case is a regression test for that behaviour.
+- **What it checks:** one arm removes a single connected half-strip beyond the central obstruction (count of connected components = 1). An arm whose direction lies just below a multiple of 90 deg (357 deg) is also a single piece.
 - **Tolerance:** exact (one component).
 - **References:** none.
 
@@ -109,7 +109,7 @@ $$A(r) = \tfrac{w}{2}\sqrt{r^2-\tfrac{w^2}{4}} + r^2\arcsin\!\frac{w}{2r},$$
 ## `test_exit_after_exception_with_logger_none`
 - **Module:** `Telescope`, `Source`, `LightPath`, `LoggingHelper` with `logger=None` (shared logging queue and its thread at interpreter exit).
 - **Tier:** nightly. Parametrised over `name` = `telescope`, `lightpath_source`, `logginghelper`.
-- **What it checks:** a subprocess that creates the objects and then raises `RuntimeError` exits by itself with status 1 and prints the traceback within the timeout (a hang is killed and counts as failure). Regression for the known issue of a futex hang at exit from the `LoggingHelper.__del__` thread join.
+- **What it checks:** a subprocess that creates the objects and then raises `RuntimeError` exits by itself with status 1 and prints the traceback within the timeout (a hang is killed and counts as failure).
 - **Tolerance:** `perturbations.logging.exit_timeout_s` = 10 s.
 - **References:** none.
 
@@ -123,6 +123,6 @@ $$A(r) = \tfrac{w}{2}\sqrt{r^2-\tfrac{w^2}{4}} + r^2\arcsin\!\frac{w}{2r},$$
 ## `test_lgs_source_not_implemented`
 - **Module:** `Source.__init__`.
 - **Tier:** nightly. Parametrised over `altitude` = 90 km, `Na_profile`, `FWHM_spot_up` = 1.0, `laser_coordinates` = [1.0, 0.0].
-- **What it checks:** any laser-guide-star parameter raises `NotImplementedError` (message matching "Laser guide stars"), never a silent natural guide star. Reflects the removal of the LGS code (2026-10-27).
+- **What it checks:** any laser-guide-star parameter raises `NotImplementedError` (message matching "Laser guide stars"), never a silent natural guide star. Laser guide stars are not implemented.
 - **Tolerance:** exception raised (no numerical criterion).
 - **References:** none.

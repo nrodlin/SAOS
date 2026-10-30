@@ -38,7 +38,7 @@ $$\frac{1}{\left(\sum_{i}c^{\,i^2}\right)^2}\approx0.1626\ \ (c=0.6),$$
 ## `test_regression_poke_superposition_and_scaling`
 - **Module:** `DeformableMirror.updateDMShape`, `influence_functions`.
 - **Tier:** fast.
-- **What it checks:** REGRESSION (SAOS internal consistency, not physics): OPD$(c_1+c_2)$ = OPD$(c_1)$ + OPD$(c_2)$; OPD$(3c)$ = 3 OPD$(c)$; a full $n_{act}^2$ command equals the same command restricted to the valid actuators; a single poke equals the stored influence-function column times the command.
+- **What it checks:** internal consistency (not a physics check): OPD$(c_1+c_2)$ = OPD$(c_1)$ + OPD$(c_2)$; OPD$(3c)$ = 3 OPD$(c)$; a full $n_{act}^2$ command equals the same command restricted to the valid actuators; a single poke equals the stored influence-function column times the command.
 - **Tolerance:** `dm.linearity.rel` = $10^{-10}$.
 - **References:** none.
 
@@ -59,7 +59,7 @@ $$\frac{1}{\left(\sum_{i}c^{\,i^2}\right)^2}\approx0.1626\ \ (c=0.6),$$
 ## `test_altitude_dm_footprint_physical_displacement`
 - **Module:** `DeformableMirror.get_dm_opd` for an altitude DM (15x15 actuators at 10 km, 60 arcsec field, metapupil $D_{fov}=D+2h\tan(\mathrm{fov}/2)$).
 - **Tier:** fast. Parametrised over (azimuth deg, displacement in grid steps) = (0, 0.7), (0, 1.6), (90, 2.3), (180, 1.3), (270, 0.8).
-- **What it checks:** a source at field angle $\theta$ and azimuth $az$ sees the DM through the pupil displaced by $\delta=h\tan\theta\,(\cos az,\sin az)$. For the ramp command $c=g(x_{act}+0.7\,y_{act})$ the change of the OPD relative to the on-axis one equals $W(\mathbf x_p+\boldsymbol\delta_r)-W(\mathbf x_p)$ from the independent model, where $\boldsymbol\delta_r$ is $\delta$ rounded to the nearest grid step $D/N$ (integer-pixel model, owner's decision 2026-10-27, the same as the atmosphere footprint). Fractional displacements 0.7 to 2.3 steps are chosen away from 0.5 so rounding is unambiguous and truncation would give 0 for 0.7 to 0.8 steps (regression intent). Criterion: relative $L_2$ error of the change over the pupil.
+- **What it checks:** a source at field angle $\theta$ and azimuth $az$ sees the DM through the pupil displaced by $\delta=h\tan\theta\,(\cos az,\sin az)$. For the ramp command $c=g(x_{act}+0.7\,y_{act})$ the change of the OPD relative to the on-axis one equals $W(\mathbf x_p+\boldsymbol\delta_r)-W(\mathbf x_p)$ from the independent model, where $\boldsymbol\delta_r$ is $\delta$ rounded to the nearest grid step $D/N$ (integer-pixel model, the same as the atmosphere footprint). Fractional displacements 0.7 to 2.3 steps are chosen away from 0.5 so rounding is unambiguous. Criterion: relative $L_2$ error of the change over the pupil.
 - **Theory / assumptions:** small field, line of sight at altitude $h$ displaced by $h\tan\theta$; azimuth 0 along +columns, 90 along +rows.
 - **Tolerance:** `dm.footprint.rel` = 0.01 (relative $L_2$ error against the rounded model; an ideal fractional-shift implementation would give $7\times10^{-4}$).
 - **References:** none.
@@ -67,14 +67,14 @@ $$\frac{1}{\left(\sum_{i}c^{\,i^2}\right)^2}\approx0.1626\ \ (c=0.6),$$
 ## `test_altitude_dm_metapupil_diameter`
 - **Module:** `DeformableMirror.buildLayer` (called on a stand-in object, no influence functions built).
 - **Tier:** fast.
-- **What it checks:** $D_{fov}=D+2h\tan(\mathrm{fov}/2)$ for the EST telescope (4.149 m, 60 arcsec, $h$ = 20 km). Regression: the former arcsec conversion 206624 gave $-1.7\times10^{-3}$ relative on the field term.
+- **What it checks:** $D_{fov}=D+2h\tan(\mathrm{fov}/2)$ for the EST telescope (4.149 m, 60 arcsec, $h$ = 20 km).
 - **Tolerance:** `dm.geometry.metapupil_rel` = $10^{-6}$ (relative, on $D_{fov}/\mathrm{expected}-1$).
 - **References:** none.
 
 ## `test_altitude_dm_grid_step_matches_ground`
 - **Module:** `DeformableMirror.buildLayer` (`pixel_size`, `D_px`, `D_fov`).
 - **Tier:** fast.
-- **What it checks:** for EST at $h$ = 0, 5 and 20 km the DM grid step equals the pupil pixel $D/N$; the grid covers the metapupil with a symmetric whole-pixel margin, $0\le D_{px}\,p-D_{fov}<2p$; and $D_{px}-N$ is even. Regression: before 2026-10-27 the grid used $D_{fov}/(D_{px}-1)$, giving $-4.0\times10^{-3}$ at 20 km and $-1.6\times10^{-2}$ ($D/(N-1)$ vs $D/N$) at $N=64$.
+- **What it checks:** for EST at $h$ = 0, 5 and 20 km the DM grid step equals the pupil pixel $D/N$; the grid covers the metapupil with a symmetric whole-pixel margin, $0\le D_{px}\,p-D_{fov}<2p$; and $D_{px}-N$ is even.
 - **Tolerance:** `dm.geometry.grid_step_rel` = $10^{-3}$ for the step; margin in $[-10^{-9},2-10^{-9}]$ pixels; parity exact.
 - **References:** none.
 
@@ -114,7 +114,7 @@ $$\dot{\mathbf x}=\begin{pmatrix}0&1\\-\omega^2&-2\zeta\omega\end{pmatrix}\mathb
 ## `test_regression_actuator_vs_map_misregistration_convention`
 - **Module:** `DeformableMirror.set_actuator_misregistration` vs `MisRegistration.apply_misreg`.
 - **Tier:** fast. Parametrised over `shift +1 px x`, `shift +2 px y`, `rotation +90 deg`, `rotation -90 deg` (shifts in DM grid pixels).
-- **What it checks:** REGRESSION (equal-path, not physics; the physical sense is covered by the previous test): the actuator-level misregistration has the same sense as the OPD-map misregistration where the map interpolation is exact (integer-pixel shifts and $\pm90$ deg), interior difference below tolerance (relative to the rms); the opposite transformation differs by more than ten times that difference.
+- **What it checks:** equal-path consistency (not a physics check; the physical sense is covered by the previous test): the actuator-level misregistration has the same sense as the OPD-map misregistration where the map interpolation is exact (integer-pixel shifts and $\pm90$ deg), interior difference below tolerance (relative to the rms); the opposite transformation differs by more than ten times that difference.
 - **Tolerance:** `dm.misregistration.convention` = $10^{-9}$ of the rms; opposite-sense ratio at least 10 (hard-coded).
 - **References:** none.
 

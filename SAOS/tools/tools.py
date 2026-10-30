@@ -4,7 +4,7 @@ Created on Mon Mar 16 18:33:20 2020
 
 @author: cheritie
 
-Small numerical helpers used by SAOS (the unused OOPAO helpers were removed on 2026-10-27).
+Small numerical helpers used by SAOS.
 """
 
 import numpy as np

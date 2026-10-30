@@ -450,7 +450,7 @@ class Controller:
         Returns
         -------
         cross : list of list of torch.Tensor or None
-            cross[i][j]: IM of DM j on the slopes of mask row i, (n_slopes_i, n_modes_j); None when DM j is in none of
+            ``cross[i][j]``: IM of DM j on the slopes of mask row i, (n_slopes_i, n_modes_j); None when DM j is in none of
             those light paths.
         missing : list of tuple
             (i, j, lp): DM j is in the optical path of light path lp (in mask row i) but its IM on lp was not measured.

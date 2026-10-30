@@ -25,7 +25,7 @@ Scheduling rule checked everywhere: a topic with decimation $k>0$ is published a
 ## `test_dm_command_does_not_hijack_atmosphere_topic`
 - **Module:** `Sharepoint.shareData`.
 - **Tier:** fast.
-- **What it checks:** regression for a topic mix-up: with `atm=1` and `dm=2`, at iteration 0 only the atmosphere topic is due, so only `atmosphere_1/layer_1` is published with the atmosphere screen, and the DM command is not published under an atmosphere topic.
+- **What it checks:** topic routing: with `atm=1` and `dm=2`, at iteration 0 only the atmosphere topic is due, so only `atmosphere_1/layer_1` is published with the atmosphere screen, and the DM command is not published under an atmosphere topic.
 - **Theory / assumptions:** none.
 - **Tolerance:** exact.
 - **References:** none.
@@ -73,7 +73,7 @@ Scheduling rule checked everywhere: a topic with decimation $k>0$ is published a
 ## `test_dm_per_dir_phase_topic_sends_phase`
 - **Module:** `Sharepoint.shareData` (`dm_per_dir` with several directions).
 - **Tier:** fast.
-- **What it checks:** with `dm_per_dir=2` and 3 directions (3D DM buffers), `dm_opd_<j>` carries `dm_opd[j]` and `dm_phase_<j>` carries `dm_phase[j]` for $j=1..3$ at the due iterations, nothing otherwise. Regression for the phase topic sending the OPD buffer.
+- **What it checks:** with `dm_per_dir=2` and 3 directions (3D DM buffers), `dm_opd_<j>` carries `dm_opd[j]` and `dm_phase_<j>` carries `dm_phase[j]` for $j=1..3$ at the due iterations, nothing otherwise. The phase topic carries the phase buffer, not the OPD buffer.
 - **Theory / assumptions:** none.
 - **Tolerance:** exact.
 - **References:** none.
@@ -129,7 +129,7 @@ Scheduling rule checked everywhere: a topic with decimation $k>0$ is published a
 ## `test_reception_poller_only_holds_live_socket`
 - **Module:** `ReceptionPoint` (poller and socket rebuild).
 - **Tier:** fast.
-- **What it checks:** after a timeout the socket is rebuilt and the poller holds exactly the current socket and none of the closed ones. Regression for stale closed sockets in the poller.
+- **What it checks:** after a timeout the socket is rebuilt and the poller holds exactly the current socket and none of the closed ones.
 - **Theory / assumptions:** none.
 - **Tolerance:** exact.
 - **References:** none.
@@ -137,7 +137,7 @@ Scheduling rule checked everywhere: a topic with decimation $k>0$ is published a
 ## `test_reception_second_timeout_returns_none_in_bounded_time`
 - **Module:** `ReceptionPoint.sendRequest`.
 - **Tier:** fast.
-- **What it checks:** three consecutive timeouts (200 ms each) each return None within a thread deadline of 4 s, so a hang is reported as a failure instead of blocking the suite. Regression for a hang at the second timeout.
+- **What it checks:** three consecutive timeouts (200 ms each) each return None within a thread deadline of 4 s, so a hang is reported as a failure instead of blocking the suite.
 - **Theory / assumptions:** none.
 - **Tolerance:** thread deadline 4 s; results `[None, None, None]`.
 - **References:** none.

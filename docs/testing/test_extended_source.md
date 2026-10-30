@@ -2,7 +2,7 @@
 
 Source: `tests/test_extended_source.py`
 
-Covers `SAOS.ExtendedSource` (sub-direction patches, blending filters, flux), as used through `LightPath` with `ScienceCam` and `Atmosphere`. The scenario reproduces the owner's asterism workflow: an h5 image of delta-function "stars" at 0.0128"/px (image[x_px, y_px]: first axis = image row) observed by an EST-like telescope (D 4.149 m, obstruction 1.3 m, 450 px resolution, $3\times3$ sub-directions, FoV 9.975", padding 5", margin 4"), with a ScienceCam at 0.0128"/px. Besides the 17 stars of the owner, a marker star at $(x,y)=(+3.0",-1.2")$ breaks the D4 symmetry so transposition or mirroring is detected. The same 18 directions are also observed as point sources (NGS) for reference. Every expectation is computed independently of SAOS: own geometry, own FFT of an analytic annular pupil with $4\times4$ sub-pixel occupancy and bilinear phase (`RefPSF`, $N=1024$, pixel scale exactly $\lambda/(\mathrm{ps}\,N\,dx)$), own sampling of the atmosphere screen (cubic sub-pixel windows), own convolution. The telescope resolution (450 px, about 2 per camera pupil sample) keeps the known `ScienceCam` resampling errors (SCI-SCALE, SCI-SR-RESAMPLE) below 0.2 % of the PSF peak; the 200 px of production scripts would give a 0.7 % (flat) to 2.3 % ($r_0$=0.6 m) mismatch. Metrics are windows of 79 px (1.0" half-width) normalised to unit sum, compared as $\max|{\rm window}-{\rm ref}|/\max({\rm ref})$. Frames are `[row, col]`, with row = sky y in the SAOS atmosphere/DM frame (an NGS observing the star written at image[x_px, y_px] is placed at azimuth $90^\circ-\varphi$; fix EXT-TRANSPOSE, 2026-10-27). All tests are marked `nightly` (module-level); fixtures are module-scoped and use the GPU when available. Tolerances: `tolerances/extended_source.yaml` (calibrated 2026-10-26 on develop, GPU, 8 seeds where stated, typically mean + 3.5 sd).
+Covers `SAOS.ExtendedSource` (sub-direction patches, blending filters, flux), as used through `LightPath` with `ScienceCam` and `Atmosphere`. The scenario reproduces an asterism workflow: an h5 image of delta-function "stars" at 0.0128"/px (image[x_px, y_px]: first axis = image row) observed by an EST-like telescope (D 4.149 m, obstruction 1.3 m, 450 px resolution, $3\times3$ sub-directions, FoV 9.975", padding 5", margin 4"), with a ScienceCam at 0.0128"/px. Besides the 17 stars of the asterism, a marker star at $(x,y)=(+3.0",-1.2")$ breaks the D4 symmetry so transposition or mirroring is detected. The same 18 directions are also observed as point sources (NGS) for reference. Every expectation is computed independently of SAOS: own geometry, own FFT of an analytic annular pupil with $4\times4$ sub-pixel occupancy and bilinear phase (`RefPSF`, $N=1024$, pixel scale exactly $\lambda/(\mathrm{ps}\,N\,dx)$), own sampling of the atmosphere screen (cubic sub-pixel windows), own convolution. The telescope resolution (450 px, about 2 per camera pupil sample) keeps the `ScienceCam` resampling error below 0.2 % of the PSF peak. Metrics are windows of 79 px (1.0" half-width) normalised to unit sum, compared as $\max|{\rm window}-{\rm ref}|/\max({\rm ref})$. Frames are `[row, col]`, with row = sky y in the SAOS atmosphere/DM frame (an NGS observing the star written at image[x_px, y_px] is placed at azimuth $90^\circ-\varphi$). All tests are marked `nightly` (module-level); fixtures are module-scoped and use the GPU when available. Tolerances: `tolerances/extended_source.yaml` (calibrated 2026-10-26 on develop, GPU, 8 seeds where stated, typically mean + 3.5 sd).
 
 Mosaic model used in the altitude-layer tests: the extended object is split into $n\times n$ patches of size $s=2(\mathrm{fov}+\mathrm{pad})/(n+1)$ with centres every $s/2$ (50 % overlap) and blended with tent weights that sum to one everywhere,
 
@@ -10,22 +10,22 @@ $$
 I(\mathbf r)=\sum_{i,j} w_i(x)\,w_j(y)\,\big[O * \mathrm{PSF}_{ij}\big](\mathbf r),
 $$
 
-where $\mathrm{PSF}_{ij}$ is the PSF of the line of sight to the centre of patch $(i,j)$, which crosses a layer at altitude $h$ displaced by $h\tan\theta$ (rounded to the layer pixel, the integer-pixel model decided by the owner on 2026-10-27).
+where $\mathrm{PSF}_{ij}$ is the PSF of the line of sight to the centre of patch $(i,j)$, which crosses a layer at altitude $h$ displaced by $h\tan\theta$ (rounded to the layer pixel, the integer-pixel model).
 
 ## `test_b1_no_atmosphere_stars`
 - **Module:** `ExtendedSource` + `ScienceCam` through `LightPath.propagate`.
 - **Tier:** nightly.
 - **What it checks:** with no atmosphere, each of the 18 stars appears at its input pixel (position error within 0.1 px, found by Fourier upsampling and a parabola), has the FWHM of the obstructed-pupil PSF, and its 79 px window matches the independent PSF window. NGS PSFs of the same directions are recorded for comparison only.
 - **Theory / assumptions:** Fraunhofer PSF of the annulus, $\mathrm{PSF}=|\mathcal F\{P\}|^2$, computed by zero-padded FFT with $N\,dx=\lambda/\mathrm{ps}$.
-- **Tolerance:** `b1`: `pos_atol_px` = 0.1 px (owner's specification; measured 0.025), `fwhm_rtol` = 0.005 (measured -0.10 %, from the 450 to 898 px resampling), `psf_atol` = 0.006 of the peak (measured 0.08-0.23 %, 2.6x margin).
+- **Tolerance:** `b1`: `pos_atol_px` = 0.1 px (measured 0.025), `fwhm_rtol` = 0.005 (measured -0.10 %, from the 450 to 898 px resampling), `psf_atol` = 0.006 of the peak (measured 0.08-0.23 %, 2.6x margin).
 - **References:** Goodman, "Introduction to Fourier Optics".
 
 ## `test_b1_production_sampling_energy`
 - **Module:** `ScienceCam.get_frame` (extended source and point source), `ScienceCam.compute_psf`.
 - **Tier:** nightly.
 - **What it checks:** no atmosphere, production pupil sampling (200 px over 4.149 m, so $\lambda/\Delta x = 4.97''$ at 500 nm lies inside the 9.975″ field; B1 uses 450 px, where it does not). The fraction of the extended-source frame outside the 18 star windows (1.0″ half-width) must not exceed $1 - EE_{ref}$, and every point-source frame must keep $EE_{ref}$ of its energy in the window, with $EE_{ref}$ the encircled energy of the independent annular-pupil PSF (own FFT) in the same window.
-- **Theory / assumptions:** energy conservation of the image: with PSF replicas about 86 % of the energy of every star leaves its core, which the unit-sum windows of B1 cannot detect. Stars near the field edge lose part of their halo out of the field, so the measured outside fraction can only be smaller than $1 - EE_{ref}$. Regression of SCI-MFT-ALIAS (2026-10-30).
-- **Tolerance:** `extended_source.b1_production`: `bg_atol` 0.005 (measured 0.0109 vs bound 0.0114; 0.84 with the replicas), `ee_atol` 0.005 (measured 0.9869 vs 0.9886; 0.136 with the replicas).
+- **Theory / assumptions:** energy conservation of the image: the unit-sum windows of B1 cannot detect energy lost from the core of every star (for instance to PSF replicas). Stars near the field edge lose part of their halo out of the field, so the measured outside fraction can only be smaller than $1 - EE_{ref}$.
+- **Tolerance:** `extended_source.b1_production`: `bg_atol` 0.005 (measured 0.0109 vs bound 0.0114), `ee_atol` 0.005 (measured 0.9869 vs 0.9886).
 - **References:** Goodman, *Introduction to Fourier Optics*.
 
 ## `test_b2_image_not_transposed_or_mirrored`
@@ -48,7 +48,7 @@ where $\mathrm{PSF}_{ij}$ is the PSF of the line of sight to the centre of patch
 - **Module:** `Atmosphere.getOPD` for the extended source.
 - **Tier:** nightly.
 - **What it checks:** same measurement, restricted to the diagonal sub-directions (0, 4, 8) where transposition makes no difference; the measured offset must equal $h\tan\theta$ rounded to the nearest layer pixel.
-- **Theory / assumptions:** integer-pixel footprint model (owner's decision 2026-10-27, see the integer-pixel atmosphere motion known issue).
+- **Theory / assumptions:** integer-pixel footprint model (the layer is displaced by whole layer pixels).
 - **Tolerance:** `b2.offset_atol_px` = 0.09 px: precision of the offset estimator on exact sub-pixel windows of the same screens, 8 seeds, mean 0.0557, sd 0.0095, plus 3.5 sd.
 - **References:** none.
 
@@ -71,9 +71,9 @@ where $\mathrm{PSF}_{ij}$ is the PSF of the line of sight to the centre of patch
 ## `test_b4_altitude_layer_psf_vs_screen`
 - **Module:** `ExtendedSource` + `Atmosphere` (layer at 15 km).
 - **Tier:** nightly.
-- **What it checks:** for every star, $\max|\mathrm{ext}-E|/\max E$ is below the owner's criterion.
+- **What it checks:** for every star, $\max|\mathrm{ext}-E|/\max E$ is below the tolerance.
 - **Theory / assumptions:** as in the orientation test; the criterion covers the extended-image model error (patch resampling and PSF blending, 0.6-0.9 % on the ground layer in b3).
-- **Tolerance:** `b4.psf_atol` = 0.02 (owner's criterion, 2026-10-27; measured 0.13-0.45 % on one seed).
+- **Tolerance:** `b4.psf_atol` = 0.02 (measured 0.13-0.45 % on one seed).
 - **References:** none.
 
 ## `test_b4_anisoplanatic_difference_grows_with_patch_distance`
@@ -111,7 +111,7 @@ where $\mathrm{PSF}_{ij}$ is the PSF of the line of sight to the centre of patch
 ## `test_b5_flux`
 - **Module:** `ExtendedSource.flux`, `LightPath.long_exposure_frame`, `ScienceCam.lightRatio`.
 - **Tier:** nightly.
-- **What it checks:** (a) source flux equals the independent photon flux; sub-direction fluxes sum to it; (b) the long-exposure frame holds flux $\times T\times A_{eff}$ photons with `lightRatio=1`; (c) the noise-free frame equals the independent convolution of the object with the PSF over the 779 px frame (maximum difference relative to the peak) and the flux within 1" of each star matches. The `lightRatio=50` value (the pre-2026-10-27 default) is recorded for context.
+- **What it checks:** (a) source flux equals the independent photon flux; sub-direction fluxes sum to it; (b) the long-exposure frame holds flux $\times T\times A_{eff}$ photons with `lightRatio=1`; (c) the noise-free frame equals the independent convolution of the object with the PSF over the 779 px frame (maximum difference relative to the peak) and the flux within 1" of each star matches. The `lightRatio=50` case is recorded for context.
 - **Theory / assumptions:** photon flux in a 10 nm band, using the ASTM G173-03 direct irradiance (via `pvlib`) and the solar disc of radius-based solid angle ($960''$):
 
 $$
@@ -124,7 +124,7 @@ $$
 ## `test_b5_default_science_photon_budget`
 - **Module:** `ScienceCam` default arguments (`lightRatio`), `LightPath`.
 - **Tier:** nightly.
-- **What it checks:** with default `ScienceCam` arguments the noise-free long-exposure frame holds flux $\times T\times A_{eff}$ photons (default `lightRatio` = 1.0; it was 50 before 2026-10-27). Regression intent on the default.
+- **What it checks:** with default `ScienceCam` arguments the noise-free long-exposure frame holds flux $\times T\times A_{eff}$ photons (default `lightRatio` = 1.0).
 - **Theory / assumptions:** none beyond photon budget.
 - **Tolerance:** `rtol` = $10^{-6}$ (hard-coded).
 - **References:** none.
@@ -133,6 +133,6 @@ $$
 - **Module:** `ExtendedSource.__init__` (band table).
 - **Tier:** nightly.
 - **What it checks:** for bands 'IR', 'V', 'R' (including 'IR', absent from the `Source` table) the extended source constructs and its sub-direction sources carry the wavelength of the extended source.
-- **Theory / assumptions:** convention (own band table, owner decision C.9: the wavelengths of the solar images are kept).
+- **Theory / assumptions:** convention (own band table; the wavelengths of the solar images are kept).
 - **Tolerance:** exact equality of the wavelength set.
 - **References:** none.

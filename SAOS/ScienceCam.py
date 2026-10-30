@@ -292,14 +292,13 @@ class ScienceCam:
         """
         Compute the PSF from a phase map with a matrix Fourier transform (MFT) evaluated directly at the camera pixels.
 
-        The pupil field P exp(i phase) is used on the native telescope grid (no resampling of the phase, which would
-        low-pass filter it and bias the Strehl ratio upwards). Pixel k of the image is at the angle
+        The pupil field P exp(i phase) is used on the native telescope grid (no resampling of the phase). Pixel k of the image is at the angle
         (k - nPix//2) * plate_scale, exactly, for any plate scale. Sign and orientation are those of an FFT: a phase that
         grows along the columns moves the PSF towards larger column indices.
 
         Band limit: the pupil field is known only at its samples (step dx = D / n), so its spectrum is defined up to the
         Nyquist frequency 1 / (2 dx), i.e. angles |theta_x|, |theta_y| <= lambda / (2 dx). Beyond it the transform of the
-        samples is periodic (period lambda / dx) and would show replicas of the PSF; those pixels are set to zero
+        samples is periodic (period lambda / dx) and would only repeat the PSF; those pixels are set to zero
         (Whittaker-Shannon interpretation of the sampled field: exact inside the band when the phase is well sampled,
         dx << r0). The PSF is normalised so that its energy over the band is 1 (Parseval); the returned crop of
         nPix x nPix pixels sums to the fraction of the energy inside the field.
@@ -347,7 +346,7 @@ class ScienceCam:
         MFT matrix A[k, m] = w(u_k) exp(-2 pi i u_k x_m) with x_m = (m - (n-1)/2) (pupil samples centred on the pupil) and
         u_k = (k - nPix//2) / (fwhm n) (cycles per pupil sample at the angle of image pixel k). Band limit of the sampled
         field: w = 1 for |u| < 1/2, 1/sqrt(2) at |u| = 1/2 (+1/2 and -1/2 are the same frequency: its energy is shared) and 0
-        beyond (rows outside the Nyquist band would only repeat the spectrum: PSF replicas). Cached per (fwhm, nPix, n).
+        beyond (rows outside the Nyquist band would only repeat the spectrum). Cached per (fwhm, nPix, n).
         """
         key = (round(float(fwhm), 12), int(nPix), int(n))
         A = self._mft_cache.get(key)

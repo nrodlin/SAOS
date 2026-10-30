@@ -95,8 +95,7 @@ Author: Alvaro Menduina Fernandez - University of Oxford
 Email: alvaro.menduinafernandez@physics.ox.ac.uk
 Version: 0.1
 Description: evaluation of Zernike polynomials with the relation between Jacobi and Zernike radial polynomials and
-their recurrence (stable for any order). The naive factorial sum, the Chong-Kintner recurrence, the series evaluator and
-ZernikeSmart of the original package were removed from SAOS on 2026-10-27 (unused).
+their recurrence (stable for any order).
 """
 
 class ZernikeNaive(object):
@@ -189,8 +188,7 @@ class ZernikeNaive(object):
         :param rho: radial coordinate (ideally it should come normalized to 1)
         :param theta: azimuth coordinate
         :param normalize_noll: True {Applies Noll coefficient}, False {Does nothing}
-        :param mode: 'Jacobi' (Jacobi-based recurrence, stable for any n), the only radial evaluator kept: the naive factorial
-                sum ('Standard', unusable above n ~ 40) and 'ChongKintner' were removed on 2026-10-27
+        :param mode: 'Jacobi' (Jacobi-based recurrence, stable for any n), the only radial evaluator
         """
         n, m = self.zernIndex(j)
 

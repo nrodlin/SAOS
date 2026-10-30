@@ -76,7 +76,7 @@ class PhaseScreenVonKarman():
         subharmonics (bool, optional): Add subharmonics (3 levels, Lane et al. 1992 / Johansson & Gavel 1994) to the
             initial FFT screen. Without them a screen the size of the pupil has ~1/4 of the tilt variance. Default True.
         initial_oversize (float, optional): The initial FFT screen is generated on a grid this times larger and cropped,
-            to avoid the periodicity of an FFT screen of the pupil size (distorted focus/astigmatism). Default 4 (1: old).
+            to avoid the periodicity of an FFT screen of the pupil size (distorted focus/astigmatism). Default 4.
     """
     def __init__(self, nx_size, pixel_scale, r0, L0, random_seed=None, n_columns=2, from_file=False, screen_file=None, logger=None,
                  far_rows=True, subharmonics=True, initial_oversize=4):

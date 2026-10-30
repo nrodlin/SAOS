@@ -2,7 +2,7 @@
 
 Source: `tests/test_modal_basis.py`
 
-Covers `SAOS.modalBasis.zonalModes.generate_zonal_modes`, `discHarmonicModes.generate_dh_modes`, `karhunenLoeveModes.generate_kl_modes`, `hadamardModes.generate_hadamard_modes` and `zernikeModes.generate_zernike_modes` / `ZernikeNaive.R_nm_Jacobi`. Bases are evaluated on the actuator coordinates of an 11x11 cartesian ground `DeformableMirror` (97 valid actuators, 32 px pupil, only the actuator geometry is used) or of an equivalent cartesian grid (e.g. 37x37 for the EST ASM) where only coordinates are needed; columns are modes normalised to $\max|\cdot| = 1$. The strategy is structural (rank, orthogonality, piston content) plus comparison with independent definitions written in the test (Noll ordering and Zernike formula through Jacobi polynomials, Noll Kolmogorov covariance, Neumann eigenfunctions of the Laplacian on the disk), mostly through subspace distances. The bases are deterministic, so tolerances (`tests/tolerances/modal_basis.yaml`) are numerical, not statistical. Whole module `fast`. The `known_issue` helper is imported but no test carries the mark; the Zernike radial-order tests are regression tests for the former issue `MB-ZERN-RADIAL` (naive factorial sum lost precision above $n\approx40$).
+Covers `SAOS.modalBasis.zonalModes.generate_zonal_modes`, `discHarmonicModes.generate_dh_modes`, `karhunenLoeveModes.generate_kl_modes`, `hadamardModes.generate_hadamard_modes` and `zernikeModes.generate_zernike_modes` / `ZernikeNaive.R_nm_Jacobi`. Bases are evaluated on the actuator coordinates of an 11x11 cartesian ground `DeformableMirror` (97 valid actuators, 32 px pupil, only the actuator geometry is used) or of an equivalent cartesian grid (e.g. 37x37 for the EST ASM) where only coordinates are needed; columns are modes normalised to $\max|\cdot| = 1$. The strategy is structural (rank, orthogonality, piston content) plus comparison with independent definitions written in the test (Noll ordering and Zernike formula through Jacobi polynomials, Noll Kolmogorov covariance, Neumann eigenfunctions of the Laplacian on the disk), mostly through subspace distances. The bases are deterministic, so tolerances (`tests/tolerances/modal_basis.yaml`) are numerical, not statistical. Whole module `fast`.
 
 Independent references defined in the file: Noll ordering $j\to(n,m,\cos|\sin)$; Zernike polynomials
 
@@ -84,14 +84,14 @@ $$\langle a_j a_{j'}\rangle = K\,(-1)^{(n+n'-2m)/2}\sqrt{(n+1)(n'+1)}\;\frac{\Ga
 - **Module:** `ZernikeNaive.R_nm_Jacobi`.
 - **Tier:** fast.
 - **What it checks:** the SAOS radial polynomial (Jacobi form, the evaluator used to build the basis) matches the scipy-Jacobi reference for every $n\le30$ and all allowed $m$ on 501 points of $\rho\in[0,1]$.
-- **Tolerance:** `modal_basis.zernike.radial_abs_low_orders` = $10^{-5}$ (DMs up to about 22x22 actuators; the old naive sum had $1.8\times10^{-6}$ at $n=30$).
+- **Tolerance:** `modal_basis.zernike.radial_abs_low_orders` = $10^{-5}$ (DMs up to about 22x22 actuators).
 - **References:** standard Jacobi representation of $R_n^m$ (e.g. Born & Wolf).
 
 ## `test_zernike_radial_jacobi_evaluator`
 - **Module:** `ZernikeNaive.R_nm_Jacobi`.
 - **Tier:** fast.
-- **What it checks:** the Jacobi evaluator is accurate up to $n=49$ (sampled orders $n=0,7,\ldots,49$): the fix for `MB-ZERN-RADIAL`. The physical bound $|R|\le1$ makes the absolute criterion meaningful.
-- **Tolerance:** `modal_basis.zernike.radial_abs` = $10^{-6}$ (the evaluator gives about $10^{-13}$ at $n=49$; the old naive sum gave $10^{-2}$ at $n=40$ and 59 at $n=50$).
+- **What it checks:** the Jacobi evaluator is accurate up to $n=49$ (sampled orders $n=0,7,\ldots,49$). The physical bound $|R|\le1$ makes the absolute criterion meaningful.
+- **Tolerance:** `modal_basis.zernike.radial_abs` = $10^{-6}$ (the evaluator gives about $10^{-13}$ at $n=49$).
 - **References:** none.
 
 ## `test_zernike_radial_polynomial_est_orders`

@@ -27,9 +27,8 @@ $$
 \qquad (2.49'' \text{ at } 500\ \mathrm{nm},\ 3.38'' \text{ at } 680\ \mathrm{nm}\ \text{for}\ n = 200,\ D = 4.149\ \mathrm{m}).
 $$
 
-Beyond it the transform of the samples is periodic with period $\lambda/\Delta x$ and would only repeat the PSF (replicas
-carrying 80–90 % of the central peak at $\pm\lambda/\Delta x$ when the half field exceeds that value). `compute_psf`
-therefore sets the image to zero outside the band: the MFT kernel rows have weight $w(u) = 1$ for $|u| < 1/2$
+Beyond it the transform of the samples is periodic with period $\lambda/\Delta x$ and would only repeat the PSF.
+`compute_psf` therefore sets the image to zero outside the band: the MFT kernel rows have weight $w(u) = 1$ for $|u| < 1/2$
 (cycles per pupil sample), $1/\sqrt{2}$ at $|u| = 1/2$ (the same frequency as $-1/2$: its energy is shared) and $0$
 beyond. This is the Whittaker–Shannon interpretation of the sampled field: inside the band the PSF is exactly the
 transform of the samples, which is the true one when the phase is well sampled ($\Delta x \ll r_0$; the field
@@ -39,11 +38,7 @@ beyond the band is not represented with this sampling; when the camera field exc
 telescope resolution that would cover it ($n \ge 2\,\theta_{max} D/\lambda$, e.g. $n \ge 401$ for $\pm 4.99''$ at
 500 nm).
 
-Two alternatives were considered and rejected: interpolating the phase to a finer grid before the transform (the
-behaviour before 2026-10-27) low-passes the phase and biases the Strehl ratio upwards (+5 to +16 %); a field constant
-inside each pupil pixel (zero-order hold) suppresses the replicas through the pixel transfer function
-$\mathrm{sinc}^2(\theta\,\Delta x/\lambda)$ but also attenuates the halo inside the band (×0.87 at 1″ and ×0.57 at 2″ in
-V), independently of how well the phase is sampled. References: Bracewell, *The Fourier Transform and Its
+References: Bracewell, *The Fourier Transform and Its
 Applications*; Goodman, *Introduction to Fourier Optics* (sampling theorem).
 
 ### Extended source (Sun)

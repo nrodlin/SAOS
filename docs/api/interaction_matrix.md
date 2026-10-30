@@ -40,7 +40,7 @@ A warning is logged if a basis is numerically rank deficient (`check_basis_rank`
 
 ### BASIS_CONVENTION
 
-The numerical content of the bases changed in the past (Noll sign of the sine Zernikes, and piston-free bases of $n_{valid}-1$ modes). `BASIS_CONVENTION` (currently 2) labels the version; it is written to the files and checked on load. An IM is only valid with the basis it was measured with: with a different convention the sine Zernike modes have the opposite sign and the feedback of those modes would be inverted. Mismatches raise `ValueError` (see below).
+`BASIS_CONVENTION` (currently 2) labels the numerical convention of the bases (Noll sign of the sine Zernikes, piston-free bases of $n_{valid}-1$ modes); it is written to the files and checked on load. An IM is only valid with the basis it was measured with: with a different convention the sine Zernike modes have the opposite sign and the feedback of those modes would be inverted. Mismatches raise `ValueError` (see below).
 
 ### File layout
 
@@ -50,8 +50,8 @@ IM file (`save_IM`): root attributes `nLPS`, `nDMs`, `basis_convention`; groups 
 
 `save_IM(filename, overwrite=False)` and `save_modalBasis(filename, overwrite=False)` never modify an existing file by default:
 
-- If `filename` (with `.h5` added when missing) exists and `overwrite=False`, they raise `FileExistsError` and the existing file is left untouched. Previously the file was opened in append mode.
-- With `overwrite=True` the content is written to a temporary file in the same folder (`<name>.tmp<pid>.h5`) which is renamed over the target with `os.replace`, an atomic replacement on POSIX: the old file is only replaced when the new one is complete, and a failure leaves no partial file (the temporary file is removed).
+- If `filename` (with `.h5` added when missing) exists and `overwrite=False`, they raise `FileExistsError` and the existing file is left untouched.
+- With `overwrite=True` the content is written to a temporary file in the same folder (`<name>.tmp<pid>.h5`) which is renamed over the target with `os.replace`, an atomic replacement on POSIX: the existing file is only replaced when the new one is complete, and a failure leaves no partial file (the temporary file is removed).
 - `check_output_file(filename, overwrite=False)` performs the same check without writing: call it before `measure()` so that an existing file is detected before spending the measurement time. It returns the path with the `.h5` extension.
 
 ```python
@@ -63,7 +63,7 @@ imh.save_modalBasis('~/simulations/im/est_basis.h5')
 
 ### Loading
 
-`load_IM` checks the convention and matches each `LP<i>` group to the light path of the same wavelength, zenith, azimuth and number of slopes (the group of the same index first), and each `IM<j>` to a DM of the same `nValidAct`, `altitude` and `nAct` (index first, never two IMs on one DM). `load_modalBasis` requires the five bases and the same `nAct`, `nValidAct` per DM. `ValueError` is raised if the IM and the modal basis have different conventions; a single file of an old convention only produces a warning.
+`load_IM` checks the convention and matches each `LP<i>` group to the light path of the same wavelength, zenith, azimuth and number of slopes (the group of the same index first), and each `IM<j>` to a DM of the same `nValidAct`, `altitude` and `nAct` (index first, never two IMs on one DM). `load_modalBasis` requires the five bases and the same `nAct`, `nValidAct` per DM. `ValueError` is raised if the IM and the modal basis have different conventions; a single file without a matching convention only produces a warning.
 
 ### Limitations
 
@@ -79,9 +79,9 @@ imh.save_modalBasis('~/simulations/im/est_basis.h5')
 ## IM and modal basis files
 
 `save_IM` and `save_modalBasis` write the attribute `basis_convention` (`BASIS_CONVENTION`, currently 2: Noll sign of the
-sine Zernikes and piston-free bases of `nValidAct - 1` modes, since 2026-10-27). Files without it are convention 1. An IM
+sine Zernikes and piston-free bases of `nValidAct - 1` modes). Files without it are convention 1. An IM
 is only valid with a modal basis of its own convention: `load_IM` and `load_modalBasis` raise `ValueError` when they do not
-match (the sine Zernikes changed sign, so mixing them would invert the feedback of those modes). Load the modal basis file
+match (mixing conventions would invert the sign of the sine Zernike modes in the feedback). Load the modal basis file
 saved with the IM, or measure the IM again.
 
 `load_IM` puts every IM back in its own (DM, light path) entry: the groups `LP<i>/IM<j>` of the file are matched by index

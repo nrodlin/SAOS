@@ -28,15 +28,15 @@ Reconstructors used as references (IM $H$, SVD $H=U\Sigma V^T$): minimum-norm ps
 - **Module:** `InteractionMatrixHandler.measure` / `ShackHartmann` slope maps.
 - **Tier:** fast.
 - **What it checks:** parametrised over `mode` = 2 (`defocus`) and 9 (`spherical`). A DM shape with the sensor's symmetry (even under $x\to-x$, $y\to-y$, $x\leftrightarrow y$) must give slope maps with $s_x(r,c)=-s_x(r,5-c)=s_x(5-r,c)=s_y(c,r)$, errors normalised to the largest slope. The independent DM surface symmetry is checked first (to $10^{-10}$).
-- **Theory / assumptions:** symmetry of the problem, independent of the sensor scale. The docstring records a diagnosis (scratch experiment, SAOS untouched): an asymmetry of order $5\times10^{-2}$ (x-mirror) found in the sensor's subaperture grid (WFS-SUBAP-GRID, +0.5 px shift of the subaperture split, see `test_wfs.py::test_defocus_subaperture_geometry`), not in the DM or IM; with a symmetric independent split the errors drop to about $2\times10^{-4}$. WFS-SUBAP-GRID was fixed on 2026-10-27 (cell-centred subaperture split): the test passes and is kept as a regression test.
+- **Theory / assumptions:** symmetry of the problem, independent of the sensor scale. The sensor uses a cell-centred subaperture split (see `test_wfs.py::test_defocus_subaperture_geometry`), so the mirror asymmetry of the slope maps is at the level of the independent reference (about $2\times10^{-4}$).
 - **Tolerance:** `symmetry.rel` = $10^{-3}$ (float32 FFT round-off); DM surface symmetry $\le10^{-10}$ (hard-coded).
 - **References:** none.
 
 ## `test_regression_im_column_equals_direct_wfs_response`
-- **Module:** `InteractionMatrixHandler.measure` vs `ShackHartmann.wfs_measure` (equal-path regression).
+- **Module:** `InteractionMatrixHandler.measure` vs `ShackHartmann.wfs_measure` (equal-path consistency).
 - **Tier:** fast.
 - **What it checks:** for the first 12 modes the IM column equals the WFS slopes for the OPD of the same DM shape applied directly, divided by the stroke.
-- **Theory / assumptions:** none (regression; SAOS vs SAOS).
+- **Theory / assumptions:** none (equal-path consistency; SAOS vs SAOS).
 - **Tolerance:** `tilt.direct` = $10^{-3}$ relative to the largest entry.
 - **References:** none.
 
@@ -52,7 +52,7 @@ Reconstructors used as references (IM $H$, SVD $H=U\Sigma V^T$): minimum-norm ps
 - **Module:** `InteractionMatrixHandler.initialize_im_class`, `.measure`, `interaction_matrix_warehouse`.
 - **Tier:** fast.
 - **What it checks:** two light paths, each with its own DM and WFS (identical properties): two distinct scanned DMs; `warehouse[i][j]` holds an IM only where DM $i$ is seen by light path $j$ (i == j) and is None otherwise; both IMs non-zero and equal to each other.
-- **Theory / assumptions:** bookkeeping only; known-issue style regression about DMs with identical properties.
+- **Theory / assumptions:** bookkeeping only, including DMs with identical properties.
 - **Tolerance:** `nonzero_min` = 1000 px/m (a poked DM gives about $10^6$ px/m); equality to `reconstructor.matrix` = $10^{-9}$.
 - **References:** none.
 
@@ -91,7 +91,7 @@ Reconstructors used as references (IM $H$, SVD $H=U\Sigma V^T$): minimum-norm ps
 ## `test_im_and_modal_basis_convention`
 - **Module:** `InteractionMatrixHandler.save_IM`, `.save_modalBasis`, `.load_IM`, `.load_modalBasis`, `BASIS_CONVENTION`.
 - **Tier:** fast.
-- **What it checks:** IM and modal-basis files carry the `basis_convention` attribute; a legacy IM (attribute removed, convention 1: old sign of the sine Zernikes) cannot be loaded into a handler whose basis uses the current convention (`ValueError`); a legacy IM with the legacy basis loads.
+- **What it checks:** IM and modal-basis files carry the `basis_convention` attribute; an IM of another convention (attribute removed, convention 1: opposite sign of the sine Zernikes) cannot be loaded into a handler whose basis uses the current convention (`ValueError`); such an IM loads with a basis of its own convention.
 - **Theory / assumptions:** convention bookkeeping (Zernike sine sign) only.
 - **Tolerance:** exact.
 - **References:** none.
@@ -100,7 +100,7 @@ Reconstructors used as references (IM $H$, SVD $H=U\Sigma V^T$): minimum-norm ps
 - **Module:** `InteractionMatrixHandler.measure`.
 - **Tier:** fast.
 - **What it checks:** `measure(['zonal'], ...)` for a one-DM system is accepted and equals `measure('zonal', ...)`.
-- **Theory / assumptions:** none (equal-path regression).
+- **Theory / assumptions:** none (equal-path consistency).
 - **Tolerance:** $10^{-12}$ relative (hard-coded).
 - **References:** none.
 
@@ -200,7 +200,7 @@ $$
 -s_{pol,i}(k) = -s(k) + \sum_j B_{j\to i}\,c_j(k-d_j) = -t(k),
 $$
 
-  so removing only DM $i$ would leave $B_{j}\,c_{j}$ of the other DM (the behaviour before 2026-10-30).
+  so removing only DM $i$ would leave $B_{j}\,c_{j}$ of the other DM.
 - **Tolerance:** `im_controller.polc.sign` (max relative error over steps and DMs; numerical precision).
 - **References:** Ellerbroek & Vogel 2003 (POLC).
 
