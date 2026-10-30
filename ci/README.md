@@ -15,9 +15,9 @@ outside the repository and gathered into an HTML report.
 Status: T1 and T2 are implemented; T3 is planned (no test carries the `heavy` marker yet). Every test is documented in the
 Validation section of the docs (`docs/testing/`).
 
-Every test compares SAOS with an independent physical or mathematical expectation. Tolerances only cover the statistical
-uncertainty of the estimator (about 3.5 sigma, measured over seeds) or the numerical precision of the reference; they
-never absorb a measured SAOS discrepancy. A failing test is reported with its measured value and tolerance, and the report groups the failures.
+Every test compares SAOS with an independent physical or mathematical reference. Tolerances cover the statistical
+uncertainty of the estimator (about 3.5 sigma, measured over seeds) or the numerical precision of the reference. The
+report lists every check with its measured value and tolerance.
 
 ## Running
 
@@ -39,7 +39,7 @@ Results go to `~/simulations/results/ci/<date>_<tier>_<sha>/` (override with `SA
 The suite needs `pytest`, `pytest-timeout` and `pyyaml` in the SAOS environment. Choose the interpreter with
 `SAOS_CI_PYTHON`.
 
-## Running automatically (local resources only)
+## Running automatically
 
 **Git hook (T1 before pushing to develop/master):**
 
@@ -51,28 +51,23 @@ git config core.hooksPath ci/githooks       # SAOS_SKIP_CI=1 git push to skip on
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cp ci/systemd/saos-ci-nightly.* ~/.config/systemd/user/     # check the paths inside the .service
+cp ci/systemd/saos-ci-nightly.* ~/.config/systemd/user/     # paths are set in the .service
 systemctl --user daemon-reload && systemctl --user enable --now saos-ci-nightly.timer
-loginctl enable-linger $USER                                # run even when not logged in
+loginctl enable-linger $USER                                # runs without an open session
 ```
 
-**Self-hosted GitHub runner:** a ✓/✗ per commit on GitHub, computed on your machine
-(`.github/workflows/validation.yml`). Nothing runs periodically:
+**GitHub Actions (self-hosted runner):** `.github/workflows/validation.yml` runs the suite on a runner registered with
+the labels `saos,gpu` (Settings → Actions → Runners):
 
-- every push to develop/master runs T1;
-- every pull request to master runs T1 + T2 (release gate);
-- any tier can be run on demand: Actions → validation → Run workflow, choosing `fast`, `nightly` or `heavy`.
+| Event | Tiers |
+|---|---|
+| Push to develop or master | T1 |
+| Pull request to master (`release-gate` job) | T1 + T2 |
+| Manual run (Actions → validation → Run workflow) | `fast`, `nightly` or `heavy` |
 
-Jobs triggered while the machine is off wait in the queue and start when the runner comes back (GitHub cancels them
-after 24 h).
-
-1. Register a runner with labels `saos,gpu` (Settings → Actions → Runners).
-2. Release gate: in Settings → Branches (or Rules → Rulesets) protect `master` with "Require a pull request before
-   merging" and "Require status checks to pass", selecting the `release-gate` check (T1 + T2 on the runner).
-   Merge develop into master through a pull request.
-
-The repository is public: the `release-gate` job only runs for pull requests opened from a branch of this repository
-(`head.repo == repository`), so a pull request from a fork never reaches the runner. Never use `pull_request_target`.
+Jobs triggered while the runner is offline stay queued until it connects (GitHub cancels them after 24 h). The
+`release-gate` job only runs for pull requests opened from a branch of this repository. Protecting master with a
+required `release-gate` status check (Settings → Rules → Rulesets) makes every merge from develop pass T1 + T2.
 
 ## Writing a test
 
