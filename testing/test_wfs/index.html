@@ -1,0 +1,2682 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Solar Adaptive Optics Simulator — a Python-first, free-threaded simulation framework.">
+      
+      
+        <meta name="author" content="SAOS Contributors">
+      
+      
+        <link rel="canonical" href="https://nrodlin.github.io/SAOS/testing/test_wfs/">
+      
+      
+        <link rel="prev" href="../test_data/">
+      
+      
+        <link rel="next" href="../test_corrsh/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>test_wfs.py - SAOS</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-orange" data-md-color-accent="amber">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#test_wfspy-shack-hartmann-point-source-validation" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="SAOS" class="md-header__button md-logo" aria-label="SAOS" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            SAOS
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              test_wfs.py
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="deep-orange" data-md-color-accent="amber"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="deep-orange" data-md-color-accent="amber"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/nrodlin/SAOS" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    nrodlin/SAOS
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../api/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Validation
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="SAOS" class="md-nav__button md-logo" aria-label="SAOS" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    SAOS
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/nrodlin/SAOS" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    nrodlin/SAOS
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/01_intro_to_saos.ipynb" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Introduction to SAOS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../api/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/telescope/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telescope
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/extended_source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extended Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/atmosphere/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Atmosphere
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/light_path/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Light Path
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/deformable_mirror/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deformable Mirror
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/misregistration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Misregistration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/vibration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vibration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/local_seeing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local Seeing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/ncpa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NCPA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/shwfs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SHWFS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/correlating_shwfs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Correlating SHWFS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/science_cam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Science Camera
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/interaction_matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction Matrix
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/controller/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Controller
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/learn_estimator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn Estimator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/sharepoint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sharepoint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/savepoint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Savepoint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/reception_point/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reception Point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/logging_helper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validation
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Validation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_atmosphere/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_atmosphere.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_atmosphere_t2/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_atmosphere_t2.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_perturbations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_perturbations.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_timing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_timing.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_detector.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_modal_basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_modal_basis.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_dm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_dm.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_packaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_packaging.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_data.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_wfs.py
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_wfs.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#test_tilt_axes_isotropy_cross_term" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_tilt_axes_isotropy_cross_term
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_tilt_scale_vs_exact_geometry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_tilt_scale_vs_exact_geometry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_reference_converged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_reference_converged
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_linearity_sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_linearity_sweep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_spot_centred_in_window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_spot_centred_in_window
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_odd_symmetry_all_pixels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_odd_symmetry_all_pixels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_continuity_default_brightest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_continuity_default_brightest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_defocus_astigmatism_relations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_defocus_astigmatism_relations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_quadratic_phase_absolute_slopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_quadratic_phase_absolute_slopes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_defocus_subaperture_geometry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_defocus_subaperture_geometry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_spot_fwhm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_spot_fwhm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_cog_photon_noise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_cog_photon_noise
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_reference_slopes_averaged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_reference_slopes_averaged
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_partial_subaperture_energy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_partial_subaperture_energy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_partial_energy_converges" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_partial_energy_converges
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_undersampled_spot_rejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_undersampled_spot_rejected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_use_brightest_validated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_use_brightest_validated
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_unknown_kwarg_reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_unknown_kwarg_reported
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_corrsh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_corrsh.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_extended_source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_extended_source.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_sciencecam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_sciencecam.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_im_controller/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_im_controller.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_learn_estimator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_learn_estimator.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_savepoint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_savepoint.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_sharepoint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_sharepoint.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_parallel_gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_parallel_gpu.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#test_tilt_axes_isotropy_cross_term" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_tilt_axes_isotropy_cross_term
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_tilt_scale_vs_exact_geometry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_tilt_scale_vs_exact_geometry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_reference_converged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_reference_converged
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_linearity_sweep" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_linearity_sweep
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_spot_centred_in_window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_spot_centred_in_window
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_odd_symmetry_all_pixels" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_odd_symmetry_all_pixels
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_continuity_default_brightest" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_continuity_default_brightest
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_defocus_astigmatism_relations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_defocus_astigmatism_relations
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_quadratic_phase_absolute_slopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_quadratic_phase_absolute_slopes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_defocus_subaperture_geometry" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_defocus_subaperture_geometry
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_spot_fwhm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_spot_fwhm
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_cog_photon_noise" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_cog_photon_noise
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_reference_slopes_averaged" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_reference_slopes_averaged
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_partial_subaperture_energy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_partial_subaperture_energy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_partial_energy_converges" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_partial_energy_converges
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_undersampled_spot_rejected" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_undersampled_spot_rejected
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_use_brightest_validated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_use_brightest_validated
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_unknown_kwarg_reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_unknown_kwarg_reported
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="test_wfspy-shack-hartmann-point-source-validation"><code>test_wfs.py</code> — Shack-Hartmann (point source) validation<a class="headerlink" href="#test_wfspy-shack-hartmann-point-source-validation" title="Permanent link">&para;</a></h1>
+<p>Source: <code>tests/test_wfs.py</code></p>
+<p>Covers <code>SAOS.ShackHartmann</code> (<code>wfs_measure</code>, <code>get_subaps</code>, <code>get_psf</code>, subaperture validity logic, parameter validation) with a point source. The sensor has <span class="arithmatex">\(6\times6\)</span> subapertures of <span class="arithmatex">\(d=0.1\)</span> m over a 48 px pupil (8 phase px per subaperture), band R (640 nm), 2 px per <span class="arithmatex">\(\lambda/d\)</span> unless stated, and is driven with synthetic phases; slopes are in detector pixels. The strategy is to compare against an independent reference written in the test file (<code>propagate_cog</code>): a direct Fourier sum of the continuous phase over the physical square subaperture (side <span class="arithmatex">\(d\)</span>, <span class="arithmatex">\(N_{ref}\)</span> equal cells), evaluated at the detector pixel centres <span class="arithmatex">\(u_m=(m-(n-1)/2)/\mathrm{samp}\)</span> in units of <span class="arithmatex">\(\lambda/d\)</span>, followed by the centre of gravity of the <span class="arithmatex">\(n\times n\)</span> window. The reference does not use SAOS code or SAOS-measured quantities; the centroid window truncation is part of the reference, while the spot-motion scale <span class="arithmatex">\(k_{px}=\lambda/(2\pi p)\cdot 206265/\mathrm{plate\_scale}\)</span> (<span class="arithmatex">\(p\)</span> = phase pixel) is derived from the nominal geometry. The tolerance policy (header of <code>tolerances/wfs.yaml</code>) is that tolerances only cover the numerical precision of the reference or estimator statistics (about 3.5 sigma) and never absorb a measured SAOS discrepancy. All tests are marked <code>fast</code> (module-level <code>pytestmark</code>).</p>
+<p>Common reference model. For a subaperture field <span class="arithmatex">\(E(\xi,\eta)=\exp[i\phi(\xi,\eta)]\)</span> on <span class="arithmatex">\(\xi,\eta\in[-1/2,1/2]\)</span>, the far field sampled at window pixel <span class="arithmatex">\((m_x,m_y)\)</span> is</p>
+<div class="arithmatex">\[
+I(u_x,u_y)=\left|\frac{1}{M^2}\sum_{\xi,\eta}E(\xi,\eta)\,e^{-2\pi i(u_x\xi+u_y\eta)}\right|^2 ,
+\]</div>
+<p>and the ideal slope is the window centroid relative to the window centre,</p>
+<div class="arithmatex">\[
+s_x=\frac{\sum_{m} (m-\tfrac{n-1}{2})\,I_m}{\sum_m I_m}.
+\]</div>
+<p>A phase gradient <span class="arithmatex">\(g\)</span> [rad/px] gives a spot shift <span class="arithmatex">\(k_{px}\,g\)</span> pixels (small-angle approximation, flat-field, noise-free).</p>
+<h2 id="test_tilt_axes_isotropy_cross_term"><code>test_tilt_axes_isotropy_cross_term</code><a class="headerlink" href="#test_tilt_axes_isotropy_cross_term" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.wfs_measure</code>.</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> a 0.3 px tilt along x on a square pupil gives positive x slopes, negligible y slopes (cross term), and the same response across all subapertures; a tilt along y gives the same response on the y slopes as x does on x (isotropy); a 30 deg tilt gives slopes whose angle is <span class="arithmatex">\(\arctan(\bar s_y/\bar s_x)=30^\circ\)</span>.</li>
+<li><strong>Theory / assumptions:</strong> slope = mean phase gradient converted to pixels, <span class="arithmatex">\(s=k_{px}\,g\)</span>; sign convention: positive phase gradient along +x gives a positive x slope. Linear regime, noise-free.</li>
+<li><strong>Tolerance:</strong> <code>tilt_axes</code> in <code>wfs.yaml</code>: cross term <span class="arithmatex">\(\le 10^{-3}\)</span> (<code>cross_max</code>), isotropy <span class="arithmatex">\(10^{-4}\)</span>, uniformity (std/mean) <span class="arithmatex">\(10^{-3}\)</span>, angle 0.1 deg; all set by float32 FFT precision.</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_tilt_scale_vs_exact_geometry"><code>test_tilt_scale_vs_exact_geometry</code><a class="headerlink" href="#test_tilt_scale_vs_exact_geometry" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.wfs_measure</code> (angular scale of the sensor, window sampling).</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> parametrised over <code>fov_px</code> = 15, 30. A 0.05 px tilt gives a mean slope that must equal the ideal window centroid from <code>tilt_cog</code> (ratio 1). It also records <span class="arithmatex">\(N\)</span> (samples across the subaperture) and <span class="arithmatex">\(N/(N-1)\)</span> as metrics.</li>
+<li><strong>Theory / assumptions:</strong> ideal centroid of the Fourier-sum reference for the nominal motion <span class="arithmatex">\(k_{px}g\)</span>; sampled reference with <span class="arithmatex">\(N\)</span> cells differs from the continuum by a few tenths of a percent.</li>
+<li><strong>Tolerance:</strong> <code>scale_atol</code> = 0.01 on the ratio (the reference sampled with <span class="arithmatex">\(N\)</span> cells differs from the continuum by 0.7 % at <span class="arithmatex">\(N=15\)</span> and 0.2 % at <span class="arithmatex">\(N=31\)</span> at the largest shift, per the yaml comment).</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_reference_converged"><code>test_reference_converged</code><a class="headerlink" href="#test_reference_converged" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> none from SAOS; tests the reference (<code>tilt_cog</code> / <code>propagate_cog</code>).</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> for shifts 0.05, 0.5, 2, 5 px, the ideal centroid computed with <span class="arithmatex">\(N=31\)</span> cells differs from the continuum (<span class="arithmatex">\(M=1024\)</span> cells) by less than the absolute-slope tolerance; the errors at <span class="arithmatex">\(N\)</span>, <span class="arithmatex">\(2N\)</span>, <span class="arithmatex">\(4N\)</span> are recorded and plotted (expected <span class="arithmatex">\(\propto 1/N^2\)</span>).</li>
+<li><strong>Theory / assumptions:</strong> midpoint-rule quadrature of the Fourier sum converges as <span class="arithmatex">\(1/N^2\)</span>.</li>
+<li><strong>Tolerance:</strong> <code>absolute.rtol</code> = <span class="arithmatex">\(5\times10^{-3}\)</span> on the maximum relative error with <span class="arithmatex">\(N\)</span> cells (measured <span class="arithmatex">\(\le 0.2\)</span> %).</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_linearity_sweep"><code>test_linearity_sweep</code><a class="headerlink" href="#test_linearity_sweep" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.wfs_measure</code> (full response curve of the centroid).</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> for 18 log-spaced spot motions from 0.01 to 6 px, both signs, 31 px window, the mean x slope satisfies <span class="arithmatex">\(|s-s_{ref}|\le \mathrm{atol}+\mathrm{rtol}|s_{ref}|\)</span> against the ideal window centroid for the nominal motion (no normalisation by the SAOS small-signal gain). The normalised gain curves are recorded as diagnostics only (not asserted).</li>
+<li><strong>Theory / assumptions:</strong> ideal windowed centroid, including window truncation at large shifts.</li>
+<li><strong>Tolerance:</strong> <code>absolute.rtol</code> = <span class="arithmatex">\(5\times10^{-3}\)</span>, <code>absolute.atol</code> = <span class="arithmatex">\(10^{-3}\)</span> px (float32 FFT / centroid precision); the combined ratio must be <span class="arithmatex">\(\le 1\)</span>.</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_spot_centred_in_window"><code>test_spot_centred_in_window</code><a class="headerlink" href="#test_spot_centred_in_window" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.get_subaps</code>, <code>wfs_measure</code> (window positioning).</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> parametrised over <code>fov_px</code> = 15, 16 (odd and even windows). With a flat phase the centre of gravity of the first subaperture image sits at <span class="arithmatex">\((n-1)/2\)</span> in x.</li>
+<li><strong>Theory / assumptions:</strong> an ideal sensor puts the zero-tilt spot at the window centre; this is the origin of the slope definition.</li>
+<li><strong>Tolerance:</strong> <code>centring_atol</code> = 0.05 px.</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_odd_symmetry_all_pixels"><code>test_odd_symmetry_all_pixels</code><a class="headerlink" href="#test_odd_symmetry_all_pixels" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.wfs_measure</code>, centroid on all pixels.</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> with an odd 15 px window and all pixels used, the response is odd, <span class="arithmatex">\(|s(+\theta)+s(-\theta)|/|s(+\theta)-s(-\theta)|\)</span> stays below the bound for shifts 0.05, 0.5, 1.5, 3 px, and the small-signal gain at 0.002 px equals that at 0.05 px (continuity at zero).</li>
+<li><strong>Theory / assumptions:</strong> symmetric window and symmetric spot imply odd centroid response.</li>
+<li><strong>Tolerance:</strong> <code>symmetry.asym_max</code> = 0.005 (0.5 %); <code>symmetry.continuity_atol</code> = 0.002 on the gain ratio.</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_continuity_default_brightest"><code>test_continuity_default_brightest</code><a class="headerlink" href="#test_continuity_default_brightest" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.wfs_measure</code> with <code>use_brightest=50</code>.</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> the small-signal gain at <span class="arithmatex">\(\pm0.002\)</span> px equals the gain at <span class="arithmatex">\(+0.05\)</span> px, and the gain at <span class="arithmatex">\(-0.05\)</span> px equals that at <span class="arithmatex">\(+0.05\)</span> px (odd, linear). The weighted selection of the brightest pixels keeps the response continuous at zero shift for a point source.</li>
+<li><strong>Theory / assumptions:</strong> none beyond linearity and oddness.</li>
+<li><strong>Tolerance:</strong> <code>symmetry.brightest_atol</code> = 0.02 (2 %), larger than the all-pixel case because of the tie-break discontinuity.</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_defocus_astigmatism_relations"><code>test_defocus_astigmatism_relations</code><a class="headerlink" href="#test_defocus_astigmatism_relations" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.wfs_measure</code> (linear response to quadratic phases).</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> scale-free algebraic identities with <span class="arithmatex">\(c=5\times10^{-4}\)</span> rad/px<span class="arithmatex">\(^2\)</span>: for defocus <span class="arithmatex">\(\phi=c(x^2+y^2)\)</span> the x slopes are independent of the row and <span class="arithmatex">\(s_x[i,j]=s_y[j,i]\)</span>; for <span class="arithmatex">\(\phi=cxy\)</span>, <span class="arithmatex">\(s_x=s_y^{\mathrm{defocus}}/2\)</span> and <span class="arithmatex">\(s_y=s_x^{\mathrm{defocus}}/2\)</span>; for <span class="arithmatex">\(\phi=c(x^2-y^2)\)</span>, <span class="arithmatex">\(s_x=s_x^{\mathrm{defocus}}\)</span> and <span class="arithmatex">\(s_y=-s_y^{\mathrm{defocus}}\)</span>. Differences are normalised by the largest slope.</li>
+<li><strong>Theory / assumptions:</strong> slope proportional to the mean phase gradient over the subaperture, <span class="arithmatex">\(\partial_x\phi=2cx\)</span> (defocus), <span class="arithmatex">\(cy\)</span> (astigmatism). Identities hold for any common scale, so they say nothing about absolute response (tested in <code>test_quadratic_phase_absolute_slopes</code>). Small amplitude keeps spot motions below 0.1 px (linear range).</li>
+<li><strong>Tolerance:</strong> <code>quadratic.rel_max</code> = <span class="arithmatex">\(2\times10^{-3}\)</span> relative to the largest slope.</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_quadratic_phase_absolute_slopes"><code>test_quadratic_phase_absolute_slopes</code><a class="headerlink" href="#test_quadratic_phase_absolute_slopes" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.wfs_measure</code>.</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> parametrised over <code>mode</code> in {defocus, astig_xy, astig_x2y2} and <code>c</code> in {0.002, 0.01, 0.03} rad/px<span class="arithmatex">\(^2\)</span> (9 cases). The slopes of every subaperture must match <code>quadratic_expected</code>, which propagates each subaperture independently over the 31 px window, so the reference includes window truncation and phase curvature inside the subaperture (spot motions up to about 3.7 px).</li>
+<li><strong>Theory / assumptions:</strong> per-subaperture Fourier-sum centroid as above, phase <span class="arithmatex">\(a_{xx}x^2+a_{yy}y^2+a_{xy}xy\)</span> about the pupil centre; subaperture centres are on the pupil grid (<code>SUB_C</code>).</li>
+<li><strong>Tolerance:</strong> <span class="arithmatex">\(|s-s_{ref}|\le\mathrm{atol}+\mathrm{rtol}|s_{ref}|\)</span> with <code>absolute.rtol</code> = <span class="arithmatex">\(5\times10^{-3}\)</span>, <code>absolute.atol</code> = <span class="arithmatex">\(10^{-3}\)</span> px.</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_defocus_subaperture_geometry"><code>test_defocus_subaperture_geometry</code><a class="headerlink" href="#test_defocus_subaperture_geometry" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann</code> subaperture grid geometry.</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> for defocus with <span class="arithmatex">\(c=0.002\)</span> the mean gradient over subaperture <span class="arithmatex">\(j\)</span> is <span class="arithmatex">\(2cx_j\)</span>, so the profile of the slopes is affine in the pupil-grid centres <span class="arithmatex">\(x_j=n_pj+(n_p-1)/2-(\mathrm{res}-1)/2\)</span>. A line <span class="arithmatex">\(s_j=a x_j+b\)</span> is fitted (scale <span class="arithmatex">\(a\)</span> absorbed): the centre offset <span class="arithmatex">\(b/a\)</span> and the maximum residual <span class="arithmatex">\(/a\)</span> (pitch uniformity), in px of subaperture position, must be small, for both axes.</li>
+<li><strong>Theory / assumptions:</strong> <span class="arithmatex">\(\bar{\partial_x\phi}=2c\,x_j\)</span>, linear regime.</li>
+<li><strong>Tolerance:</strong> <code>geometry.offset_atol</code> = 0.05 px, <code>geometry.pitch_atol</code> = 0.05 px.</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_spot_fwhm"><code>test_spot_fwhm</code><a class="headerlink" href="#test_spot_fwhm" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.wfs_measure</code> / <code>get_subaps</code> (spot shape and sampling).</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> the flat-phase spot of a square subaperture, 4 px per <span class="arithmatex">\(\lambda/d\)</span>, 31 px window: the FWHM along x and y (band-limited upsampled cut through the peak, then half-maximum crossings) divided by <span class="arithmatex">\(0.8859\,\lambda/d\)</span> equals 1.</li>
+<li><strong>Theory / assumptions:</strong> a square aperture of side <span class="arithmatex">\(d\)</span> gives a <span class="arithmatex">\(\mathrm{sinc}^2(d\,\theta/\lambda)\)</span> spot, with FWHM <span class="arithmatex">\(0.8859\,\lambda/d\)</span> (not the <span class="arithmatex">\(1.03\lambda/D\)</span> of a circular aperture).</li>
+<li><strong>Tolerance:</strong> <code>fwhm_atol</code> = 0.02 on the ratio.</li>
+<li><strong>References:</strong> Goodman, "Introduction to Fourier Optics" (Fraunhofer diffraction by a rectangular aperture).</li>
+</ul>
+<h2 id="test_cog_photon_noise"><code>test_cog_photon_noise</code><a class="headerlink" href="#test_cog_photon_noise" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.wfs_measure</code> with detector shot noise.</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> with QE 1, 1 e-/DN, no readout or dark noise and all window pixels, the variance of the slopes over 120 frames (all valid subapertures, x and y) equals <span class="arithmatex">\(M_2/N_e\)</span> for three flux levels (magnitude 2, 1, 0). <span class="arithmatex">\(M_2\)</span> is the second central moment of the ideal spot computed in the test; <span class="arithmatex">\(N_e\)</span> is the electron count measured in the noisy frames themselves, so photometric calibration is not involved.</li>
+<li><strong>Theory / assumptions:</strong> photon-noise-limited centre of gravity, <span class="arithmatex">\(\sigma_s^2=M_2/N_e\)</span> with <span class="arithmatex">\(M_2=\sum(x-x_c)^2I/\sum I\)</span>. Valid for negligible per-pixel rounding at these fluxes.</li>
+<li><strong>Tolerance:</strong> <code>photon_noise.ratio_atol</code> = 0.053 on the ratio (8640 samples give <span class="arithmatex">\(\sigma(\mathrm{var})/\mathrm{var}=\sqrt{2/8640}=1.5\)</span> %; band is 3.5 sigma).</li>
+<li><strong>References:</strong> none specific (standard photon-noise CoG variance, e.g. Rousset 1999 in Roddier, "Adaptive Optics in Astronomy").</li>
+</ul>
+<h2 id="test_reference_slopes_averaged"><code>test_reference_slopes_averaged</code><a class="headerlink" href="#test_reference_slopes_averaged" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann</code> reference-slope computation (<code>reference_slopes_maps</code>, <code>n_reference_frames</code>).</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> with <code>noiseFlag=True</code> the reference slopes are averaged over <code>n_reference_frames</code> (100) noisy frames, so <span class="arithmatex">\(\mathrm{rms}(\text{ref}_{noisy}-\text{ref}_{clean})=\sigma_1/\sqrt n\)</span>, where <span class="arithmatex">\(\sigma_1\)</span> is the single-frame noise rms measured over 30 extra frames; checked as <span class="arithmatex">\(\sqrt n\cdot\mathrm{ratio}=1\)</span>.</li>
+<li><strong>Theory / assumptions:</strong> independent frame noise, so averaging reduces rms by <span class="arithmatex">\(\sqrt n\)</span>.</li>
+<li><strong>Tolerance:</strong> <code>reference.n_sigma</code> = 3.5: band <span class="arithmatex">\(1\pm 3.5/\sqrt{2M}\)</span>, <span class="arithmatex">\(M\)</span> the number of valid slopes (estimator statistics).</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_partial_subaperture_energy"><code>test_partial_subaperture_energy</code><a class="headerlink" href="#test_partial_subaperture_energy" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann</code> validity of partial subapertures (<code>valid_subapertures</code>, <code>get_psf</code>).</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> parametrised over pupil resolution 48, 96, 192 (ids <code>res48</code>, <code>res96</code>, <code>res192</code>; 8, 16, 32 px per subaperture). For a circular pupil with 20 % central obstruction and flat phase, the valid-subaperture map equals (fraction of pixels in the pupil <span class="arithmatex">\(\ge 0.5\)</span>), and the energy of each valid subaperture image, relative to a fully illuminated one, equals the energy transmitted by the binary mask through that subaperture computed by an exact Fourier sum (<code>partial_energy_discrepancy</code>).</li>
+<li><strong>Theory / assumptions:</strong> the aperture contract: the pupil is a piecewise-constant binary mask, each pixel a uniform cell transmitted with unit amplitude; window energy = <span class="arithmatex">\(\sum|E_{far}|^2\)</span> over the window. The reference uses at least 256 Fourier cells per subaperture to avoid aliasing (about 1 % error otherwise).</li>
+<li><strong>Tolerance:</strong> <code>energy_atol</code> = <span class="arithmatex">\(2\times10^{-3}\)</span> (float32 FFT and exact Fourier-sum reference); the valid map must match exactly.</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_partial_energy_converges"><code>test_partial_energy_converges</code><a class="headerlink" href="#test_partial_energy_converges" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> same as above.</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> the rms (over valid subapertures) of energy ratio <span class="arithmatex">\(-1\)</span> is below the tolerance at each of the three pupil resolutions, i.e. the energy is a property of the aperture, not its sampling.</li>
+<li><strong>Theory / assumptions:</strong> as above.</li>
+<li><strong>Tolerance:</strong> <code>energy_atol</code> = <span class="arithmatex">\(2\times10^{-3}\)</span>.</li>
+<li><strong>References:</strong> none specific.</li>
+</ul>
+<h2 id="test_undersampled_spot_rejected"><code>test_undersampled_spot_rejected</code><a class="headerlink" href="#test_undersampled_spot_rejected" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.__init__</code> parameter validation.</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> a plate scale coarser than <span class="arithmatex">\(\lambda/d\)</span> (<code>samp=0.8</code>, spot below 1 px) raises <code>ValueError</code> at construction.</li>
+<li><strong>Theory / assumptions:</strong> convention/validation only.</li>
+<li><strong>Tolerance:</strong> exception raised.</li>
+<li><strong>References:</strong> none.</li>
+</ul>
+<h2 id="test_use_brightest_validated"><code>test_use_brightest_validated</code><a class="headerlink" href="#test_use_brightest_validated" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.__init__</code> / centroid selection (<code>use_brightest</code>).</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> parametrised with <code>n</code> = 0 (<code>zero</code>) and <span class="arithmatex">\(15^2+1\)</span> (<code>more_than_window</code>). Out-of-range <code>use_brightest</code> must either raise <code>ValueError</code> at construction, or behave as all pixels: 0.3 px tilt slopes equal those of <code>use_brightest = npix^2</code>.</li>
+<li><strong>Theory / assumptions:</strong> validation only.</li>
+<li><strong>Tolerance:</strong> max slope difference <span class="arithmatex">\(\le 10^{-6}\)</span> px (hard-coded).</li>
+<li><strong>References:</strong> none.</li>
+</ul>
+<h2 id="test_unknown_kwarg_reported"><code>test_unknown_kwarg_reported</code><a class="headerlink" href="#test_unknown_kwarg_reported" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>ShackHartmann.__init__</code> keyword handling.</li>
+<li><strong>Tier:</strong> fast.</li>
+<li><strong>What it checks:</strong> a misspelt option (<code>validSubapTreshold</code>) must raise <code>TypeError</code> or log a warning that names it.</li>
+<li><strong>Theory / assumptions:</strong> validation only.</li>
+<li><strong>Tolerance:</strong> exception or warning present.</li>
+<li><strong>References:</strong> none.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../test_data/" class="md-footer__link md-footer__link--prev" aria-label="Previous: test_data.py">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                test_data.py
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../test_corrsh/" class="md-footer__link md-footer__link--next" aria-label="Next: test_corrsh.py">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                test_corrsh.py
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.expand", "navigation.indexes", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

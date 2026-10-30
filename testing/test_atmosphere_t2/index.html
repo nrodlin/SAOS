@@ -1,0 +1,2338 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Solar Adaptive Optics Simulator — a Python-first, free-threaded simulation framework.">
+      
+      
+        <meta name="author" content="SAOS Contributors">
+      
+      
+        <link rel="canonical" href="https://nrodlin.github.io/SAOS/testing/test_atmosphere_t2/">
+      
+      
+        <link rel="prev" href="../test_atmosphere/">
+      
+      
+        <link rel="next" href="../test_perturbations/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/logo.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>test_atmosphere_t2.py - SAOS</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CJetBrains+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="deep-orange" data-md-color-accent="amber">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#test_atmosphere_t2py-atmosphere-at-est-scale-r0-scan-zernike-variances-frozen-flow-anisoplanatism-seeing-t2" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="SAOS" class="md-header__button md-logo" aria-label="SAOS" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            SAOS
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              test_atmosphere_t2.py
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="deep-orange" data-md-color-accent="amber"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="deep-orange" data-md-color-accent="amber"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/nrodlin/SAOS" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    nrodlin/SAOS
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../installation/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Installation
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../tutorials/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Tutorials
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../api/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Validation
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="SAOS" class="md-nav__button md-logo" aria-label="SAOS" data-md-component="logo">
+      
+  <img src="../../assets/logo.png" alt="logo">
+
+    </a>
+    SAOS
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/nrodlin/SAOS" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    nrodlin/SAOS
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../tutorials/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tutorials
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Tutorials
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../tutorials/01_intro_to_saos.ipynb" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Introduction to SAOS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../api/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    API Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    API Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/telescope/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Telescope
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/extended_source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extended Source
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/layer/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Layer
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/atmosphere/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Atmosphere
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/light_path/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Light Path
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/deformable_mirror/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deformable Mirror
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/misregistration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Misregistration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/vibration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Vibration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/local_seeing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Local Seeing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/ncpa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    NCPA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/shwfs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    SHWFS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/correlating_shwfs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Correlating SHWFS
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Detector
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/science_cam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Science Camera
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/interaction_matrix/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Interaction Matrix
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/controller/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Controller
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/learn_estimator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn Estimator
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/sharepoint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sharepoint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/savepoint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Savepoint
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/reception_point/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reception Point
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/logging_helper/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Logging
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api/data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Data files
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Validation
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Validation
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_atmosphere/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_atmosphere.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_atmosphere_t2.py
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_atmosphere_t2.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#test_r0_scan_pupil_scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_r0_scan_pupil_scale
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_outer_scale_recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_outer_scale_recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_zernike_variances_initial_screen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_zernike_variances_initial_screen
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_zernike_variances_atmosphere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_zernike_variances_atmosphere
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_taylor_frozen_flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_taylor_frozen_flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_anisoplanatism" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_anisoplanatism
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_seeing_limited_fwhm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_seeing_limited_fwhm
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_perturbations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_perturbations.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_timing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_timing.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_detector/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_detector.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_modal_basis/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_modal_basis.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_dm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_dm.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_packaging/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_packaging.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_data.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_wfs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_wfs.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_corrsh/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_corrsh.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_extended_source/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_extended_source.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_sciencecam/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_sciencecam.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_im_controller/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_im_controller.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_learn_estimator/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_learn_estimator.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_savepoint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_savepoint.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_sharepoint/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_sharepoint.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test_parallel_gpu/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    test_parallel_gpu.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#test_r0_scan_pupil_scale" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_r0_scan_pupil_scale
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_outer_scale_recovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_outer_scale_recovery
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_zernike_variances_initial_screen" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_zernike_variances_initial_screen
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_zernike_variances_atmosphere" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_zernike_variances_atmosphere
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_taylor_frozen_flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_taylor_frozen_flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_anisoplanatism" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_anisoplanatism
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test_seeing_limited_fwhm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        test_seeing_limited_fwhm
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+
+<h1 id="test_atmosphere_t2py-atmosphere-at-est-scale-r0-scan-zernike-variances-frozen-flow-anisoplanatism-seeing-t2"><code>test_atmosphere_t2.py</code> — atmosphere at EST scale: r0 scan, Zernike variances, frozen flow, anisoplanatism, seeing (T2)<a class="headerlink" href="#test_atmosphere_t2py-atmosphere-at-est-scale-r0-scan-zernike-variances-frozen-flow-anisoplanatism-seeing-t2" title="Permanent link">&para;</a></h1>
+<p>Source: <code>tests/test_atmosphere_t2.py</code></p>
+<p>Covers <code>PhaseScreenVonKarman</code> (initial and extruded screens), <code>Atmosphere</code> (multi-layer OPD, footprints), <code>Telescope</code>, <code>Source</code> and <code>ScienceCam</code> at the EST geometry (D = 4.149 m, 216 px, 1.92 cm/px, <span class="arithmatex">\(L_0\)</span> = 25 m, <span class="arithmatex">\(T_s\)</span> = 1 ms). All references are written inside the test module (von Kármán formulas, Noll Zernike basis orthonormalised on the sampled pupil, exact pupil covariance, finite-aperture long-exposure OTF), independent of SAOS. Statistics are larger than in T1 and several tests use a thread pool. The whole module is <code>nightly</code>. Tolerances come from <code>tests/tolerances/atmosphere_t2.yaml</code> (calibrated 2026-10-27 over 6 seed sets, each <span class="arithmatex">\(3.5\times\)</span> the per-run sd, scaled by <span class="arithmatex">\(1/\sqrt n\)</span> when <span class="arithmatex">\(n\)</span> differs from the calibration run; none is derived from a SAOS-vs-theory offset).</p>
+<h2 id="test_r0_scan_pupil_scale"><code>test_r0_scan_pupil_scale</code><a class="headerlink" href="#test_r0_scan_pupil_scale" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>PhaseScreenVonKarman.initial_screen</code> and <code>add_row</code>.</li>
+<li><strong>Tier:</strong> nightly. Parametrised over <code>source</code> = <code>initial</code>, <code>extruded</code>.</li>
+<li><strong>What it checks:</strong> for <span class="arithmatex">\(r_0\)</span> = 0.05, 0.08, 0.10, 0.15, 0.20, 0.30, 1.0 m, the mean structure function of 16 screens of 216 px (initial FFT screens, or one extruded screen sampled every <span class="arithmatex">\(2n_x\)</span> rows after a burn-in of <span class="arithmatex">\(n_x\)</span> rows; the YAML gives <code>n_maps</code> = 16, the docstring still says 32) is fitted (lags 1 px to <span class="arithmatex">\(n_x/2\)</span>) for <span class="arithmatex">\(r_0\)</span> jointly with <span class="arithmatex">\(L_0\)</span> and with <span class="arithmatex">\(L_0\)</span> fixed. Fitted/true <span class="arithmatex">\(r_0\)</span> must be 1 and the joint <span class="arithmatex">\(L_0\)</span> ratio must lie in <span class="arithmatex">\([e^{-t}, e^{t}]\)</span>.</li>
+<li><strong>Theory / assumptions:</strong> <span class="arithmatex">\(D_{vK}(r; r_0, L_0)\)</span> above; a pupil-sized screen (<span class="arithmatex">\(\approx 0.16\,L_0\)</span>) only weakly constrains <span class="arithmatex">\(L_0\)</span>, hence a tolerance on <span class="arithmatex">\(\log L_0\)</span>.</li>
+<li><strong>Tolerance:</strong> <code>atmosphere_t2.r0_scan.{initial,extruded}</code>: <code>r0_joint</code>, <code>r0_fixed</code> (per <span class="arithmatex">\(r_0\)</span>; initial 0.032 / 0.116, extruded 0.077 / 0.123) and <code>logL0</code> (0.95 initial, 1.6 extruded), all <span class="arithmatex">\(3.5\sigma\)</span> over seeds.</li>
+<li><strong>References:</strong> Assémat, Wilson &amp; Gendron 2006; Roddier 1981.</li>
+</ul>
+<h2 id="test_outer_scale_recovery"><code>test_outer_scale_recovery</code><a class="headerlink" href="#test_outer_scale_recovery" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>PhaseScreenVonKarman.initial_screen</code>.</li>
+<li><strong>Tier:</strong> nightly. Parametrised over <code>L0_true</code> = 5, 12, 25 m.</li>
+<li><strong>What it checks:</strong> screens of 38.4 m (256 px of 15 cm, <span class="arithmatex">\(r_0\)</span> = 0.3 m) that span the turnover; joint <span class="arithmatex">\(r_0\)</span>/<span class="arithmatex">\(L_0\)</span> fit of the mean <span class="arithmatex">\(D(r)\)</span> of 24 initial screens (lags 0.45 m to 19 m) recovers <span class="arithmatex">\(L_0\)</span> (within <span class="arithmatex">\(e^{\pm t}\)</span>) and <span class="arithmatex">\(r_0\)</span>.</li>
+<li><strong>Theory / assumptions:</strong> as for the T1 outer-scale tests.</li>
+<li><strong>Tolerance:</strong> <code>atmosphere_t2.outer_scale.L0_{5,12,25}</code>: <code>r0</code> 0.011 / 0.028 / 0.032 and <code>logL0</code> 0.021 / 0.084 / 0.112 (<span class="arithmatex">\(3.5\sigma\)</span> over seeds).</li>
+<li><strong>References:</strong> Assémat, Wilson &amp; Gendron 2006.</li>
+</ul>
+<h2 id="test_zernike_variances_initial_screen"><code>test_zernike_variances_initial_screen</code><a class="headerlink" href="#test_zernike_variances_initial_screen" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>PhaseScreenVonKarman.initial_screen</code>.</li>
+<li><strong>Tier:</strong> nightly.</li>
+<li><strong>What it checks:</strong> the variances of the Z2 to Z11 coefficients of 1000 initial 216 px screens (<span class="arithmatex">\(r_0\)</span> = 0.10 m, <span class="arithmatex">\(L_0\)</span> = 25 m; the docstring still says 600) on the circular pupil against the exact von Kármán projection computed on the sampled pupil; the mean of the ratios over Z2 to Z11; and the largest off-diagonal element of the whitened covariance (Cholesky of the theory), which must be near zero.</li>
+<li><strong>Theory / assumptions:</strong> the coefficients are <span class="arithmatex">\(a_j = \frac{1}{N}\sum_{\mathrm{pupil}}\varphi Z_j\)</span> with Noll-normalised Zernikes orthonormalised on the sampled pupil; their covariance is <span class="arithmatex">\(G = B^{T}CB\)</span>, the sampled covariance <span class="arithmatex">\(C\)</span> projected on the basis (computed by FFT convolution of the sampled <span class="arithmatex">\(C(r)\)</span> with each basis vector). Gaussian variance estimator: relative sd <span class="arithmatex">\(\sqrt{2/n}\)</span>.</li>
+<li><strong>Tolerance:</strong> <code>atmosphere_t2.zernike.initial</code>: <code>mode</code> 0.27, <code>mean</code> 0.085, <code>offdiag</code> 0.18, with <span class="arithmatex">\(n\)</span> = 1000 (<span class="arithmatex">\(3.5\,\mathrm{sd}_{200}/\sqrt5\)</span>; off-diagonal limit adds <span class="arithmatex">\(3.5\times0.06/\sqrt5\)</span> to the expected <span class="arithmatex">\(0.20/\sqrt5\)</span>).</li>
+<li><strong>References:</strong> Noll 1976, JOSA 66:207.</li>
+</ul>
+<h2 id="test_zernike_variances_atmosphere"><code>test_zernike_variances_atmosphere</code><a class="headerlink" href="#test_zernike_variances_atmosphere" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>Atmosphere</code> (3 layers at 0/5/12 km, 60/30/10 % Cn<span class="arithmatex">\(^2\)</span>, total <span class="arithmatex">\(r_0\)</span> = 0.12 m, winds 0/90/0 deg), <code>Atmosphere.updateLayer</code>, <code>getOPD</code>.</li>
+<li><strong>Tier:</strong> nightly.</li>
+<li><strong>What it checks:</strong> the same Z2 to Z11 variance ratios and whitened covariance as above for the on-axis OPD, after burn-in, with 1000 samples from 4 independent atmospheres spaced 1000 rows (19 m, decorrelated beyond <span class="arithmatex">\(L_0\)</span>).</li>
+<li><strong>Theory / assumptions:</strong> a sum of independent layers with <span class="arithmatex">\(\sum r_{0,i}^{-5/3} = r_0^{-5/3}\)</span> and a common <span class="arithmatex">\(L_0\)</span> has the von Kármán covariance of <span class="arithmatex">\(r_0\)</span>. The measured mean ratio is about 0.96 (Z4 about 0.78, Z10 about 0.88), so the tolerances are set from the observed spread.</li>
+<li><strong>Tolerance:</strong> <code>atmosphere_t2.zernike.atmosphere</code>: <code>mode</code> 0.16, <code>mean</code> 0.033, <code>offdiag</code> 0.14, <span class="arithmatex">\(n\)</span> = 1000.</li>
+<li><strong>References:</strong> Noll 1976, JOSA 66:207.</li>
+</ul>
+<h2 id="test_taylor_frozen_flow"><code>test_taylor_frozen_flow</code><a class="headerlink" href="#test_taylor_frozen_flow" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>Atmosphere.update</code>, <code>Atmosphere.getOPD</code> (single layer).</li>
+<li><strong>Tier:</strong> nightly. Parametrised over (k px/step, direction deg) = (1, 0), (1, 90), (2, 0).</li>
+<li><strong>What it checks:</strong> the temporal structure function of the on-axis OPD of one layer, averaged over the 216 x 216 px and 2000 steps after a burn-in of <span class="arithmatex">\(2n_x\)</span> steps, at delays <span class="arithmatex">\(\tau\)</span> = 1, 2, 3, 5, 8, 13, 21, 34, 54, 80, 108 steps (limited to <span class="arithmatex">\(k\tau\le108\)</span> px), against the spatial <span class="arithmatex">\(D_{vK}\)</span> at <span class="arithmatex">\(r = k\tau\,\mathrm{px}\)</span>. The effective speed ratio (mean ratio on <span class="arithmatex">\(r\le n_x/4\)</span> to the power 0.6) is recorded.</li>
+<li><strong>Theory / assumptions:</strong> Taylor frozen flow,</li>
+</ul>
+<div class="arithmatex">\[D_\varphi(\tau) = \langle[\varphi(t+\tau)-\varphi(t)]^2\rangle = D_{vK}(v\tau T_s),\qquad D\propto v^{5/3}\ (r\ll L_0),\]</div>
+<p>independent of the direction of motion; integer pixels per step.
+- <strong>Tolerance:</strong> <code>atmosphere_t2.frozen_flow</code>: per-delay absolute tolerance on the ratio, <code>small_r</code> = [0.12, 0.16, 0.19, 0.23, 0.29, 0.34, 0.40, 0.48, 0.61] and <code>large_r</code> = [0.80, 1.01]; <span class="arithmatex">\(3.5\times\)</span> the largest sd of the (1,0) and (1,90) cases, indexed by delay and therefore conservative for <span class="arithmatex">\(k&gt;1\)</span>. The tolerances are wide at large <span class="arithmatex">\(\tau\)</span> because few independent samples cover the screen.
+- <strong>References:</strong> Taylor frozen-flow hypothesis (Conan 1995 discusses temporal statistics; the test uses the structure function, not spectra).</p>
+<h2 id="test_anisoplanatism"><code>test_anisoplanatism</code><a class="headerlink" href="#test_anisoplanatism" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>Atmosphere.getOPD</code> for off-axis <code>Source</code>, footprint model.</li>
+<li><strong>Tier:</strong> nightly.</li>
+<li><strong>What it checks:</strong> the mean over the pupil and over 96 samples of <span class="arithmatex">\((\mathrm{OPD}(\theta)-\mathrm{OPD}(0))^2\)</span> for <span class="arithmatex">\(\theta\)</span> = 5, 10, 15, 20 arcsec (4 layers, <span class="arithmatex">\(r_0\)</span> = 0.12 m, fractions 0.5/0.2/0.2/0.1, altitudes 0, about 1.6, 4, 8 km tuned to integer-pixel offsets), both pointwise and after removing the pupil mean (piston), against theory.</li>
+<li><strong>Theory / assumptions:</strong> independent layers, each with <span class="arithmatex">\(r_{0,i} = r_0 f_i^{-3/5}\)</span> and shift <span class="arithmatex">\(s_i = h_i\tan\theta\)</span>:</li>
+</ul>
+<div class="arithmatex">\[\langle\Delta\varphi^2\rangle_{pw} = \sum_i D_i(s_i) = \sum_i 2\,[C_i(0)-C_i(s_i)],\]</div>
+<p>and with piston removed the variance is reduced by <span class="arithmatex">\(\frac{1}{N^2}\sum_{\mathbf{p},\mathbf{q}}\sum_i\left[2C_i(\mathbf{d})-C_i(\mathbf{d}+\mathbf{s}_i)-C_i(\mathbf{d}-\mathbf{s}_i)\right]\)</span> (<span class="arithmatex">\(\mathbf d=\mathbf p-\mathbf q\)</span>), computed with the autocorrelation of the sampled circular pupil. Altitudes are chosen so the footprint offsets are <span class="arithmatex">\(n+0.02\)</span> px, to decouple rounding of the integer-pixel footprint from the physics.
+- <strong>Tolerance:</strong> <code>atmosphere_t2.aniso</code>: <code>rel</code> = 0.15 on the SAOS/theory ratio with <span class="arithmatex">\(n\)</span> = 96 (<span class="arithmatex">\(3.5\,\mathrm{sd}_{32}/\sqrt3\)</span>; worst sd<span class="arithmatex">\(_{32}\)</span> = 0.073).
+- <strong>References:</strong> none specific; the pupil-covariance computation is the test's own.</p>
+<h2 id="test_seeing_limited_fwhm"><code>test_seeing_limited_fwhm</code><a class="headerlink" href="#test_seeing_limited_fwhm" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Module:</strong> <code>Atmosphere</code> + <code>ScienceCam.get_frame</code> (no AO).</li>
+<li><strong>Tier:</strong> nightly. Parametrised over <span class="arithmatex">\(r_0\)</span> = 0.10, 0.15, 0.25 m.</li>
+<li><strong>What it checks:</strong> the FWHM of the long exposure of 480 ScienceCam frames (6 atmospheres x 80 frames spaced 16 m along the motion; one layer, <span class="arithmatex">\(L_0\)</span> = 25 m, 500 nm, 1.5 px per <span class="arithmatex">\(\lambda/D\)</span>, 3.6 arcsec field) against the exact expected long exposure of the finite aperture, and first that the Tokovinin formula agrees with that reference. FWHM is measured on the azimuthal mean about the optical axis (quadratic peak fit, linear half-maximum crossing), with the same estimator on reference and SAOS.</li>
+<li><strong>Theory / assumptions:</strong> long-exposure OTF <span class="arithmatex">\(T(\rho)=T_{tel}(\rho)\exp[-D_{vK}(\rho)/2]\)</span> (finite aperture) evaluated by FFT on the camera grid, and the seeing FWHM</li>
+</ul>
+<div class="arithmatex">\[\mathrm{FWHM} \approx 0.976\,\frac{\lambda}{r_0}\sqrt{1-2.183\,(r_0/L_0)^{0.356}},\]</div>
+<p>valid for <span class="arithmatex">\(r_0\ll L_0\)</span>.
+- <strong>Tolerance:</strong> <code>atmosphere_t2.seeing</code>: <code>formula_accuracy</code> 0.03 (Tokovinin vs finite-aperture reference; measured 1.3 to 2.4 %, deterministic) and <code>rel</code> 0.084 (SAOS vs reference; <span class="arithmatex">\(3.5\times\)</span> worst sd 0.024 at <span class="arithmatex">\(r_0\)</span> = 0.25). FWHM SAOS/Tokovinin is only recorded.
+- <strong>References:</strong> Tokovinin 2002 (PASP 114:1156); Roddier 1981.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../test_atmosphere/" class="md-footer__link md-footer__link--prev" aria-label="Previous: test_atmosphere.py">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                test_atmosphere.py
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../test_perturbations/" class="md-footer__link md-footer__link--next" aria-label="Next: test_perturbations.py">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                test_perturbations.py
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.expand", "navigation.indexes", "navigation.top", "navigation.footer", "search.suggest", "search.highlight", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
