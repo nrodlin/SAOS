@@ -30,8 +30,7 @@ see `ci/README.md` for the nightly timer, the git hooks and the GitHub workflow.
 ## Tolerance policy
 
 Tolerances (`tests/tolerances/*.yaml`) only cover the statistical uncertainty of the estimator (about 3.5 sigma, measured
-over several seed sets) or the numerical precision of the reference. They never absorb a measured SAOS discrepancy: a
-systematic offset is either corrected or an explicit, documented convention.
+over several seed sets) or the numerical precision of the reference. A systematic offset is either corrected or an explicit, documented convention.
 
 ## Conventions and common theory
 
@@ -57,7 +56,7 @@ $$C(r) = C(0)\,\frac{2^{1/6}}{\Gamma(5/6)}\,x^{5/6}K_{5/6}(x),\quad x = \frac{2\
 | [`test_detector.py`](test_detector.md) | Detector noise statistics, quantisation, saturation, reproducibility (T1) | 11 | fast |
 | [`test_modal_basis.py`](test_modal_basis.md) | modal bases for DM commands and interaction matrices (T1) | 12 | fast |
 | [`test_dm.py`](test_dm.md) | DeformableMirror: influence functions, fitting, altitude footprints, geometry, dynamics, misregistration (T1) | 15 | fast |
-| [`test_packaging.py`](test_packaging.md) | wheel contents and declared dependencies (C.13, nightly) | 2 | nightly |
+| [`test_packaging.py`](test_packaging.md) | wheel contents and declared dependencies (nightly) | 2 | nightly |
 | [`test_wfs.py`](test_wfs.md) | Shack-Hartmann (point source) validation | 18 | fast |
 | [`test_corrsh.py`](test_corrsh.md) | Correlating Shack-Hartmann (solar, extended scene) | 13 | fast |
 | [`test_extended_source.py`](test_extended_source.md) | Extended (solar) source with ScienceCam and Atmosphere | 15 | nightly |

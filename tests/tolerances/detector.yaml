@@ -1,6 +1,6 @@
 # Tolerances of tests/test_detector.py. Samples: 4 frames x 128^2 px = 65536 independent pixels (2 frames = 32768 for the
 # dark calibration). One statistical policy: tolerance = 3.5 sigma of the estimator, sigma measured over 30 seeds
-# (theoretical value in parentheses); no tolerance absorbs a measured SAOS discrepancy.
+# (theoretical value in parentheses).
 shot_noise:
   mean_rtol: 7.3e-4     # sigma(mean/(QE N)) = 2.1e-4 measured (1/sqrt(QE N n_px) = 2.5e-4)
   var_rtol: 0.020       # sigma(var ratio) = 5.6e-3 (sqrt(2/n_px) = 5.5e-3)

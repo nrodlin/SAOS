@@ -156,8 +156,7 @@ def main():
         h.append(f'<p class="bad">pytest session ended abnormally (exit status {info.get("exitstatus")}): '
                  'interrupted, collection error or no tests selected. The results below are incomplete.</p>')
     h.append('<p class="muted">Tests labelled with a known issue state the physically correct behaviour and fail while '
-             'the SAOS bug exists. A labelled test that passes means the bug is no longer reproduced: check the fix and '
-             'remove the label.</p>')
+             'the SAOS bug exists. A labelled test that passes means the bug is no longer reproduced and the label can be removed.</p>')
 
     issues = defaultdict(list)
     for t in tests:

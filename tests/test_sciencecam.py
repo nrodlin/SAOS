@@ -192,7 +192,7 @@ def test_psf_obstructed_vs_reference(logger, tolerances, report):
 
 def test_psf_band_limited_beyond_nyquist(logger, tolerances, rng, report):
     """
-    REGRESSION (SCI-MFT-ALIAS, 2026-10-30): a camera field wider than the Nyquist band of the pupil sampling. The pupil
+    Band limit: a camera field wider than the Nyquist band of the pupil sampling. The pupil
     field is known at its samples (dx = D / res), so its spectrum is defined for |u| <= 1/2 cycle per sample, i.e. angles
     |theta| <= lambda / (2 dx); the transform of the samples is periodic beyond (replicas at lambda / dx). Here 64 px pupil,
     4 px per lambda/D and a 384 px field (|u| up to 0.75): pixels outside the band must be exactly zero; inside the band the

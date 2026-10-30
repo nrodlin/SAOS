@@ -1,5 +1,5 @@
 """
-Packaging of SAOS (C.13): the wheel built from the repository must contain every subpackage and the solar images, and its
+Packaging of SAOS: the wheel built from the repository must contain every subpackage and the solar images, and its
 declared dependencies must be exactly the third-party modules imported by the package (independent check: the imports are
 read from the source with ast, not from setup.cfg).
 """

@@ -210,7 +210,7 @@ def test_strehl_subpixel_tilt(savepoint, tolerances, report):
 
 def test_strehl_in_field_convention(savepoint, rng, tolerances, report):
     """
-    The saved Strehl is the measured SR in the camera field (documented convention, the owner's decision 2026-10-27):
+    The saved Strehl is the measured SR in the camera field (documented convention):
     SR = (peak / energy in the field) / (ideal peak / ideal energy in the field) = SR_peak * f0 / f, with f and f0 the
     fractions of the total energy inside the field for the aberrated and the ideal PSF. Independent terms: SR_peak = maximum
     of the aberrated PSF sampled 16x finer (unit ideal peak), f / f0 from sums of independent frames normalised to the
@@ -273,7 +273,7 @@ def test_contrast_and_mfgs(savepoint, report):
     gives a/sqrt(2). MFGS: a deterministic 12 x 12 texture (smooth waves + a hot pixel + a pseudo-random pattern) must equal the
     independent loop implementation `mfgs_reference` for several amplitudes of the high-frequency pattern, with
     contrast and MFGS invariant to the image scale (frames are saved in photons or DN). The border of the median filter is
-    extended symmetrically (zero padding biased the border medians low, SAV-MFGS-BORDER).
+    extended symmetrically (zero padding would bias the border medians low).
     """
     sp = savepoint()
     lp = types.SimpleNamespace(src=types.SimpleNamespace(tag='sun'))

@@ -1,6 +1,6 @@
 # Tolerances of tests/test_corrsh.py (CorrelatingShackHartmann, 6x6 subapertures of 0.1 m, 8 px per subaperture, V band, 0.4"/px,
-# lambda/d = 2.58 px, sun patches of 58 px, noise-free unless stated). Policy: tolerances cover the numerical precision of the
-# independent reference or estimator statistics; they never absorb a measured SAOS discrepancy. Calibrated 2026-10-27 (CPU, float32).
+# lambda/d = 2.58 px, sun patches of 58 px, noise-free unless stated). Tolerances cover the numerical precision of the
+# independent reference or estimator statistics. Calibrated 2026-10-27 (CPU, float32).
 tilt:
   cog_atol: 0.002       # px; spot centroid vs Fourier-sum reference (M = 256 cells vs 128 pupil samples): measured 4.3e-4
   image_atol: 0.002     # max |spot - reference| / reference peak: measured 3.6e-4
@@ -21,12 +21,12 @@ conv:
   image_atol: 1.0e-5    # max |image - reference| / peak, float32 FFT (measured 1.5e-7 ... 2.7e-8)
   cog_atol: 1.0e-4      # px (measured 4e-6)
   flux_atol: 1.0e-5     # std/mean of the flux ratio, float32 (measured 1e-7)
-linearity:               # owner's specification (2026-10-27)
-  use_brightest: 9        # estimator setting under test (owner: 9 in campaigns; 16 tried 2026-10-27: worse)
+linearity:               # linearity and cross-coupling over the measuring range
+  use_brightest: 9        # estimator setting under test (16 gives worse linearity)
   range_arcsec: 4.0    # +-10 px = 80 % of the half window (4.25" fails cross-coupling only at the window-edge point)
   n_points: 41
-  lin_frac: 0.02          # RMS of the mean slopes about the fitted line <= 2 % of R (owner 2026-10-27)
-  cross_frac: 0.03        # RMS over subapertures of the cross slopes <= 3 % of R at every shift (owner, 2026-10-27)
+  lin_frac: 0.02          # RMS of the mean slopes about the fitted line <= 2 % of R
+  cross_frac: 0.03        # RMS over subapertures of the cross slopes <= 3 % of R at every shift
   residual_rms_rad: 0.3   # fixed residual phase making the subaperture images (and the pseudo-reference) differ
 isotropy:
   atol: 2.0e-4          # px; same code path for rows and columns, float32 (measured 4e-5)

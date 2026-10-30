@@ -70,7 +70,7 @@ def test_readout_noise_on_signal(logger, report, tolerances):
 
 def test_readout_noise_dark_frame(logger, report, tolerances):
     """
-    Readout noise on a dark frame. SAOS convention (owner's decision 2026-10-27, DET-RON-CLIP accepted): no bias pedestal and
+    Readout noise on a dark frame. SAOS convention: no bias pedestal and
     unsigned output, so negative excursions are clipped at 0. A zero-mean Gaussian of sigma clipped at 0 has mean
     sigma/sqrt(2 pi) and variance sigma^2 (1/2 - 1/(2 pi)): the dark frame must follow that clipped law.
     """

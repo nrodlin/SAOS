@@ -22,7 +22,7 @@ if [ ! -d "$WT" ]; then
 else
     git -C "$WT" checkout -q --force --detach "$SHA" && git -C "$WT" clean -qfdx || { echo "checkout of $SHA failed" >&2; exit 1; }
 fi
-# Never test (and stamp) another commit than the requested one
+# The worktree must be at the fetched commit; otherwise nothing is tested or stamped
 if [ "$(git -C "$WT" rev-parse HEAD)" != "$SHA" ]; then
     echo "worktree is not at $SHA, aborting" >&2; exit 1
 fi

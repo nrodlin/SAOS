@@ -1,6 +1,6 @@
 # Tolerances of tests/test_sciencecam.py.
 # Calibrated on 2026-10-26 (develop a243eb4, CPU) unless stated; values are a few times the deviation measured with the
-# correct behaviour (fixed seeds), so that a real regression and not numerical noise trips them.
+# correct behaviour (fixed seeds), so that a real deviation and not numerical noise trips them.
 psf:
   fwhm_rtol: 0.01               # measured -0.15% (64-px pixelated pupil vs continuous Airy)
   first_zero_rtol: 0.02         # ring position from the azimuthal mean of an 8x upsampled frame (0.25 px bins)
@@ -19,6 +19,6 @@ long_exposure:
   discrete_profile_atol: 1.0e-3 # LE vs DL frame convolved with the discrete tilt set (exact; measured 2e-4 = FoV edge)
   gaussian_fwhm_rtol: 0.015     # 30x30 Gaussian-quantile tilts vs continuous Gaussian blur (grid itself: ~0.3%)
   gaussian_profile_atol: 0.015
-band_limit:                     # PSF band limited to the Nyquist band of the pupil sampling (2026-10-30)
+band_limit:                     # PSF band limited to the Nyquist band of the pupil sampling
   energy_atol: 1.0e-10          # Parseval over exactly one period: numerical precision
   inside_atol: 1.0e-10          # same samples, same transform (MFT vs zero-padded FFT): numerical precision

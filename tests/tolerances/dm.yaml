@@ -6,8 +6,8 @@ model:
 fitting:                    # mechCoupling 0.6 (default), 11x11 actuators over 4 m
   ratio_atol: 1.0e-8        # SAOS residual/target ratio minus the independent-model ratio (numerical precision)
 geometry:
-  metapupil_rel: 1.0e-6     # 206624 (before 2026-10-27) gave -1.7e-3 relative on the field term
-  grid_step_rel: 1.0e-3     # before 2026-10-27 (grid D_fov/(D_px-1)): EST 20 km -4.0e-3 vs ground; D/(N-1) vs D/N -1.6e-2 at N = 64
+  metapupil_rel: 1.0e-6     # sensitivity: a metapupil footprint of 206624 gives -1.7e-3 relative on the field term
+  grid_step_rel: 1.0e-3     # sensitivity: a grid D_fov/(D_px-1) gives EST 20 km -4.0e-3 vs ground; D/(N-1) vs D/N -1.6e-2 at N = 64
 dynamics:
   rel: 1.0e-12              # torch float64 vs scipy dlsim
 footprint:

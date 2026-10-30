@@ -1,22 +1,22 @@
 """
 T2 validation of the extended source (ExtendedSource) used with ScienceCam and Atmosphere.
 
-Scenario of the owner (mcaobenchcodes/processingScripts/generateExtendedAsterism.py and
+Scenario based on the asterism scripts (mcaobenchcodes/processingScripts/generateExtendedAsterism.py and
 telescopeSims/anisoplanatism/anisoplanatismPointSource.py): an h5 image of delta-function "stars" at 0.0128"/px,
 written as image[x_px, y_px] (first axis = sky x = r cos(az), second axis = sky y = r sin(az)), is observed by an
 EST-like telescope (D 4.149 m, central obstruction 1.3 m, 3x3 sub-directions, FoV 9.975", padding 5", margin 4") with a
-ScienceCam at 0.0128"/px. Besides the 17 stars of the owner a marker star at (x, y) = (+3.0", -1.2") breaks the D4
+ScienceCam at 0.0128"/px. Besides the 17 stars of the asterism a marker star at (x, y) = (+3.0", -1.2") breaks the D4
 symmetry of the pattern, so that a transposed or mirrored image is detected. The same 18 directions are observed with
 point sources (NGS) for reference.
 
 Every expectation is computed independently of SAOS (own geometry, own FFT of an analytic annular pupil, own
 sampling of the atmosphere screen, own convolution) with the conventions of the camera frames: [row, col], first
-axis = image row, called x by the owner's generator, pixel nPix//2 = optical axis. In the SAOS sky frame of the
+axis = image row, called x by the asterism generator, pixel nPix//2 = optical axis. In the SAOS sky frame of the
 atmosphere and the DMs (x = column, y = row), the image row is sky y: the NGS observing the star written at
-image[x_px, y_px] is placed at azimuth 90 - phi (fixed with EXT-TRANSPOSE, 2026-10-27).
+image[x_px, y_px] is placed at azimuth 90 - phi.
 
 Telescope resolution: 450 px (about 2 per camera pupil sample at 898 px), so that the known resampling errors of
-ScienceCam (SCI-SCALE, SCI-SR-RESAMPLE, tests/test_sciencecam.py) stay below 0.2% of the PSF peak and do not mask
+ScienceCam (tests/test_sciencecam.py) stay below 0.2% of the PSF peak and do not mask
 the extended-source mechanics; with the 200 px of the production scripts the reference mismatch is 0.7% (flat phase)
 to 2.3% (r0 0.6 m).
 
@@ -60,7 +60,7 @@ TEXT_OWNER = [[0, 0],
               [1.872, 0], [1.872, 90], [1.872, 180], [1.872, -90],
               [2.647, 45], [2.647, 135], [2.647, -135], [2.647, -45],
               [3.744, 0], [3.744, 90], [3.744, 180], [3.744, -90],
-              [5.294, 45], [5.294, 135], [5.294, -135], [5.294, -45]]       # [r ("), azimuth (deg)] of the owner
+              [5.294, 45], [5.294, 135], [5.294, -135], [5.294, -45]]       # [r ("), azimuth (deg)] of the asterism
 MARKER = [3.23, -21.8]                                                       # (x, y) = (+3.0", -1.2")
 STAR_POLAR = TEXT_OWNER + [MARKER]
 
@@ -204,7 +204,7 @@ def device():
 
 
 def pattern_stars(npix):
-    """Integer pixel offsets (ix, iy) from the image centre of the stars, rounded as in the owner's generator."""
+    """Integer pixel offsets (ix, iy) from the image centre of the stars, rounded as in the asterism generator."""
     out = []
     for r, phi in STAR_POLAR:
         out.append(dict(r=r, phi=phi, x=r * np.cos(np.deg2rad(phi)), y=r * np.sin(np.deg2rad(phi)),
@@ -221,7 +221,7 @@ def write_h5(path, data):
 
 
 def write_pattern(path):
-    """Owner's recipe (generateExtendedAsterism.py): delta stars written as image[x_px, y_px], plus the marker star."""
+    """Asterism recipe (generateExtendedAsterism.py): delta stars written as image[x_px, y_px], plus the marker star."""
     npix = int(np.round(20 / PS))
     img = np.zeros((npix, npix))
     stars = pattern_stars(npix)
@@ -264,7 +264,7 @@ def run_case(path, tel, logger, atm, stars):
     sun = make_sun(path, logger)
     cam = make_cam(tel, logger)
     ext, _ = science_frame(sun, atm, tel, cam, logger)
-    # The star sits at image [row, col] = (r cos phi, r sin phi) (owner's image[x_px, y_px]); in the SAOS sky frame
+    # The star sits at image [row, col] = (r cos phi, r sin phi) (generator convention image[x_px, y_px]); in the SAOS sky frame
     # (atmosphere, DMs: x = column, y = row) that direction is (x, y) = (r sin phi, r cos phi), i.e. azimuth 90 - phi
     ngs = [science_frame(Source('V0', 5, coordinates=[st['r'], 90.0 - st['phi']], logger=logger), atm, tel, cam, logger)[0]
            for st in stars]
@@ -409,7 +409,7 @@ def test_b1_no_atmosphere_stars(flat_case, pattern, ref, tolerances, report):
 
 def test_b1_production_sampling_energy(pattern, ref, logger, tolerances, report):
     """
-    REGRESSION (SCI-MFT-ALIAS, 2026-10-30). No atmosphere, production pupil sampling: 200 px over 4.149 m, so that
+    Aliasing check. No atmosphere, production pupil sampling: 200 px over 4.149 m, so that
     lambda / dx = 4.97" at 500 nm is inside the 9.975" field (B1 uses 450 px, where it is not). With a periodic PSF the
     replicas carried ~86 % of the energy of every star outside its core, which the unit-sum windows of B1 cannot see.
     Energy criteria against the independent annular-pupil PSF (own FFT): the fraction of the extended-source frame
@@ -549,7 +549,7 @@ def test_b2_subdirection_footprint_subpixel(altitude_case, tolerances, report):
     """
     Same measurement as test_b2_subdirection_footprint_orientation, restricted to the diagonal sub-directions (a = b, 0, 4, 8)
     where the layer axes (transposed or not) give the same offset, so that only the footprint position is tested: the measured
-    offset must match h tan(theta) rounded to the nearest layer pixel (integer-pixel model, owner's decision 2026-10-27). The
+    offset must match h tan(theta) rounded to the nearest layer pixel (integer-pixel model). The
     tolerance is the precision of the offset estimator itself (whitened cross-correlation + parabola), 8 seeds.
     """
     tol = tolerances['extended_source']['b2']
@@ -663,10 +663,10 @@ def test_b4_altitude_layer_orientation(b4_expect, tolerances, report):
 def test_b4_altitude_layer_psf_vs_screen(b4_expect, tolerances, report):
     """
     Same set-up as test_b4_altitude_layer_orientation. Absolute criterion on every star: max |ext - E| / peak <= b4.psf_atol
-    (2 %, owner's criterion), E built from the screen with the footprint offsets h tan(theta) rounded to the layer pixel
+    (2 %), E built from the screen with the footprint offsets h tan(theta) rounded to the layer pixel
     (integer-pixel model). The criterion covers the extended-image model error itself (patch resampling and PSF blending,
     validated on the ground layer in b3: 0.6-0.9 %); the reference precision is b4.ref_atol (0.11 %). The layer-axes
-    orientation is fixed (EXT-TRANSPOSE solved) and tested separately by test_b4_altitude_layer_orientation.
+    orientation is tested separately by test_b4_altitude_layer_orientation.
     """
     tol = tolerances['extended_source']['b4']
     ext_w, E, Et = b4_expect['ext'], b4_expect['E'], b4_expect['Et']
@@ -868,7 +868,7 @@ def test_b5_flux(flat_case, pattern, ref, tel, logger, tolerances, report):
     cam50 = make_cam(tel, logger)
     cam50.lightRatio = 50
     _, lp50 = science_frame(sun, None, tel, cam50, logger)
-    report.metric('long exposure photons with ScienceCam lightRatio 50 (default before 2026-10-27) / (flux T A_eff) (context)',
+    report.metric('long exposure photons with ScienceCam lightRatio 50 / (flux T A_eff) (context)',
                   lp50.long_exposure_frame.sum() / (N_exp * TS * tel.area_eff))
     f = flat_case['ext']
     P = ref.psf()
@@ -907,7 +907,7 @@ def test_b5_default_science_photon_budget(flat_case, tel, logger, report):
     With the default ScienceCam arguments the long-exposure frame of a noise-free LightPath must hold the photons that the
     source delivers through the effective area in the exposure time, flux x T x A_eff (a camera that records all the light
     of the path): ScienceCam.lightRatio is the fraction of the photons reaching the camera (LightPath.py and
-    ScienceCam.apply_noise), 1.0 by default (it was 50 before 2026-10-27).
+    ScienceCam.apply_noise), 1.0 by default.
     """
     sun = flat_case['sun']
     cam = ScienceCam(fieldOfView=FOV, plate_scale=PS, samplingTime=TS, telescope=tel, integrationTime=TS, logger=logger,
@@ -922,7 +922,7 @@ def test_b5_default_science_photon_budget(flat_case, tel, logger, report):
 
 def test_band_without_source_entry(logger, report):
     """
-    ExtendedSource uses its own band table (C.9, owner: the wavelengths of the solar images are kept): a band absent from the
+    ExtendedSource uses its own band table (the wavelengths of the solar images are kept): a band absent from the
     Source table ('IR') constructs, and the sub-direction sources carry the wavelength of the extended source.
     """
     from SAOS.ExtendedSource import ExtendedSource

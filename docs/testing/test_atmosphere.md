@@ -117,7 +117,7 @@ $$r_{0,i} = r_0\,(\cos z)^{3/5} f_i^{-3/5},\qquad \sum_i r_{0,i}^{-5/3} = \left(
 - **Tier:** fast. Parametrised over $(d, az)$ = (0.16, 0), (0.09, 90), (0.04, 37), (0.15, 215), (0.16, 127), (0.09, 300) (metres, degrees).
 - **What it checks:** fractional footprint offsets (0.4 to 1.6 layer pixels of 0.1 m, no component within 0.05 px of a half pixel) follow the integer-pixel model, $\mathrm{round}(d\cos az/p)\,p$ and $\mathrm{round}(d\sin az/p)\,p$ with $p = 0.1$ m, exactly; and lie within half a pixel of the physical $h\tan\theta$ (unbiased rounding). Same linear-ramp measurement as above.
 - **Tolerance:** `atmosphere.footprint.atol_m` = $10^{-6}$ m for the model comparison; $|\Delta-h\tan\theta|/p\le 0.5+10^{-6}$ for the physical comparison.
-- **References:** none (SAOS design decision documented in the test).
+- **References:** none (SAOS convention documented in the test).
 
 ## `test_wind_motion`
 - **Module:** `Atmosphere.update` (layer shift), `PhaseScreenVonKarman.add_row` / `add_col`.

@@ -396,7 +396,7 @@ def test_zernike_radial_polynomial_low_orders(report, tolerances):
 
 
 def test_zernike_radial_jacobi_evaluator(report, tolerances):
-    """The Jacobi evaluator already present in SAOS (R_nm_Jacobi) is accurate up to n = 49 (the fix for MB-ZERN-RADIAL)."""
+    """The Jacobi evaluator already present in SAOS (R_nm_Jacobi) is accurate up to n = 49."""
     rho = np.linspace(0, 1, 501)
     err = _radial_errors(ZernikeNaive(mask=[]).R_nm_Jacobi, range(0, 50, 7), rho)
     report.check('max |R_jacobi - R_ref|, n <= 49', err.max(), hi=tolerances['modal_basis']['zernike']['radial_abs'])
@@ -407,8 +407,8 @@ def test_zernike_radial_polynomial_est_orders(report, tolerances):
     """
     An EST-size DM (ASM, 37x37, Zernike up to n ~ 49) needs radial polynomials accurate to |R| <= 1 up to n = 49. The
     basis that SAOS generates (generate_zernike_modes) must equal, column by column, the same basis built with the
-    independent radial reference of this module (Jacobi form, scipy). (The naive factorial sum, which lost all precision
-    above n ~ 40, was removed from SAOS on 2026-10-27.)
+    independent radial reference of this module (Jacobi form, scipy). (A naive factorial sum loses all precision
+    above n ~ 40 and is not used.)
     """
     tol = tolerances['modal_basis']['zernike']
 
@@ -424,7 +424,7 @@ def test_zernike_radial_polynomial_est_orders(report, tolerances):
     report.check(f'37x37 basis ({dm.nValidAct} modes): columns differing from the reference > {tol["basis_column_abs"]}',
                  int(bad.sum()), expected=0, atol=0)
     s = np.linalg.svd(B_saos, compute_uv=False)
-    # Information: even exact Zernikes alias on the actuator grid at the highest orders (physical limit, not this bug)
+    # Information: even exact Zernikes alias on the actuator grid at the highest orders (physical limit)
     report.metric('37x37 basis numerical rank (s > 1e-8 s_max) / number of modes', int(np.sum(s > 1e-8 * s[0])) / B_saos.shape[1])
     n_values = np.arange(31, 50)
     err = _radial_errors(ZernikeNaive(mask=[]).R_nm_Jacobi, n_values, np.linspace(0, 1, 501))

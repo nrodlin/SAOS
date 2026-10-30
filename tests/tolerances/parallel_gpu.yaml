@@ -9,7 +9,7 @@ cpu_gpu:
   controller_rel: 1.0e-10       # float64 matrix products and Cholesky/SVD on both devices, 10 steps: relative to the maximum
   im_slope_px: 1.0e-5           # |IM_cpu - IM_gpu| x stroke: float32 WFS slopes, absolute [px]; measured 4.3e-6
 vram:
-  budget_mib: 8.7               # re-recorded 2026-10-27 after the WFS block (pupil sampled at npix_pupil > npix_lenslet to remove spot aliasing, #54): peak 8.62 MiB (was 6.69 MiB), GTX 1660
-  headroom: 1.25                # regression allowance over the recorded peak (a leak or a copy per step trips it)
+  budget_mib: 8.7               # recorded peak with the WFS pupil sampled at npix_pupil > npix_lenslet (spot aliasing removal): 8.62 MiB, GTX 1660
+  headroom: 1.25                # allowance over the recorded peak (a leak or a copy per step trips it)
 threads_count:
   max_threads: 0                # 0 -> os.cpu_count()

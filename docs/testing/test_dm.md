@@ -121,6 +121,6 @@ $$\dot{\mathbf x}=\begin{pmatrix}0&1\\-\omega^2&-2\zeta\omega\end{pmatrix}\mathb
 ## `test_print_properties_runs`
 - **Module:** `DeformableMirror.print_properties`.
 - **Tier:** fast.
-- **What it checks:** logging runs without error and a record containing "Controlled Actuators" is emitted (item C.11). Smoke test, no physics.
+- **What it checks:** logging runs without error and a record containing "Controlled Actuators" is emitted. Smoke test, no physics.
 - **Tolerance:** assertion on the presence of the message.
 - **References:** none.

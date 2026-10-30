@@ -322,7 +322,7 @@ class Atmosphere:
                                'phase': np.array(f[grp_name]['phase'])}
                 layer.screen = PhaseScreenVonKarman(nx_size=layer.npix, pixel_scale=layer.spatial_res, r0=layer.fractionalR0, L0=self.L0, 
                                                     random_seed=layer.seed, n_columns=f[grp_name].attrs['n_columns'], from_file=True, screen_file=screen_dict, logger=self.logger)
-                # Evolution state (files saved before 2026-10-27 do not have it: the generator restarts from the seed)
+                # Evolution state (optional in the file: if absent, the generator restarts from the seed)
                 if 'rng_state' in f[grp_name].attrs:
                     layer.screen._R.bit_generator.state = json.loads(f[grp_name].attrs['rng_state'])
                 layer.displ_buffer_x = float(f[grp_name].attrs.get('displ_buffer_x', 0.0))

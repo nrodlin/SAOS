@@ -155,9 +155,9 @@ def series_vs_exact(est, r, L0, r0=0.15):
 def test_vk_series_exact_grid(est1, report, tolerances):
     """
     von Karman phase structure function D(r) = 2 [C(0) - C(r)] with C from the Bessel-K formula (scipy) against
-    vk_structure_torch (10-term series, kept by the owner's decision 2026-10-27: exact in the range of use), on the EST range of
+    vk_structure_torch (10-term series, exact in the range of use), on the EST range of
     separations r in [1 cm, 8.5 m] (log grid, 60 points; 8.5 m = metapupil at 15 km with a 60" field) and L0 in {10, 25, 50} m,
-    r0 = 0.15 m. Criterion: relative difference <= use_rtol (accepted accuracy of the series) over the grid. Outside this range (L0 <~ 7 m with r >= 6 m, x = pi r / L0 > 3)
+    r0 = 0.15 m. Criterion: relative difference <= use_rtol (accuracy of the series in the range of use) over the grid. Outside this range (L0 <~ 7 m with r >= 6 m, x = pi r / L0 > 3)
     the truncated series is not valid: recorded for information (r = 8 m, L0 = 5 m).
     """
     tol = tolerances['learn_estimator']['vk_series']

@@ -1,11 +1,10 @@
 # Tolerances of tests/test_learn_estimator.py (SAOS/tomography/learnEstimator.py, CPU, stand-in light paths).
-# Policy: tolerances cover only the numerical precision of the independent reference (scipy Bessel-K von Karman
-# formulas, float64 matrices) or estimator statistics (~3.5 sigma measured over seeds); they never absorb a measured
-# SAOS discrepancy.
+# Tolerances cover the numerical precision of the independent reference (scipy Bessel-K von Karman
+# formulas, float64 matrices) or estimator statistics (~3.5 sigma measured over seeds).
 vk_series:
   rtol: 1.0e-6          # series vs exact Bessel-K D(r): reference cancellation error C(0) - C(r) is <= 1e-10 relative at r = 1 cm (L0 = 50 m)
   convergent_x_max: 1.0 # region tested as a passing control: x = pi r / L0 <= 1
-  use_rtol: 1.0e-4      # owner's accepted accuracy of the 10-term series in the EST range of use (r <= 8.5 m, L0 >= 10 m), 2026-10-27:
+  use_rtol: 1.0e-4      # accuracy of the 10-term series in the EST range of use (r <= 8.5 m, L0 >= 10 m):
                         # measured 6.1e-5 at L0 = 10 m, r = 8.5 m; <= 1e-8 for L0 >= 15 m
 matrix:
   rtol: 1.0e-8          # float64 covariance entries vs the independent reference (same formula, scipy K_5/6)

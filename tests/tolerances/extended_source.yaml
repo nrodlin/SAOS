@@ -6,14 +6,14 @@
 seed: 11                          # atmosphere realisation of the module fixtures
 
 b1:                               # no atmosphere, deterministic
-  pos_atol_px: 0.1                # specified by the owner; measured 0.025 (Fourier-upsampled peak estimator)
-  fwhm_rtol: 0.005                # measured -0.10% (450 px pupil resampled to 898 px, SCI-SCALE ~ -0.1%)
+  pos_atol_px: 0.1                # measured 0.025 (Fourier-upsampled peak estimator)
+  fwhm_rtol: 0.005                # measured -0.10% (450 px pupil resampled to 898 px, scale ~ -0.1%)
   psf_atol: 0.006                 # measured 0.08-0.23% (pupil pixelation + bilinear resampling); 2.6x margin
 b1_production:                    # 200 px pupil (production sampling), energy criteria, deterministic
   bg_atol: 0.005                  # measured fraction outside the windows 0.0109 vs 1 - EE_ref 0.0114 (edge halos leave the
-                                  # field); with the PSF replicas (before 2026-10-30) it was 0.84
+                                  # field); with PSF replicas inside the field it would be 0.84
   ee_atol: 0.005                  # NGS EE in the window 0.9869 vs EE_ref 0.9886 (200 px pixelated annulus vs analytic
-                                  # annulus with 4x4 sub-pixel occupancy); 0.136 with the replicas
+                                  # annulus with 4x4 sub-pixel occupancy); 0.136 with PSF replicas
 b2:
   offset_atol_px: 0.09            # precision of the offset estimator on exact sub-pixel windows of the same screens (8 seeds, max over 9 directions):
                                   # mean 0.0557, sd 0.0095 (max 0.072) + 3.5 sd = 0.089 px
@@ -25,7 +25,7 @@ b4:                               # layer at 15 km, expected from the screen wit
   ref_atol: 0.0011                # numerical precision of the reference: expected star windows from the 1024 px FFT / 4x4 pupil
                                   # sub-pixels / bilinear phase on the 450 px grid vs the 2048 px FFT / 8x8 / cubic-sampled phase,
                                   # max over the 18 stars, 8 seeds: mean 6.8e-4, sd 1.1e-4 (max 9.0e-4) + 3.5 sd = 1.06e-3
-  psf_atol: 0.02                  # owner's criterion (2026-10-27): ext vs E per star, all stars. Includes the extended-image model error
+  psf_atol: 0.02                  # ext vs E per star, all stars. Includes the extended-image model error
                                   # validated in b3 (ground, 0.59-0.91 %); measured at 15 km 0.13-0.45 % (1 seed)
 b4_growth:                        # 8 seeds
   floor: 0.014                    # ext vs NGS at patch centres (zero anisoplanatism): 0.0045-0.0091 (mean 0.0069, sd 0.0020) + 3.5 sd

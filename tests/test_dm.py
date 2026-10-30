@@ -290,8 +290,7 @@ def test_altitude_dm_footprint_physical_displacement(az, disp, dm_alt, tel, repo
     delta = h tan(theta) (cos az, sin az): azimuth 0 -> +x (columns), 90 -> +y (rows). Prescribed surface: a ramp
     command c = g (x_act + 0.7 y_act) (actuators of the independent model, metapupil D_fov = D + 2 h tan(fov/2)), whose exact surface
     W(x, y) is the independent model. Expectation for the change of the OPD relative to the on-axis one:
-    dW = W(x_p + delta_r) - W(x_p) at the pupil points x_p. Integer-pixel model (as the atmosphere footprint, owner's decision
-    2026-10-27): delta_r is delta rounded to the nearest grid step D/N (the pupil pixel), so |delta_r - delta| <= half a step, unbiased
+    dW = W(x_p + delta_r) - W(x_p) at the pupil points x_p. Integer-pixel model (as the atmosphere footprint): delta_r is delta rounded to the nearest grid step D/N (the pupil pixel), so |delta_r - delta| <= half a step, unbiased
     (truncation would give 0 for 0.7-0.8 steps). Fractional displacements 0.7-2.3 steps. Criterion: relative L2 error of the
     change over the pupil < yaml bound.
     """
@@ -504,7 +503,7 @@ def test_regression_actuator_vs_map_misregistration_convention(name, dxp, dyp, r
 
 
 def test_print_properties_runs(dm, logger, caplog):
-    """print_properties logs the DM configuration and its map-level misregistration without errors (C.11)."""
+    """print_properties logs the DM configuration and its map-level misregistration without errors."""
     import logging
     with caplog.at_level(logging.INFO, logger=logger.name):
         dm.print_properties()

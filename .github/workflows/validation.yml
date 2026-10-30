@@ -3,8 +3,8 @@
 # master (release gate), and any tier on demand (Actions -> validation -> Run workflow). Jobs triggered while the runner
 # is offline wait in the queue (GitHub cancels them after 24 h).
 # The repository is public. Pull requests trigger the release gate only when they come from a branch of this repository
-# (develop -> master): a pull request from a fork never reaches the self-hosted runner (job-level `if`). Never use
-# pull_request_target.
+# (develop -> master): a pull request from a fork never reaches the self-hosted runner (job-level `if`). The workflow
+# uses `pull_request` events only, never `pull_request_target`.
 # Release gate: protect master with "Require status checks to pass" on the `release-gate` job (T1 + T2).
 name: validation
 on:

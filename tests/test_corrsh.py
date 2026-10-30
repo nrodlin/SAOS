@@ -4,7 +4,7 @@ formation (compute_images) and the end-to-end correlation measurement (wfs_measu
 
 Configuration: 6x6 subapertures of d = 0.1 m over a 48 px pupil (8 phase px per subaperture), V band (500 nm), plate scale
 0.4"/px (lambda/d = 2.58 px), FoV 10", ExtendedSource 3x3 sub-directions (FoV 10", padding 20.1", margin 8": sun patches of
-58 px per subaperture), use_brightest = 5 (the setting of the owner's validation scripts). A global tilt of theta arcsec moves
+58 px per subaperture), use_brightest = 5 (the setting of the validation campaigns). A global tilt of theta arcsec moves
 the image by theta / plate_scale px.
 
 Independent references (no SAOS code, no SAOS-measured quantity):
@@ -436,7 +436,7 @@ def residual_phase(rms=0.3, seed=7):
 
 def test_global_tilt_linearity_and_cross_coupling(logger, report, tolerances):
     """
-    Linearity over the full measuring range and cross-coupling, with the owner's estimator (use_brightest from the yaml, 9).
+    Linearity over the full measuring range and cross-coupling, with the production estimator setting (use_brightest from the yaml, 9).
     A fixed residual phase (0.3 rad rms, high order) makes the subaperture images differ, so the pseudo-reference (subaperture
     pseudoref_index, measured with that phase, as the reference slopes) is a different subaperture from the ones evaluated; the
     pseudo-reference subaperture itself is excluded. A global tilt moves the object by s px along x or y, for s in

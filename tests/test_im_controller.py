@@ -138,7 +138,7 @@ def dm_surface(cmd_valid, X, Y, nacts=7, coupling=0.6, thresh=0.5):
 
 
 SAMP, FOV_PX = 2.0, 15                           # pixels per lambda/d and window size of make_wfs
-ZERO_PX = FOV_PX // 2                            # window pixel of the zero frequency: the lenslet axis at the window centre (WFS-SPOT-OFFCENTRE, solved)
+ZERO_PX = FOV_PX // 2                            # window pixel of the zero frequency: the lenslet axis at the window centre 
 M_FINE = 32                                      # samples per subaperture side of the forward model
 
 
@@ -219,15 +219,7 @@ def test_im_symmetry_of_symmetric_modes(mode, label, sysm, report, tolerances):
     the scale of the sensor. Errors normalised to the largest slope (float32 pipeline: yaml bound). The DM surface itself is
     symmetric to 1e-13 (independent model), checked first.
 
-    History: this test failed until WFS-SUBAP-GRID was fixed (2026-10-27, cell-centred subaperture split); it now passes and
-    is kept as a regression test. Original diagnosis (scratch experiment): the asymmetry was in the sensor, not in the DM or the IM.
-    An analytic symmetric phase (0.1 rad defocus / spherical on the 48 px pupil) fed directly to ShackHartmann.wfs_measure gives
-    x-mirror 5.1e-2 (defocus) and 5.7e-2 (spherical), y-mirror of s_x 1e-4 / 4.9e-2 (spherical), x<->y 1e-4: only the axis
-    along which the +0.5 px shift of the subaperture grid matters is broken (s_x of a defocus depends on x only). With
-    split_subapertures replaced by an independent symmetric split (subaperture k = value at the pixel edges
-    [k np - 1/2, k np + np - 1/2], replicate-padded, same bilinear resampling afterwards) the same computation gives x-mirror
-    2.3e-4 (defocus) / 2.3e-4 (spherical, 0.01 rad, linear regime) and y-mirror 8e-5 / 1e-4, all below the yaml bound: the
-    asymmetry is WFS-SUBAP-GRID (see test_wfs.py::test_defocus_subaperture_geometry).
+    The symmetry is a property of the sensor (cell-centred subaperture split), see test_wfs.py::test_defocus_subaperture_geometry.
     """
     tol = tolerances['im_controller']['symmetry']
     valid = _valid_mask()

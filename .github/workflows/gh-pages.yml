@@ -21,7 +21,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          # Use standard (non-free-threaded) Python — cffi is incompatible with 3.13t
+          # Standard (non-free-threaded) Python: cffi is incompatible with 3.13t
           python-version: '3.12'
 
       - name: Cache pip dependencies

@@ -1,7 +1,7 @@
 # Tolerances of tests/test_im_controller.py (6x6 SH, 48 px, 7x7 DM, zernike basis).
 nonzero_min: 1000.0         # px/m: a poked DM gives IM entries ~1e6 px/m
 tilt:
-  direct: 1.0e-3            # regression: IM column vs direct WFS response
+  direct: 1.0e-3            # equal-path check: IM column vs direct WFS response
 forward_model:
   abs_rel: 3.0e-3           # reference precision: 32 samples per subaperture side differ by 9e-4 from 64 (error ~ 1/m^2), 4e-3 at 16
 symmetry:

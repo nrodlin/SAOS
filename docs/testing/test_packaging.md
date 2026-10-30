@@ -1,4 +1,4 @@
-# `test_packaging.py` — wheel contents and declared dependencies (C.13, nightly)
+# `test_packaging.py` — wheel contents and declared dependencies (nightly)
 
 Source: `tests/test_packaging.py`
 

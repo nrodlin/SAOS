@@ -25,8 +25,9 @@ matrix and the modal basis generation in adaptive optics simulations.
 """
 
 # Convention of the generated modal bases, written to the modal basis and IM files (attribute basis_convention). Files
-# without it are convention 1. 2: Noll sign of the sine Zernikes and piston-free bases of nValidAct - 1 modes (2026-10-27).
-# An IM is only valid with a basis of its own convention (the sine Zernikes changed sign: mixing them inverts the feedback).
+# without the attribute are convention 1. Convention 2: Noll sign of the sine Zernikes and piston-free bases of
+# nValidAct - 1 modes. An IM is only valid with a basis of its own convention (the sine Zernikes differ in sign, so
+# mixing conventions inverts the feedback).
 BASIS_CONVENTION = 2
 
 class InteractionMatrixHandler:

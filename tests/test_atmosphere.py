@@ -377,7 +377,7 @@ FOOTPRINT_PIX = 0.1           # layer pixel D / res of _footprint_displacement [
 
 
 def footprint_model(d_m, az):
-    """Integer-pixel footprint model (owner's decision 2026-10-27): each component of h tan(theta) rounded to the nearest layer pixel."""
+    """Integer-pixel footprint model: each component of h tan(theta) rounded to the nearest layer pixel."""
     rad = np.deg2rad(az)
     return (np.round(d_m * np.cos(rad) / FOOTPRINT_PIX) * FOOTPRINT_PIX, np.round(d_m * np.sin(rad) / FOOTPRINT_PIX) * FOOTPRINT_PIX)
 
@@ -527,7 +527,7 @@ def test_save_load_many_layers_order(logger, report, tmp_path):
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-# Edge cases and chromatic shift (C.8, C.10)
+# Edge cases and chromatic shift
 # ----------------------------------------------------------------------------------------------------------------------
 
 def test_odd_resolution_and_zero_cn2_layer(logger, report):

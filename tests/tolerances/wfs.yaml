@@ -1,6 +1,6 @@
 # Tolerances of tests/test_wfs.py (ShackHartmann, point source, 6x6 subapertures, 2 px per lambda/d unless stated).
-# Policy: tolerances cover only the numerical precision of the independent reference (convergence shown by
-# test_reference_converged) or estimator statistics (~3.5 sigma); they never absorb a measured SAOS discrepancy.
+# Tolerances cover the numerical precision of the independent reference (convergence shown by
+# test_reference_converged) or estimator statistics (~3.5 sigma).
 tilt_axes:
   cross_max: 1.0e-3     # |cross slope| / direct slope; float32 FFT precision
   isotropy: 1.0e-4      # x vs y response (same code path); float32 precision
