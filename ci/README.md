@@ -56,12 +56,18 @@ systemctl --user daemon-reload && systemctl --user enable --now saos-ci-nightly.
 loginctl enable-linger $USER                                # run even when not logged in
 ```
 
-**Self-hosted GitHub runner:** a ✓/✗ per commit on GitHub, computed on your machine.
+**Self-hosted GitHub runner:** a ✓/✗ per commit on GitHub, computed on your machine
+(`.github/workflows/validation.yml`). Nothing runs periodically:
 
-1. Register a runner with labels `saos,gpu` (Settings → Actions → Runners), under a dedicated user without sudo.
-2. Copy `ci/github/validation.yml` to `.github/workflows/`.
+- every push to develop/master runs T1;
+- every pull request to master runs T1 + T2 (release gate);
+- any tier can be run on demand: Actions → validation → Run workflow, choosing `fast`, `nightly` or `heavy`.
 
-3. Release gate: in Settings → Branches (or Rules → Rulesets) protect `master` with "Require a pull request before
+Jobs triggered while the machine is off wait in the queue and start when the runner comes back (GitHub cancels them
+after 24 h).
+
+1. Register a runner with labels `saos,gpu` (Settings → Actions → Runners).
+2. Release gate: in Settings → Branches (or Rules → Rulesets) protect `master` with "Require a pull request before
    merging" and "Require status checks to pass", selecting the `release-gate` check (T1 + T2 on the runner).
    Merge develop into master through a pull request.
 
