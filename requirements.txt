@@ -11,3 +11,4 @@ jupyter
 pytest
 pytest-timeout
 psutil
+pyyaml

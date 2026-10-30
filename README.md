@@ -16,13 +16,13 @@ Full documentation — installation guides, pedagogical tutorials, and API refer
 
 To build the documentation locally:
 ```bash
-pip install mkdocs mkdocs-material mkdocs-jupyter mkdocstrings[python]
+pip install -r requirements.txt   # or: pip install mkdocs mkdocs-material mkdocs-jupyter mkdocstrings[python]
 mkdocs serve
 ```
 
 ## ⚙️ Installation
 
-For optimal performance, we strongly recommend using a free-threaded Python environment (e.g., Python 3.13.2t). 
+For optimal performance, we strongly recommend using a free-threaded Python environment (e.g., Python 3.13.9t). 
 A quick installation snippet is provided below. For detailed instructions, please check the [Installation Guide](docs/installation.md).
 
 ```bash

@@ -120,8 +120,8 @@ def a2_scan(source, seed, logger, n_maps, r0s=R0S):
 @pytest.mark.parametrize('source', ['initial', 'extruded'])
 def test_r0_scan_pupil_scale(logger, report, tolerances, seed, source):
     """
-    Screens of the pupil size (216 px, 4.149 m, L0 25 m) for r0 = 0.05-1 m: the mean structure function of 32 independent
-    screens (initial FFT screens, or one extruded screen sampled every 2 nx rows after a burn-in of nx rows) is fitted
+    Screens of the pupil size (216 px, 4.149 m, L0 25 m) for r0 = 0.05-1 m: the mean structure function of `n_maps` (yaml, 16)
+    independent screens (initial FFT screens, or one extruded screen sampled every 2 nx rows after a burn-in of nx rows) is fitted
     with the von Karman D(r) (joint r0/L0 fit and r0 fit with L0 fixed, lags 1 px - nx/2). The fitted r0 must equal the
     generation value within 3.5 sigma of the fit over seeds (per r0); the joint L0 within the same criterion on log L0.
     """
@@ -307,7 +307,7 @@ def _zernike_report(report, a, G, tol, label):
 
 def test_zernike_variances_initial_screen(logger, report, tolerances, seed):
     """
-    Z2-Z11 variances (and covariances) of 600 initial 216-px screens (r0 0.10 m, L0 25 m) on the circular pupil against
+    Z2-Z11 variances (and covariances) of n (yaml, 1000) initial 216-px screens (r0 0.10 m, L0 25 m) on the circular pupil against
     the exact von Karman projection B^T C B built here on the sampled pupil (FFT convolution of the sampled covariance
     with each basis vector). Tolerance on each variance ratio: 3.5 sqrt(2/n) (Gaussian estimator), verified over seeds.
     """

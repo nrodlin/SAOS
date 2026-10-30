@@ -12,7 +12,8 @@ outside the repository and gathered into an HTML report.
 | T2 | `nightly` | More realisations, extended object, CPU vs GPU, short closed loops | Workstation GPU | < 45 min |
 | T3 | `heavy` | Reduced MCAO scenarios (D 0.64 m, 8x8 SH, 3 DMs), scale-dependent code paths | Laptop / workstation | < 1 h |
 
-Status: T1 is implemented; T2 and T3 are planned (no tests carry those markers yet, so those tiers select nothing).
+Status: T1 and T2 are implemented; T3 is planned (no test carries the `heavy` marker yet). Every test is documented in the
+Validation section of the docs (`docs/testing/`).
 
 Every test compares SAOS with an independent physical or mathematical expectation. Tolerances only cover the statistical
 uncertainty of the estimator (about 3.5 sigma, measured over seeds) or the numerical precision of the reference; they
@@ -61,7 +62,12 @@ loginctl enable-linger $USER                                # run even when not 
 1. Register a runner with labels `saos,gpu` (Settings → Actions → Runners), under a dedicated user without sudo.
 2. Copy `ci/github/validation.yml` to `.github/workflows/`.
 
-The repository is public, so the workflow never triggers on pull requests.
+3. Release gate: in Settings → Branches (or Rules → Rulesets) protect `master` with "Require a pull request before
+   merging" and "Require status checks to pass", selecting the `release-gate` check (T1 + T2 on the runner).
+   Merge develop into master through a pull request.
+
+The repository is public: the `release-gate` job only runs for pull requests opened from a branch of this repository
+(`head.repo == repository`), so a pull request from a fork never reaches the runner. Never use `pull_request_target`.
 
 ## Writing a test
 

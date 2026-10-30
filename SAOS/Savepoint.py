@@ -232,9 +232,12 @@ class Savepoint:
         sci : int
             Flag to save science phase. If 0, the science phase will not be saved. 
             Larger than 0, it will be saved with the specified decimation factor.
-        sci_frame : int
+        sci_frame : int or dict or list
             Flag to save science frame. If 0, the science frame will not be saved. 
             Larger than 0, it will be saved with the specified decimation factor.
+            A dict {'short': n, 'long': m} sets the decimation of the short and long exposure frames independently,
+            a list gives one value (int or dict) per light path, and a dict keyed by light path index (with an
+            optional 'default' key) selects the value per light path.
         only_metrics : bool
             If True, only the metrics of the buffers are saved. If false, the data
             is included as well.

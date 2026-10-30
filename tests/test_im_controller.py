@@ -219,7 +219,8 @@ def test_im_symmetry_of_symmetric_modes(mode, label, sysm, report, tolerances):
     the scale of the sensor. Errors normalised to the largest slope (float32 pipeline: yaml bound). The DM surface itself is
     symmetric to 1e-13 (independent model), checked first.
 
-    Diagnosis of the failure (scratch experiment, SAOS untouched): the asymmetry is in the sensor, not in the DM or the IM.
+    History: this test failed until WFS-SUBAP-GRID was fixed (2026-10-27, cell-centred subaperture split); it now passes and
+    is kept as a regression test. Original diagnosis (scratch experiment): the asymmetry was in the sensor, not in the DM or the IM.
     An analytic symmetric phase (0.1 rad defocus / spherical on the 48 px pupil) fed directly to ShackHartmann.wfs_measure gives
     x-mirror 5.1e-2 (defocus) and 5.7e-2 (spherical), y-mirror of s_x 1e-4 / 4.9e-2 (spherical), x<->y 1e-4: only the axis
     along which the +0.5 px shift of the subaperture grid matters is broken (s_x of a defocus depends on x only). With

@@ -40,8 +40,8 @@ Make sure to add `pyenv` to your `~/.bashrc` or `~/.profile` as instructed by th
 Install the free-threaded version of Python 3.13 (or newer) and create a virtual environment:
 
 ```bash
-pyenv install 3.13.2t
-pyenv virtualenv 3.13.2t venv_saos
+pyenv install 3.13.9t
+pyenv virtualenv 3.13.9t venv_saos
 pyenv activate venv_saos
 ```
 
@@ -74,9 +74,11 @@ git checkout develop
 # Install SAOS (editable) with its runtime dependencies
 pip install --prefer-binary -e .
 
-# Optional: documentation and validation-suite tools
+# Optional: documentation (mkdocs) and validation-suite tools (pytest, pytest-timeout, pyyaml, psutil, ruff, jupyter)
 pip install --prefer-binary -r requirements.txt
 ```
+
+The validation suite is described in `ci/README.md` (`ci/run_ci.sh fast`, or `python -m pytest tests -m fast`). `torch` runs on the CPU by default; a CUDA build of torch is optional and is used automatically when `torch.cuda.is_available()`.
 
 > **Free-threaded builds and wheels:** use `--prefer-binary`. On a free-threaded Python the newest release of several
 > dependencies is often published only as source (e.g. scipy 1.18, matplotlib 3.11.2, pyzmq 27.2 at the time of writing),

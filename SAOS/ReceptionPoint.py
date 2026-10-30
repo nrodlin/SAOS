@@ -23,16 +23,16 @@ class ReceptionPoint:
                  protocol="tcp", 
                  timeout=5000):
         """
-        Initialize the Sharepoint publisher for sharing light path data.
+        Initialize the client that requests light path buffers from an external server.
 
         Parameters
         ----------
         logger : logging.Logger, optional
             External logger to use. If None, initializes internal logging.
         port : int, optional
-            Port number for ZeroMQ publisher. Default is 5555.
+            Port of the server. Default is 7001.
         ip : str, optional
-            IP address to bind the publisher. Default is localhost.
+            Address of the server. Default is localhost.
         protocol : str, optional
             Communication protocol (e.g., 'tcp').
         timeout : int

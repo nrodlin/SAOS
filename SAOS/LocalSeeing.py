@@ -89,7 +89,7 @@ class LocalSeeing:
         Returns
         -------
         np.ndarray
-           Local seeing OPD for the given iteration
+            Local seeing OPD for the given iteration
         """        
         if (iteration+1) > self.localSeeing_input.shape[2]:
             self.logger.warning('LocalSeeing::getCurrentOPD - The length of the local seeing array is smaller than the simulation window. Wrapping-around.')
