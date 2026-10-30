@@ -366,6 +366,47 @@ def test_regression_save_load_im_round_trip(logger, tmp_path, report):
     report.assert_ok()
 
 
+def test_save_im_refuses_existing_file_and_overwrites_atomically(logger, tmp_path, report):
+    """
+    save_IM / save_modalBasis never append to an existing file: by default an existing file raises FileExistsError and is
+    left byte-identical (check_output_file raises the same before measuring); with overwrite=True the file is replaced by
+    the new content and no temporary file is left. Checked with a file holding unrelated content.
+    """
+    lps = _two_lp_system(logger, science_first=False)
+    h = InteractionMatrixHandler(logger)
+    h.initialize_im_class(lps)
+    h.measure('zonal', STROKE, nModes=[10])
+    for kind, save in (('IM', h.save_IM), ('modal basis', h.save_modalBasis)):
+        path = tmp_path / f'{kind.replace(" ", "_")}.h5'
+        with h5py.File(path, 'w') as f:
+            f.attrs['marker'] = 'old file'
+        before = path.read_bytes()
+        raised = False
+        try:
+            h.check_output_file(str(path))
+        except FileExistsError:
+            raised = True
+        report.check(f'{kind}: check_output_file raises on an existing file', raised, 1.0, atol=0)
+        raised = False
+        try:
+            save(str(path))
+        except FileExistsError:
+            raised = True
+        report.check(f'{kind}: save raises FileExistsError on an existing file', raised, 1.0, atol=0)
+        report.check(f'{kind}: existing file left byte-identical', path.read_bytes() == before, 1.0, atol=0)
+        report.check(f'{kind}: save(overwrite=True) returns True', save(str(path), overwrite=True), 1.0, atol=0)
+        with h5py.File(path, 'r') as f:
+            report.check(f'{kind}: old content gone after overwrite', 'marker' not in f.attrs, 1.0, atol=0)
+            report.check(f'{kind}: basis convention written', 'basis_convention' in f.attrs, 1.0, atol=0)
+        report.check(f'{kind}: no temporary file left', len(list(tmp_path.glob('*.tmp*'))), 0, atol=0)
+    h2 = InteractionMatrixHandler(logger)
+    h2.initialize_im_class(lps)
+    h2.load_IM(str(tmp_path / 'IM.h5'))
+    worst = np.max(np.abs(h2.interaction_matrix_warehouse[0][0]['IM'] - h.interaction_matrix_warehouse[0][0]['IM']))
+    report.check('overwritten IM loads back bit by bit', worst, hi=0.0)
+    report.assert_ok()
+
+
 def test_regression_save_load_im_with_science_lightpath_first(logger, tmp_path, report):
     """REGRESSION (round trip): a science-only light path (no WFS) before the WFS light path must not break the save/load round trip."""
     lps = _two_lp_system(logger, science_first=True)
@@ -892,6 +933,60 @@ def test_polc_slopes_attribute_is_minus_the_turbulence(sysm, logger, report, tol
     got = c.slopes_polc[0].cpu().numpy().ravel()
     expected = -(IM @ a[k])
     report.check('slopes_polc vs -s_turb (max rel)', np.max(np.abs(got - expected)) / np.max(np.abs(expected)), hi=tolerances['im_controller']['polc']['sign'])
+    report.assert_ok()
+
+
+def test_polc_per_dm_adds_every_dm_seen_by_the_wfs(logger, report, tolerances):
+    """
+    Per-DM reconstructors (joint_reconstruction=False) on one WFS seen by two DMs (prescribed 14 x 6 and 14 x 4 IMs).
+    Plant: s(k) = t(k) + B0 c0(k-1) + B1 c1(k-1), t a random turbulence slope sequence, Controller delay 1. The
+    pseudo-open-loop slopes of each DM's own slope vector must remove both DMs: slopes_polc[i] = -(s - B0 c0 - B1 c1) =
+    -t(k) for i = 0, 1 (removing only DM i would leave B_j c_j of the other DM).
+    """
+    rng = np.random.default_rng(31)
+    n, sizes, K = 14, [6, 4], 12
+    B = [rng.standard_normal((n, m)) for m in sizes]
+    bases = [rng.standard_normal((12, 6)), rng.standard_normal((9, 4))]
+    hand = mock_handler([[B[0]], [B[1]]], bases)
+    ctrl = Controller(telescope=TEL, interactionMatrix=hand, reconstructionMethod='inversion', controllerType='leaky', logger=logger,
+                      operationType='polc', gain=[0.5, 0.5], decay=[0.99, 0.99], rcond=1e-3, joint_reconstruction=False, delay=1)
+    lp = MockLP(n)
+    c_prev = [np.zeros(m) for m in sizes]
+    worst = 0.0
+    for k in range(K):
+        t = rng.standard_normal(n)
+        lp.s = t + B[0] @ c_prev[0] + B[1] @ c_prev[1]
+        ctrl.computeControlAction([lp])
+        for i in range(2):
+            got = ctrl.slopes_polc[i].cpu().numpy().ravel()
+            worst = max(worst, np.max(np.abs(got + t)) / np.max(np.abs(t)))
+        c_prev = [c.cpu().numpy().ravel().copy() for c in ctrl.command_previous]
+    report.check('per-DM slopes_polc vs -t (max rel over steps and DMs)', worst, hi=tolerances['im_controller']['polc']['sign'])
+    report.assert_ok()
+
+
+def test_polc_per_dm_missing_cross_im_raises(logger, report):
+    """
+    Per-DM POLC where DM 1 is in the optical path of the WFS used by DM 0 but its IM on that WFS was not measured: the
+    pseudo-open-loop slopes of DM 0 cannot be formed, so computeControlAction must raise ValueError instead of silently
+    leaving the contribution of DM 1 in them. DM 1 has its own WFS (light path 1, not seen by DM 0).
+    """
+    rng = np.random.default_rng(32)
+    n = 14
+    dms = [types.SimpleNamespace(name='dm0'), types.SimpleNamespace(name='dm1')]
+    hand = mock_handler([[rng.standard_normal((n, 6)), None], [None, rng.standard_normal((n, 4))]],
+                        [rng.standard_normal((12, 6)), rng.standard_normal((9, 4))])
+    hand.light_path_list = [types.SimpleNamespace(dm=dms), types.SimpleNamespace(dm=[dms[1]])]
+    hand.dm_scanned_list = dms
+    ctrl = Controller(telescope=TEL, interactionMatrix=hand, reconstructionMethod='inversion', controllerType='leaky', logger=logger,
+                      operationType='polc', gain=[0.5, 0.5], decay=[0.99, 0.99], rcond=1e-3, joint_reconstruction=False, delay=1)
+    report.check('missing (DM, light path) detected', ctrl.polc_cross_missing == [(0, 1, 0)], 1.0, atol=0)
+    raised = False
+    try:
+        ctrl.computeControlAction([MockLP(n), MockLP(n)])
+    except ValueError:
+        raised = True
+    report.check('computeControlAction raises ValueError', raised, 1.0, atol=0)
     report.assert_ok()
 
 

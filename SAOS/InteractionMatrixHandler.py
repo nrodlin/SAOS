@@ -339,19 +339,75 @@ class InteractionMatrixHandler:
         self.logger.info(f'Max. displacement info: DM x LP: {self.max_displacement}')
         return True
     
-    def save_IM(self, filename=None):
+    def check_output_file(self, filename, overwrite=False):
         """
-        Save the interaction matrix warehouse to a self.im_boolean_matrix[j, i]H5 file.
+        Check that an IM or modal basis file can be written, before spending time measuring it.
 
         Parameters
         ----------
         filename : str
-            Path to save the IM file.
+            Output path (the .h5 extension is added if missing).
+        overwrite : bool, optional
+            If False (default), an existing file is an error.
+
+        Returns
+        -------
+        str
+            The output path with the .h5 extension.
+
+        Raises
+        ------
+        FileExistsError
+            If the file exists and overwrite is False.
+        """
+        if not filename.endswith(".h5"):
+            filename += ".h5"
+        if os.path.exists(filename) and not overwrite:
+            self.logger.error(f'InteractionMatrixHandler - {filename} already exists (pass overwrite=True to replace it).')
+            raise FileExistsError(f'{filename} already exists: choose another name or pass overwrite=True to replace it.')
+        return filename
+
+    def _write_atomically(self, filename, overwrite, write):
+        """Write the file through a temporary file in the same folder, renamed at the end: an existing file is replaced
+        only when the new one is complete, and a failed write never leaves a partial file."""
+        filename = self.check_output_file(filename, overwrite)
+        folder = os.path.dirname(filename)
+        if folder:
+            os.makedirs(folder, exist_ok=True)
+        tmp = filename[:-3] + f'.tmp{os.getpid()}.h5'
+        try:
+            with h5py.File(tmp, 'w') as f:
+                write(f)
+            os.replace(tmp, filename)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        return filename
+
+    def save_IM(self, filename=None, overwrite=False):
+        """
+        Save the interaction matrix warehouse to an H5 file.
+
+        The file is written to a temporary file and renamed at the end. Call check_output_file() before measure() to
+        detect an existing file before spending time measuring the IM.
+
+        Parameters
+        ----------
+        filename : str
+            Path to save the IM file (.h5 is added if missing).
+        overwrite : bool, optional
+            If False (default), an existing file raises FileExistsError and is left untouched. If True, it is replaced
+            once the new file is complete.
 
         Returns
         -------
         bool
-            True if save is successful.
+            True if save is successful, False if there is no IM to save.
+
+        Raises
+        ------
+        FileExistsError
+            If the file exists and overwrite is False.
         """
         self.logger.debug('InteractionMatrixHandler::save_IM')
 
@@ -359,57 +415,62 @@ class InteractionMatrixHandler:
             self.logger.error('InteractionMatrixHandler::save_IM - IM warehouse not initialized.')
             return False
         
-        self.logger.info('InteractionMatrixHandler::save_IM - Writting...') 
-
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-
-        if not filename.endswith(".h5"):
-            filename += ".h5"
-            
-        with h5py.File(filename, 'a') as f:
-            f.attrs['nLPS'] = len(self.light_path_list)
-            f.attrs['nDMs'] = len(self.dm_scanned_list)
-            f.attrs['basis_convention'] = self.im_convention if self.im_convention is not None else BASIS_CONVENTION
-
-            for i in range(len(self.light_path_list)):
-                if np.sum(self.im_boolean_matrix[i,:]) > 0: # There is an IM defined for this LP, so there is WFS
-                    # Append LP
-                    lp_group = f.create_group('LP' + str(i))
-                    # Set main attributes of this LP
-                    lp_group.attrs['wavelength'] = self.light_path_list[i].src.wavelength
-                    lp_group.attrs['zenith']     = np.round(self.light_path_list[i].src.coordinates[0], 2)
-                    lp_group.attrs['azimuth']    = np.round(self.light_path_list[i].src.coordinates[1], 2)
-                    lp_group.attrs['nSignal']    = self.light_path_list[i].wfs.nSignal
-                    # Create the IMs
-                    for j in range(self.im_boolean_matrix.shape[1]):
-                        if self.im_boolean_matrix[i,j]: # There is an interaction with DM j
-                            im_subgroup = lp_group.create_group('IM' + str(j))
-                            # Append DMs attributes
-                            im_subgroup.attrs['nValidAct']         = self.dm_scanned_list[j].nValidAct
-                            im_subgroup.attrs['nAct']              = self.dm_scanned_list[j].nActs
-                            im_subgroup.attrs['altitude']          = self.dm_scanned_list[j].altitude
-                            im_subgroup.attrs['mechCoupling']      = self.dm_scanned_list[j].mechCoupling
-                            im_subgroup.attrs['modalBasis']        = self.interaction_matrix_warehouse[j][i]['modalBasis']
-                            im_subgroup.attrs['maxDisplacement']   = self.max_displacement[j, i]
-                            im_subgroup.attrs['discarded_modes']   = self.interaction_matrix_warehouse[j][i].get('discarded_modes', 0)
-                            # Append IM
-                            im_subgroup.create_dataset('data', data=self.interaction_matrix_warehouse[j][i]['IM'])
-                        
+        self.logger.info('InteractionMatrixHandler::save_IM - Writing...')
+        self._write_atomically(filename, overwrite, self._write_IM)
         self.logger.info('InteractionMatrixHandler::save_IM - Saved.')
-    
-    def save_modalBasis(self, filename):
+        return True
+
+    def _write_IM(self, f):
+        """Content of the IM file (see save_IM)."""
+        f.attrs['nLPS'] = len(self.light_path_list)
+        f.attrs['nDMs'] = len(self.dm_scanned_list)
+        f.attrs['basis_convention'] = self.im_convention if self.im_convention is not None else BASIS_CONVENTION
+
+        for i in range(len(self.light_path_list)):
+            if np.sum(self.im_boolean_matrix[i,:]) > 0: # There is an IM defined for this LP, so there is WFS
+                # Append LP
+                lp_group = f.create_group('LP' + str(i))
+                # Set main attributes of this LP
+                lp_group.attrs['wavelength'] = self.light_path_list[i].src.wavelength
+                lp_group.attrs['zenith']     = np.round(self.light_path_list[i].src.coordinates[0], 2)
+                lp_group.attrs['azimuth']    = np.round(self.light_path_list[i].src.coordinates[1], 2)
+                lp_group.attrs['nSignal']    = self.light_path_list[i].wfs.nSignal
+                # Create the IMs
+                for j in range(self.im_boolean_matrix.shape[1]):
+                    if self.im_boolean_matrix[i,j]: # There is an interaction with DM j
+                        im_subgroup = lp_group.create_group('IM' + str(j))
+                        # Append DMs attributes
+                        im_subgroup.attrs['nValidAct']         = self.dm_scanned_list[j].nValidAct
+                        im_subgroup.attrs['nAct']              = self.dm_scanned_list[j].nActs
+                        im_subgroup.attrs['altitude']          = self.dm_scanned_list[j].altitude
+                        im_subgroup.attrs['mechCoupling']      = self.dm_scanned_list[j].mechCoupling
+                        im_subgroup.attrs['modalBasis']        = self.interaction_matrix_warehouse[j][i]['modalBasis']
+                        im_subgroup.attrs['maxDisplacement']   = self.max_displacement[j, i]
+                        im_subgroup.attrs['discarded_modes']   = self.interaction_matrix_warehouse[j][i].get('discarded_modes', 0)
+                        # Append IM
+                        im_subgroup.create_dataset('data', data=self.interaction_matrix_warehouse[j][i]['IM'])
+
+    def save_modalBasis(self, filename, overwrite=False):
         """
-        Save the generated modal bases to a H5 file.
+        Save the generated modal bases to an H5 file (temporary file renamed at the end, as save_IM).
 
         Parameters
         ----------
         filename : str
-            Output filename (without extension).
+            Output filename (.h5 is added if missing).
+        overwrite : bool, optional
+            If False (default), an existing file raises FileExistsError and is left untouched. If True, it is replaced
+            once the new file is complete.
 
         Returns
         -------
         bool
-            True if saved correctly.
+            True if saved correctly, False if there is no modal basis to save.
+
+        Raises
+        ------
+        FileExistsError
+            If the file exists and overwrite is False.
         """
         self.logger.debug('InteractionMatrixHandler::save_modalBasis')
 
@@ -417,27 +478,24 @@ class InteractionMatrixHandler:
             self.logger.error('InteractionMatrixHandler::save_modalBasis - Modal Basis not initialized.')
             return False
 
-        self.logger.info('InteractionMatrixHandler::save_IM - Writting...')
+        self.logger.info('InteractionMatrixHandler::save_modalBasis - Writing...')
+        self._write_atomically(filename, overwrite, self._write_modalBasis)
+        self.logger.info('InteractionMatrixHandler::save_modalBasis - Saved.')
+        return True
 
-        os.makedirs(os.path.dirname(filename), exist_ok=True)
-
-        if not filename.endswith(".h5"):
-            filename += ".h5"
-            
-        with h5py.File(filename, 'a') as f:
-            f.attrs['basis_convention'] = self.basis_convention if self.basis_convention is not None else BASIS_CONVENTION
-            for i in range(len(self.modal_list)):
-                # Create one group per modal basis
-                modal_group = f.create_group(self.modal_list[i])
-                # For each modal basis, create a subgroup per DM --> The name is the number of valid acts
-                for j in range(len(self.dm_scanned_list)):
-                    dm_subgroup = modal_group.create_group('DM' + str(j))
-                    # Then, we add the modal base and the metadata
-                    dm_subgroup.create_dataset('data', data=self.modal_basis[j][self.modal_list[i]])
-                    dm_subgroup.attrs['nAct'] = self.dm_scanned_list[j].nActs
-                    dm_subgroup.attrs['nValidAct'] = self.dm_scanned_list[j].nValidAct
-       
-        self.logger.info('InteractionMatrixHandler::save_IM - Saved.')        
+    def _write_modalBasis(self, f):
+        """Content of the modal basis file (see save_modalBasis)."""
+        f.attrs['basis_convention'] = self.basis_convention if self.basis_convention is not None else BASIS_CONVENTION
+        for i in range(len(self.modal_list)):
+            # Create one group per modal basis
+            modal_group = f.create_group(self.modal_list[i])
+            # For each modal basis, create a subgroup per DM --> The name is the number of valid acts
+            for j in range(len(self.dm_scanned_list)):
+                dm_subgroup = modal_group.create_group('DM' + str(j))
+                # Then, we add the modal base and the metadata
+                dm_subgroup.create_dataset('data', data=self.modal_basis[j][self.modal_list[i]])
+                dm_subgroup.attrs['nAct'] = self.dm_scanned_list[j].nActs
+                dm_subgroup.attrs['nValidAct'] = self.dm_scanned_list[j].nValidAct
 
     def load_IM(self, filename):
         """

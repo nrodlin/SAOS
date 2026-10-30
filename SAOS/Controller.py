@@ -33,6 +33,10 @@ class Controller:
             polc: the reconstructor acts on the pseudo-open-loop slopes s_pol = s + IM c(k - delay). With inversion/tikhonov and the
             leaky or PI controllers the law is c(k) = (1 - gain) c(k-1) + gain (-R s_pol) (decay and ki are not used); a stateSpace
             controller receives -R s_pol as its input. With tomography, see the tomographic law.
+            The IM term adds back every DM in the optical path of the WFS: with a joint reconstructor on the global slope
+            vector, sum_j IM_j c_j(k - d_j); with per-DM reconstructors (joint_reconstruction=False), the slope vector of DM i
+            (WFS of its mask row) also gets the commands of the other DMs seen by those WFS. A DM in the optical path of one
+            of those WFS whose IM was not measured raises ValueError at the first call.
         **kwargs
             rcond : list of length equal to nDMs or float
                 Percentage of the maximum singular value below witch the SV are discarded.
@@ -97,6 +101,11 @@ class Controller:
             self.operationType = operationType
         else:
             raise ValueError('Unknown operation type')
+
+        # POLC with per-DM slope vectors: IMs of every DM on the WFS of each DM's mask
+        self.im_polc_cross, self.polc_cross_missing = None, []
+        if self.operationType == 'polc':
+            self.im_polc_cross, self.polc_cross_missing = self._init_polc_cross_ims(interactionMatrix)
         
         if self.controllerType == 'stateSpace':
             self.A = kwargs.get('A', None)
@@ -432,6 +441,46 @@ class Controller:
 
         return reconstructor, modal_basis, mask, t_mask, discarded_modes
     
+    def _init_polc_cross_ims(self, interactionMatrix):
+        """
+        IMs needed by the pseudo-open-loop slopes of each DM's own slope vector (the WFS of mask row i, in the order
+        computeControlAction concatenates them): s_pol_i = s_i + sum_j IM_{j -> WFS(mask i)} c_j(k - d_j). Every DM j that
+        is in the optical path of one of those WFS contributes, not only DM i.
+
+        Returns
+        -------
+        cross : list of list of torch.Tensor or None
+            cross[i][j]: IM of DM j on the slopes of mask row i, (n_slopes_i, n_modes_j); None when DM j is in none of
+            those light paths.
+        missing : list of tuple
+            (i, j, lp): DM j is in the optical path of light path lp (in mask row i) but its IM on lp was not measured.
+        """
+        warehouse = interactionMatrix.interaction_matrix_warehouse
+        lps = getattr(interactionMatrix, 'light_path_list', None) or []
+        dms = getattr(interactionMatrix, 'dm_scanned_list', None) or []
+        nDMs, nLPs = len(warehouse), len(warehouse[0])
+        cross, missing = [], []
+        for i in range(nDMs):
+            row = []
+            lp_idx = [k for k in range(nLPs) if self.mask[i, k]]
+            for j in range(nDMs):
+                n_modes_j = self.reconstructor[j].shape[0]
+                blocks, used = [], False
+                for k in lp_idx:
+                    im = warehouse[j][k]['IM']
+                    n_slopes_k = next((warehouse[m][k]['IM'].shape[0] for m in range(nDMs) if warehouse[m][k]['IM'] is not None), 0)
+                    if im is not None:
+                        blocks.append(np.atleast_2d(np.asarray(im).T).T[:, :n_modes_j]); used = True
+                    else:
+                        in_path = k < len(lps) and j < len(dms) and getattr(lps[k], 'dm', None) is not None and \
+                                  any(d is dms[j] for d in lps[k].dm)
+                        if in_path:
+                            missing.append((i, j, k))
+                        blocks.append(np.zeros((n_slopes_k, n_modes_j)))
+                row.append(torch.as_tensor(np.vstack(blocks), dtype=torch.float64, device=self.device) if used else None)
+            cross.append(row)
+        return cross, missing
+
     def set_tomography_targets(self, im_target_per_dm, joint=True, release_R_tomo=True):
         """
         Reconstructor of the tomographic (L&A) control law from the interaction matrices of the DMs seen by the target
@@ -629,7 +678,12 @@ class Controller:
                 
                 # Predict slopes from delayed commands
                 pred_s = self.im_per_dm[i] @ cmd_delayed
-                error_polc.append(error_res[i] + pred_s)
+                # Per-DM slope vector: add back every DM seen by the WFS of this mask row, not only DM i
+                pred_i = torch.zeros_like(error_res[i])
+                for j in range(len(self.reconstructor)):
+                    if self.im_polc_cross is not None and self.im_polc_cross[i][j] is not None:
+                        pred_i = pred_i + self.im_polc_cross[i][j] @ self.command_history[-self.delay[j]][j]
+                error_polc.append(error_res[i] + pred_i)
                 if pred_s.shape[0] == global_slopes.shape[0]:
                     global_pred = global_pred + pred_s
                 elif polc and any(R.shape[1] == global_slopes.shape[0] for R in self.reconstructor):
@@ -658,6 +712,11 @@ class Controller:
                 if self.reconstructor[i].shape[1] == global_slopes.shape[0]:
                     modal_error.append(self.reconstructor[i] @ global_slopes)
                 elif self.reconstructor[i].shape[1] == error[i].shape[0]:
+                    if polc and any(m[0] == i for m in self.polc_cross_missing):
+                        lost = sorted({(j, k) for (r, j, k) in self.polc_cross_missing if r == i})
+                        raise ValueError(f'Controller - POLC for DM {i}: (DM, light path) {lost} are in the optical path of its WFS '
+                                         f'but their IMs were not measured, so the pseudo-open-loop slopes would be incomplete. '
+                                         f'Measure those IMs (InteractionMatrixHandler boolean matrix) or use a joint reconstructor.')
                     modal_error.append(self.reconstructor[i] @ error[i])
                 else:
                     raise ValueError(f"Shape mismatch: reconstructor[{i}] has shape {self.reconstructor[i].shape}, "
