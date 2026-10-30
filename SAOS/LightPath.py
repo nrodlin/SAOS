@@ -8,8 +8,7 @@ import numpy as np
 from joblib import Parallel, delayed
 
 import logging
-import logging.handlers
-from queue import Queue
+from .LoggingHelper import get_logger
 
 """
 LightPath Module
@@ -28,12 +27,7 @@ class LightPath:
         logger : logging.Logger, optional
             Logger instance for diagnostics.
         """
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         self.tag = 'lightpath'
 
@@ -109,7 +103,7 @@ class LightPath:
         Parameters
         ----------
         src : Source
-            Light source (NGS, LGS, or Sun).
+            Light source (natural source or Sun; LGS are not implemented).
         tel : Telescope
             Telescope instance.
         atm : Atmosphere, optional
@@ -157,6 +151,10 @@ class LightPath:
 
         self.wfs = wfs
         self.sci = sci
+        # Noise stream of this path on each detector: streams are numbered in the order in which the light paths are connected to the
+        # detector, so the noise of a path does not depend on thread scheduling when several paths share a WFS or a camera
+        self.wfs_noise_stream = wfs.cam.register_stream() if wfs is not None else None
+        self.sci_noise_stream = sci.cam.register_stream() if sci is not None else None
         # Special disturbance object
 
         self.vibration   = vibration
@@ -201,16 +199,18 @@ class LightPath:
             self.vibration_opd = self.vibration.getCurrentVibrations(self.iteration)
             self.vibration_phase = self.vibration_opd * (2*np.pi/self.src.wavelength)
         else:
-            self.vibration_opd   *= 0
-            self.vibration_phase *= 0
+            # New zero arrays, never in-place: the previous arrays may be views of the user's data (e.g. LocalSeeing input)
+            self.vibration_opd   = np.zeros_like(self.vibration_opd)
+            self.vibration_phase = np.zeros_like(self.vibration_phase)
         
         ## Local seeing
         if (not interaction_matrix) and (self.localSeeing is not None):
             self.localSeeing_opd = self.localSeeing.getCurrentOPD(self.iteration)
             self.localSeeing_phase = self.localSeeing_opd * (2*np.pi/self.src.wavelength)
         else:
-            self.localSeeing_opd   *= 0
-            self.localSeeing_phase *= 0
+            # getCurrentOPD returns a view of the LocalSeeing input: zeroing it in place would erase that frame of the sequence
+            self.localSeeing_opd   = np.zeros_like(self.localSeeing_opd)
+            self.localSeeing_phase = np.zeros_like(self.localSeeing_phase)
 
         ## Project the atmosphere
      
@@ -218,8 +218,8 @@ class LightPath:
             self.atmosphere_opd = self.atm.getOPD(self.src)
             self.atmosphere_phase = self.atmosphere_opd * (2 * np.pi /self.src.wavelength)
         else: # Avoid interacting with the atmosphere while the IM is being measured
-            self.atmosphere_opd   *= 0
-            self.atmosphere_phase *= 0
+            self.atmosphere_opd   = np.zeros_like(self.atmosphere_opd)
+            self.atmosphere_phase = np.zeros_like(self.atmosphere_phase)
 
         # Project the DM
         if self.dm is not None:
@@ -258,9 +258,9 @@ class LightPath:
         # Then, measure the slopes at the WFS - if defined
         if self.wfs is not None:
             if self.src.tag == 'sun':
-                self.slopes_1D, self.slopes_2D, self.wfs_frame, _ = self.wfs.wfs_measure(self.wfs_phase, self.src, self.pseudo_ref, self.reference_slopes)
+                self.slopes_1D, self.slopes_2D, self.wfs_frame, _ = self.wfs.wfs_measure(self.wfs_phase, self.src, self.pseudo_ref, self.reference_slopes, stream=self.wfs_noise_stream)
             else:
-                self.slopes_1D, self.slopes_2D, self.wfs_frame = self.wfs.wfs_measure(self.wfs_phase, self.src)
+                self.slopes_1D, self.slopes_2D, self.wfs_frame = self.wfs.wfs_measure(self.wfs_phase, self.src, stream=self.wfs_noise_stream)
 
             self.error_measurement[:, (self.iteration+1)%self.error_measurement.shape[1]] = self.slopes_1D.copy()
 
@@ -273,10 +273,12 @@ class LightPath:
         # Generate the Science frame, if the time advances
         if (self.sci is not None) and (not interaction_matrix) and (temporal_tick):
             get_frame = False
-            # Check Science cam decimation
+            # Check Science cam decimation: the frame is taken at the last iteration of every window of `decimation` iterations
+            # (iterations decimation-1, 2 decimation-1, ...), the convention of Savepoint ((iteration + 1) % rate == 0); with
+            # decimation 1 every iteration
             if self.sci.decimation > 0:
                 # Then, we have to check the decimation
-                if (self.decimation_counter % self.sci.decimation) == 0:
+                if ((self.decimation_counter + 1) % self.sci.decimation) == 0:
                     get_frame = True
             else:
                 get_frame = True
@@ -290,9 +292,12 @@ class LightPath:
                 # Now, manage the long exposure frame --> The number of frames accumulated let us know the time exposed
                 # Incorporate the decimation factor since we only acquire a frame every decimation steps
                 decimation_factor = max(1, self.sci.decimation) if self.sci.decimation > 0 else 1
-                exposured_time = len(self.long_exp_cumulative) * decimation_factor * self.tel.samplingTime
+                # Number of frames of the exposure, counted as an integer (comparing accumulated float times added one extra
+                # frame when k * Ts rounded below k / fs, e.g. 1500 or 1800 Hz). A non-integral ratio is rounded up: the
+                # exposure is never shorter than integrationTime (2.4 frames -> 3, not 2)
+                n_frames_exposure = max(1, int(np.ceil(self.sci.integrationTime / (decimation_factor * self.tel.samplingTime) - 1e-6)))
                 # Check if we have exposed the required time
-                if exposured_time >= self.sci.integrationTime:
+                if len(self.long_exp_cumulative) >= n_frames_exposure:
                     # Add the frames accumulated
                     longExp = np.sum(self.long_exp_cumulative, 0)
                     # Normalize energy to 1
@@ -301,7 +306,7 @@ class LightPath:
                         longExp /= total_energy
                     # Check if the user wants to add noise
                     if self.sci.cam.noiseFlag:
-                        longExp = self.sci.apply_noise(longExp, self.src.flux * self.sci.integrationTime * self.tel.area_eff)
+                        longExp = self.sci.apply_noise(longExp, self.src.flux * self.sci.integrationTime * self.tel.area_eff, stream=self.sci_noise_stream)
                     else:
                         longExp = longExp * self.src.flux * self.sci.integrationTime * self.tel.area_eff * self.sci.lightRatio
                     # Save the frame 
@@ -343,30 +348,4 @@ class LightPath:
             return False
 
     
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
     
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

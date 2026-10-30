@@ -3,9 +3,9 @@ import numpy as np
 
 # Returns a 3D matrix of size: (nActs x nActs x Nmodes) whose range is between -1 and 1.
 def generate_hadamard_modes(dm, nModes=None, useTorch=False, include_piston=False):
-    # If the modes are not specified, use the number of actuators --> maximum number of modes
+    # If the modes are not specified, use every degree of freedom: nValidAct, minus piston when it is excluded
     if nModes is None:
-        nModes = dm.nValidAct
+        nModes = dm.nValidAct if include_piston else dm.nValidAct - 1
     # Hadamard modes are defined over a surface that is a power of 2 ==> we must compute the nearest power of 2 
     # Each row contains the exact informatiion of its equivalent column ==> row 0 == col 0
     # We are considering that: each row is a mode, and each column is an actuator.

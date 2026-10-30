@@ -16,8 +16,14 @@ All docstrings follow the **NumPy** format.
 | [NCPA](ncpa.md) | `NCPA` | Non-Common Path Aberrations |
 | [SHWFS](shwfs.md) | `ShackHartmann` | Classical Shack-Hartmann WFS |
 | [Correlating SHWFS](correlating_shwfs.md) | `CorrelatingShackHartmann` | Solar correlation-based SH-WFS |
+| [Vibration](vibration.md) | `Vibration` | Telescope vibrations (tip-tilt sequence, arcsec on sky) |
+| [Local Seeing](local_seeing.md) | `LocalSeeing` | Local seeing OPD sequence [m] |
 | [Detector](detector.md) | `Detector` | Detector noise and quantization model |
 | [Science Camera](science_cam.md) | `ScienceCam` | PSF / solar image science camera |
 | [Interaction Matrix](interaction_matrix.md) | `InteractionMatrixHandler` | IM measurement and reconstruction |
-| [Controller](controller.md) | `Controller` | Leaky integrator / PI AO controller |
+| [Controller](controller.md) | `Controller` | Reconstructors (inversion, Tikhonov, tomography) and control laws (leaky, PI, state space; closed, open or POLC operation) |
+| [Learn Estimator](learn_estimator.md) | `LearnEstimator` | Learn-and-apply tomographic estimator |
 | [Sharepoint](sharepoint.md) | `Sharepoint` | Real-time telemetry via ZeroMQ |
+| [Savepoint](savepoint.md) | `Savepoint` | HDF5 results: data, metrics and simulation metadata |
+| [Reception Point](reception_point.md) | `ReceptionPoint` | Client that requests buffers from an external server (ZeroMQ) |
+| [Logging](logging_helper.md) | `LoggingHelper`, `get_logger` | Shared logging queue and listener |

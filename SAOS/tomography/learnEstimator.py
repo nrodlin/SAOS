@@ -5,12 +5,15 @@ import h5py
 from scipy.special import gamma
 
 import logging
-import logging.handlers
-from queue import Queue
 
 import time
 
 import matplotlib.pyplot as plt
+from ..LoggingHelper import get_logger
+
+R0_WAVELENGTH = 500e-9   # [m] reference wavelength of r0 (as in Atmosphere): the fitted r0 and covariances refer to it
+VK_SERIES_X_MAX = 3.0    # validity of the 10-term von Karman series (vk_structure_torch): x = pi r / L0 <= 3 (relative error <~ 1e-4);
+                         # learn() bounds L0 >= pi r_max / VK_SERIES_X_MAX, r_max the largest separation of the problem
 
 class LearnEstimator:
     """
@@ -25,13 +28,7 @@ class LearnEstimator:
                  logger=None):
 
         # shared logging setup
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         self.tag       = 'learnEstimator'
 
@@ -201,10 +198,6 @@ class LearnEstimator:
     
     # Compute separations
 
-    def separations_to_torch(self, AB, Ab, aB, ab, dtype=torch.float64):
-        sep_stack = np.stack((AB, Ab, aB, ab), axis=0)
-        return torch.as_tensor(sep_stack, dtype=dtype, device=self.device)
-
     def compute_coordinate_differences(self, A_row, a_row, B_col, b_col):
         # A_row, a_row: shape (nLayers, N_row, 2)
         # B_col, b_col: shape (nLayers, N_col, 2)
@@ -213,15 +206,6 @@ class LearnEstimator:
         diff_aB = a_row[:, :, None, :] - B_col[:, None, :, :]
         diff_ab = a_row[:, :, None, :] - b_col[:, None, :, :]
         return np.stack((diff_AB, diff_Ab, diff_aB, diff_ab), axis=0)
-
-    def compute_separations_vectorized(self, A_row, a_row, B_col, b_col):
-        # A_row, a_row: shape (nLayers, N_row, 2)
-        # B_col, b_col: shape (nLayers, N_col, 2)
-        AB = np.linalg.norm(A_row[:, :, None, :] - B_col[:, None, :, :], axis=-1)
-        Ab = np.linalg.norm(A_row[:, :, None, :] - b_col[:, None, :, :], axis=-1)
-        aB = np.linalg.norm(a_row[:, :, None, :] - B_col[:, None, :, :], axis=-1)
-        ab = np.linalg.norm(a_row[:, :, None, :] - b_col[:, None, :, :], axis=-1)
-        return AB, Ab, aB, ab
 
     def compute_covariance_matrix_torch(self, diff_stack_torch, r0, L0, fractionalCn2, scale, constants, noise_var=None, row_sizes_tensor=None, diag_idx=None, Vx=None, Vy=None, dt=None):
         # diff_stack_torch: shape (4, nLayers, N_rows, N_cols, 2)
@@ -432,7 +416,18 @@ class LearnEstimator:
               lr=1e-2, max_iters=150, patience=50, min_delta=1e-9,
               lr_patience=20, lr_factor=0.5, optimize_noise=True, initial_noise=1e-2,
               lp_indices=None, wind_delay_frames=10, max_iters_wind=150, lr_wind=1e-1,
-              patience_wind=50):
+              patience_wind=50, estimate_wind=True):
+        """
+        Estimate the atmospheric parameters from open-loop (or pseudo-open-loop) telemetry.
+
+        Phase 1 fits r0, L0, the Cn2 fractions and the noise variance to the instantaneous slope covariance.
+        Phase 2 (only if estimate_wind) fits the wind velocity of every layer to time-delayed covariances, which is
+        what makes the reconstructor predictive. With estimate_wind=False Phase 2 is skipped (no delayed telemetry is
+        loaded), windSpeedX/Y are left as None and build_reconstructor() then computes a non-predictive (L&A)
+        reconstructor.
+        The slopes (in px) are converted to wavefront gradients (s ps / 206265, achromatic) and expressed as phase gradients
+        at R0_WAVELENGTH (500 nm), so the fitted r0 is the r0 at 500 nm, as in Atmosphere, whatever the WFS band.
+        """
         orig_device = self.device
         try:
             return self._learn_internal(
@@ -440,7 +435,7 @@ class LearnEstimator:
                 lr, max_iters, patience, min_delta,
                 lr_patience, lr_factor, optimize_noise, initial_noise,
                 lp_indices, wind_delay_frames, max_iters_wind, lr_wind,
-                patience_wind
+                patience_wind, estimate_wind
             )
         except (torch.OutOfMemoryError, RuntimeError) as e:
             if ("out of memory" in str(e).lower() or isinstance(e, torch.OutOfMemoryError)) and self.device == "cuda":
@@ -456,7 +451,7 @@ class LearnEstimator:
                         lr, max_iters, patience, min_delta,
                         lr_patience, lr_factor, optimize_noise, initial_noise,
                         lp_indices, wind_delay_frames, max_iters_wind, lr_wind,
-                        patience_wind
+                        patience_wind, estimate_wind
                     )
                     return res
                 finally:
@@ -468,7 +463,7 @@ class LearnEstimator:
               lr=1e-2, max_iters=150, patience=50, min_delta=1e-9,
               lr_patience=20, lr_factor=0.5, optimize_noise=True, initial_noise=1e-2,
               lp_indices=None, wind_delay_frames=10, max_iters_wind=150, lr_wind=1e-1,
-              patience_wind=50):
+              patience_wind=50, estimate_wind=True):
         self.logger.info('LearnEstimator::learn - loading initial params.')
         # Extract initial params
         initial_r0 = atm_guess['r0']
@@ -510,6 +505,14 @@ class LearnEstimator:
         
         diff_stack = self.compute_coordinate_differences(A_row, a_row, A_row, a_row)
         diff_stack_torch = torch.as_tensor(diff_stack, dtype=dtype, device=self.device)
+        # Lower bound of L0 in the fit: the von Karman series is valid for pi r / L0 <= VK_SERIES_X_MAX
+        r_max = float(np.max(np.linalg.norm(diff_stack, axis=-1)))
+        L0_min = np.pi * r_max / VK_SERIES_X_MAX
+        self.L0_min = L0_min
+        if initial_L0 <= L0_min:
+            self.logger.warning(f'LearnEstimator::learn - initial L0 {initial_L0:.2f} m below the validity bound of the von Karman '
+                                f'series ({L0_min:.2f} m for separations up to {r_max:.2f} m): starting from {1.5 * L0_min:.2f} m.')
+            initial_L0 = 1.5 * L0_min
         
         # Compute theoretical covariance matrix
         t1 = time.time()        
@@ -545,7 +548,9 @@ class LearnEstimator:
         self.logger.info('LearnEstimator::learn - Load slopes measurements for Phase 1.')
         meas_slopes_t, meas_slopes_tdelay = self.loadMeasurements(data_path, len(self.measWFSparams), subapsSel, selSamples, lp_indices=lp_indices, delay_frames=0)
         self.logger.info('LearnEstimator::learn - Compute experimental covariance for Phase 1.')
-        gain = (self.measWFSparams[0]['subap_size']*2*np.pi*2)/(206265.0*self.measWFSparams[0]['plate_scale']*self.measWFSparams[0]['wavelength'])
+        # Slope [px] -> wavefront (OPD) gradient s ps / 206265 [m/m] -> phase gradient at the r0 wavelength [rad/m]: the von Karman
+        # model is the phase structure function of r0 at R0_WAVELENGTH
+        gain = 2*np.pi*self.measWFSparams[0]['plate_scale']/(206265.0*R0_WAVELENGTH)
         cov_meas = self.compute_measurement_covariance(meas_slopes_t, meas_slopes_tdelay, gain, dtype)
         t3 = time.time()
         self.logger.info(f'Separation {t1-t0}, CovMat (1it):{t2-t1}, Experimental: {t3-t2}')
@@ -553,7 +558,7 @@ class LearnEstimator:
         # Phase 1: Atmosphere & Noise Estimation
         self.logger.info("LearnEstimator::learn - Starting Phase 1: Atmosphere & Noise Estimation...")
         raw_r0 = torch.nn.Parameter(torch.log(torch.expm1(initial_r0_torch)))
-        raw_L0 = torch.nn.Parameter(torch.log(torch.expm1(initial_L0_torch)))
+        raw_L0 = torch.nn.Parameter(torch.log(torch.expm1(initial_L0_torch - L0_min)))     # L0 = L0_min + softplus(raw_L0)
         raw_cn2 = torch.nn.Parameter(torch.log(initial_fractionalCn2_torch + 1e-12))
 
         # Setup noise optimization if requested
@@ -580,7 +585,7 @@ class LearnEstimator:
             optimizer.zero_grad()
 
             r0 = torch.nn.functional.softplus(raw_r0) + 1e-6
-            L0 = torch.nn.functional.softplus(raw_L0) + 1e-6
+            L0 = torch.nn.functional.softplus(raw_L0) + L0_min
             fractionalCn2 = torch.nn.functional.softmax(raw_cn2, dim=0)
             
             if optimize_noise:
@@ -638,7 +643,7 @@ class LearnEstimator:
         # Compute and assign final optimized parameters
         with torch.no_grad():
             r0_opt = torch.nn.functional.softplus(raw_r0) + 1e-6
-            L0_opt = torch.nn.functional.softplus(raw_L0) + 1e-6
+            L0_opt = torch.nn.functional.softplus(raw_L0) + L0_min
             fractionalCn2_opt = torch.nn.functional.softmax(raw_cn2, dim=0)
             if optimize_noise:
                 noise_opt = torch.nn.functional.softplus(raw_noise) + 1e-8
@@ -647,6 +652,9 @@ class LearnEstimator:
 
         self.r0 = r0_opt.item()
         self.L0 = L0_opt.item()
+        if self.L0 < 1.05 * L0_min:
+            self.logger.warning(f'LearnEstimator::learn - fitted L0 = {self.L0:.2f} m is at the lower bound {L0_min:.2f} m '
+                                f'(validity of the von Karman series for separations up to {r_max:.2f} m): L0 is not constrained by the data.')
         self.fractionalCn2 = fractionalCn2_opt.detach().cpu().numpy()
         if optimize_noise:
             self.noise_var = noise_opt.detach().cpu().numpy()
@@ -657,6 +665,27 @@ class LearnEstimator:
         self.logger.info(f"Optimized parameters (Phase 1): r0={self.r0:.4f}, L0={self.L0:.4f}, Cn2={self.fractionalCn2}")
         if optimize_noise:
             self.logger.info(f"Optimized noise variance per WFS (Phase 1): {self.noise_var}")
+
+        if not estimate_wind:
+            # Non-predictive Learn: no wind, so build_reconstructor() does not shift the target covariance
+            self.windSpeedX = None
+            self.windSpeedY = None
+            self.logger.info("LearnEstimator::learn - Wind estimation disabled: Phase 2 skipped (non-predictive reconstructor).")
+            del raw_r0, raw_L0, raw_cn2, optimizer, scheduler, cov_theo, cov_meas, diff_stack_torch, best_params
+            if optimize_noise:
+                del raw_noise
+            import gc
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            return {
+                'r0': self.r0,
+                'L0': self.L0,
+                'fractionalCn2': self.fractionalCn2,
+                'noise_var': self.noise_var,
+                'windSpeedX': None,
+                'windSpeedY': None
+            }
 
         # Phase 2: Wind Velocity Estimation (Vx, Vy)
         self.logger.info("LearnEstimator::learn - Starting Phase 2: Wind Speed Estimation...")
@@ -794,11 +823,14 @@ class LearnEstimator:
         regularization: float, optional
             Diagonal regularization added to C_ss.
         windSpeedX: array-like, optional
-            Wind speed along X for delay compensation. If None, uses self.windSpeedX.
+            Wind speed along X for delay compensation. If None, uses self.windSpeedX. If that is also None (learn() with
+            estimate_wind=False), the reconstructor is non-predictive (L&A).
         windSpeedY: array-like, optional
             Wind speed along Y for delay compensation. If None, uses self.windSpeedY.
         dt: float, optional
-            Time delay in seconds. If None, computes from target LP delay.
+            Prediction horizon in seconds. If None, the total pure delay of the target light path, (delay + 1) Ts (SAOS
+            convention: the slopes of frame k reach the controller after `delay` frames and the command acts from the next
+            frame). Ignored without wind speeds.
         chunk_size: int, optional
             Chunk size along the rows for memory-efficient computation.
         device: str or torch.device, optional
@@ -824,7 +856,7 @@ class LearnEstimator:
             # Check target LPs delay
             delay_frames = self.targetLPs[0].delay if hasattr(self, 'targetLPs') and len(self.targetLPs) > 0 else 0
             sampling_time = self.targetLPs[0].tel.samplingTime if hasattr(self, 'targetLPs') and len(self.targetLPs) > 0 else 0.001
-            dt = delay_frames * sampling_time
+            dt = (delay_frames + 1) * sampling_time
 
         dtype = torch.float64
         calc_device = device if device is not None else self.device
@@ -933,11 +965,13 @@ class LearnEstimator:
                 a_row_t_chunk = a_row_t[:, i:end_idx, :]
                 scale_ts_chunk = scale_ts[i:end_idx, :]
                 
-                # Compute Cts chunk: shape (chunk_rows, N_sensed)
+                # Compute Cts chunk: shape (chunk_rows, N_sensed). Rows = target at t + dt, columns = sensed slopes at t: with frozen
+                # flow phi(r, t) = phi0(r - V t) the covariance is C(r_t - r_s - V dt), so the displacement is -V dt (prediction).
+                # (In learn(), Phase 2, the rows are at t and the columns at t + tau: there the displacement is +V tau.)
                 Cts_chunk = self.compute_covariance_matrix_chunked_torch(
                     A_row_t_chunk, a_row_t_chunk, A_row_s, a_row_s, r0_torch, L0_torch, fractionalCn2_torch,
                     scale_ts_chunk, constants, noise_var=None,
-                    Vx=windSpeedX_torch, Vy=windSpeedY_torch, dt=dt, chunk_size=chunk_size, device=calc_device, label="Cts_chunk"
+                    Vx=windSpeedX_torch, Vy=windSpeedY_torch, dt=-dt, chunk_size=chunk_size, device=calc_device, label="Cts_chunk"
                 )
                 
                 # Solve for Rtomo_chunk
@@ -1012,34 +1046,3 @@ class LearnEstimator:
                 )
             else:
                 raise e
-
-
-    def setup_logging(self, logging_level=logging.INFO):
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
-    
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

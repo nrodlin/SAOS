@@ -7,8 +7,7 @@ import zmq
 import pickle
 
 import logging
-import logging.handlers
-from queue import Queue
+from .LoggingHelper import get_logger
 
 """
 ReceptionPoint Module
@@ -24,27 +23,22 @@ class ReceptionPoint:
                  protocol="tcp", 
                  timeout=5000):
         """
-        Initialize the Sharepoint publisher for sharing light path data.
+        Initialize the client that requests light path buffers from an external server.
 
         Parameters
         ----------
         logger : logging.Logger, optional
             External logger to use. If None, initializes internal logging.
         port : int, optional
-            Port number for ZeroMQ publisher. Default is 5555.
+            Port of the server. Default is 7001.
         ip : str, optional
-            IP address to bind the publisher. Default is localhost.
+            Address of the server. Default is localhost.
         protocol : str, optional
             Communication protocol (e.g., 'tcp').
         timeout : int
             Timeout for the response to arrive in ms.       
         """
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
             
         # Map arguments to attributes
         self.ip = ip
@@ -90,18 +84,7 @@ class ReceptionPoint:
                     break
                 else:
                     result = None
-                    
-                    # Reset socket
-                    try:
-                        self.socket.setsockopt(zmq.LINGER,0)
-                        self.socket.close()
-                    except Exception:
-                        pass
-					
-                    self.socket = self.context.socket(zmq.REQ)
-                    self.socket.connect(self.protocol + '://' + self.ip + ':' + str(self.port))
-                    
-                    self.poller.register(self.socket, zmq.POLLIN)
+                    self._reset_socket()
                     self.logger.error('ReceptionPoint::sendRequest - Timeout.')
                     break
         
@@ -127,15 +110,7 @@ class ReceptionPoint:
                         break
                     else:
                         result = None
-                        # Reset socket
-                        try:
-                            self.socket.setsockopt(zmq.LINGER, 0)
-                            self.socket.close()
-                        except Exception:
-                            pass
-                        self.socket = self.context.socket(zmq.REQ)
-                        self.socket.connect(self.protocol + "://" + self.ip + ":" + str(self.port))
-                        self.poller.register(self.socket, zmq.POLLIN)
+                        self._reset_socket()
                         self.logger.error("ReceptionPoint::sendRequest - loop_cmd timeout.")
                         break
                 except Exception as e:
@@ -148,33 +123,26 @@ class ReceptionPoint:
             self.logger.warning('ReceptionPoint::sendRequest - Unsupported buffer type.')
         return result
     
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
     
+    def _reset_socket(self):
+        """
+        Replace the REQ socket after a timeout (a REQ socket that sent a request without a reply cannot send again): the old
+        socket is removed from the poller before being closed, so that the poller never waits on closed sockets.
+        """
+        try:
+            self.poller.unregister(self.socket)
+        except KeyError:
+            pass
+        try:
+            self.socket.setsockopt(zmq.LINGER, 0)
+            self.socket.close()
+        except Exception:
+            pass
+        self.socket = self.context.socket(zmq.REQ)
+        self.socket.connect(self.protocol + '://' + self.ip + ':' + str(self.port))
+        self.poller.register(self.socket, zmq.POLLIN)
+
     def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()
         if self.socket is not None and self.context is not None:
             self.socket.close()
             self.context.term()

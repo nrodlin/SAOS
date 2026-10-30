@@ -8,10 +8,9 @@ Major update on 26/03/2025
 @author: nrodlin
 """
 import logging
-import logging.handlers
-from queue import Queue
 
 import numpy as np
+from .LoggingHelper import get_logger
 
 """
 Telescope Module
@@ -53,12 +52,7 @@ class Telescope:
             Logger instance for output. If None, a default logger is created.
         """
 
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         self.isInitialized               = False                        # Resolution of the telescope
         self.resolution                  = resolution                   # Resolution of the telescope
@@ -82,7 +76,7 @@ class Telescope:
     def set_pupil(self):
         """
         Generate the pupil mask either from user input or by creating a circular aperture
-        with optional central obstruction.
+        with optional central obstruction (without spiders: self.spiders is reset to None).
 
         Updates the following:
         - self.pupil
@@ -94,6 +88,7 @@ class Telescope:
         -------
         None
         """
+        self.spiders = None                # set by apply_spiders()
         # Case where the pupil is not input: circular pupil with central obstruction    
         if self.user_defined_pupil is None:
             D           = self.resolution+1
@@ -119,7 +114,8 @@ class Telescope:
         Parameters
         ----------
         angle : list of float
-            List of angles [deg] defining the spider orientation.
+            Direction of every arm [deg], counter-clockwise from +x (columns) with y = +row, the frame of the source
+            azimuths. Each arm is a half-strip of width thickness_spider from the centre to the pupil edge.
         thickness_spider : float
             Width of the spider arms in meters.
         offset_X : list of float, optional
@@ -133,6 +129,9 @@ class Telescope:
         """
         # Reset the pupil to the default one before adding the spiders
         self.set_pupil()
+        self.spiders = dict(angle=list(np.atleast_1d(angle).astype(float)), thickness=float(thickness_spider),
+                            offset_X=None if offset_X is None else list(np.atleast_1d(offset_X).astype(float)),
+                            offset_Y=None if offset_Y is None else list(np.atleast_1d(offset_Y).astype(float)))
 
         if thickness_spider > 0:           
             pup = np.copy(self.pupil)
@@ -148,24 +147,18 @@ class Telescope:
             if np.max(np.abs(offset_X))>=max_offset or np.max(np.abs(offset_Y))>max_offset:
                 self.logger.warning('Telescope::apply_spiders - The spider offsets are too large! Weird things could happen!')
 
+            # Pixel centres of the pupil grid, (i - (N-1)/2) D/N, with x = +column and y = +row (frame of the source azimuths)
+            x = (np.arange(self.resolution) - (self.resolution - 1) / 2) * self.D / self.resolution
+            [X0, Y0] = np.meshgrid(x, x)
             for i in range(len(angle)):
-                angle_val = (angle[i]+90)%360
-                x = np.linspace(-self.D/2,self.D/2,self.resolution)
-                [X,Y] = np.meshgrid(x,x)
-                X+=offset_X[i]
-                Y+=offset_Y[i]
-    
-                map_dist = np.abs(X*np.cos(np.deg2rad(angle_val)) + Y*np.sin(np.deg2rad(-angle_val)))
-        
-                if 0<=angle_val<90:
-                    map_dist[:self.resolution//2,:] = thickness_spider
-                if 90<=angle_val<180:
-                    map_dist[:,:self.resolution//2] = thickness_spider
-                if 180<=angle_val<270:
-                    map_dist[self.resolution//2:,:] = thickness_spider
-                if 270<=angle_val<360:
-                    map_dist[:,self.resolution//2:] = thickness_spider                
-                pup*= map_dist>thickness_spider/2
+                # Arm i: half-strip of width thickness_spider starting at the centre (displaced by the offsets) towards the
+                # angle [deg], counter-clockwise from +x
+                th = np.deg2rad(angle[i])
+                X = X0 + offset_X[i]
+                Y = Y0 + offset_Y[i]
+                along = X*np.cos(th) + Y*np.sin(th)
+                perp = -X*np.sin(th) + Y*np.cos(th)
+                pup = pup * ~((along > 0) & (np.abs(perp) < thickness_spider/2))
 
             self.pupil = pup.copy()
             self.pupilReflectivity = self.pupil.astype(float) * self.pupilReflectivity
@@ -197,31 +190,3 @@ class Telescope:
         self.logger.info('{: ^18s}'.format('Pixels in the pupil')          + '{: ^18s}'.format(str(self.pixelArea))                                +'{: ^18s}'.format('[pixels]' ))
         self.logger.info('{: ^18s}'.format('Field of View')                + '{: ^18s}'.format(str(self.fov))                                      +'{: ^18s}'.format('[arcsec]' ))
         self.logger.info('%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%')
-
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
-    
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

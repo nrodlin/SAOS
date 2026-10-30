@@ -1,3 +1,18 @@
 [build-system]
 requires = ["setuptools>=42.0"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -p no:cacheprovider"
+timeout = 600
+# On timeout, dump the stack of every thread and stop the session (a hung test leaves a trace instead of hitting the
+# run_ci.sh budget silently)
+timeout_method = "thread"
+markers = [
+    "fast: T1 tier, isolated module physics at small scale (CPU, whole tier < 5 min)",
+    "nightly: T2 tier, more realisations, extended object, CPU vs GPU, short closed loops (workstation GPU, < 45 min)",
+    "heavy: T3 tier, reduced MCAO scenarios and scale-dependent paths (< 1 h on the laptop)",
+    "gpu: needs CUDA (skipped when no GPU is visible)",
+    "known_issue(issue_id, description, location): documented SAOS bug reproduced by the test (the test fails until fixed)",
+]

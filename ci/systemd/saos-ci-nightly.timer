@@ -1,0 +1,9 @@
+[Unit]
+Description=Run the SAOS nightly validation at 02:00
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -4,8 +4,7 @@ import torch
 import time
 
 import logging
-import logging.handlers
-from queue import Queue
+from .LoggingHelper import get_logger
 
 class Controller:
     def __init__(self,
@@ -30,7 +29,14 @@ class Controller:
         reconstructionMethod : String
             Type of reconstructor used, supported types are: {inversion, tikhonov, tomography}.        
         operationType : String
-            The type of operation that will be used, supported types are: {open, closed, polc}. By default, closed.            
+            The type of operation that will be used, supported types are: {open, closed, polc}. By default, closed.
+            polc: the reconstructor acts on the pseudo-open-loop slopes s_pol = s + IM c(k - delay). With inversion/tikhonov and the
+            leaky or PI controllers the law is c(k) = (1 - gain) c(k-1) + gain (-R s_pol) (decay and ki are not used); a stateSpace
+            controller receives -R s_pol as its input. With tomography, see the tomographic law.
+            The IM term adds back every DM in the optical path of the WFS: with a joint reconstructor on the global slope
+            vector, sum_j IM_j c_j(k - d_j); with per-DM reconstructors (joint_reconstruction=False), the slope vector of DM i
+            (WFS of its mask row) also gets the commands of the other DMs seen by those WFS. A DM in the optical path of one
+            of those WFS whose IM was not measured raises ValueError at the first call.
         **kwargs
             rcond : list of length equal to nDMs or float
                 Percentage of the maximum singular value below witch the SV are discarded.
@@ -52,13 +58,7 @@ class Controller:
                 Feedforward matrix/matrices for the stateSpace controller. Shape (N_outputs, N_inputs).
         """        
         # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         # Define class attributes
         self.tag = 'controller'
@@ -84,6 +84,7 @@ class Controller:
         self.R_tomo_path = kwargs.get('R_tomo_path', None)
 
         self.nModes = kwargs.get('nModes', None)
+        self.joint_reconstruction = kwargs.get('joint_reconstruction', True)
 
         # Run the initialization of the reconstructor
         self.reconstructor, self.modal_basis, self.mask, self.t_mask, self.discarded_modes = self.initializeReconstructor(self.reconstructionMethod, interactionMatrix)                
@@ -100,6 +101,11 @@ class Controller:
             self.operationType = operationType
         else:
             raise ValueError('Unknown operation type')
+
+        # POLC with per-DM slope vectors: IMs of every DM on the WFS of each DM's mask
+        self.im_polc_cross, self.polc_cross_missing = None, []
+        if self.operationType == 'polc':
+            self.im_polc_cross, self.polc_cross_missing = self._init_polc_cross_ims(interactionMatrix)
         
         if self.controllerType == 'stateSpace':
             self.A = kwargs.get('A', None)
@@ -291,11 +297,16 @@ class Controller:
                 self.logger.error("R_tomo_path must be provided for tomography reconstruction method.")
                 raise ValueError("R_tomo_path must be provided for tomography reconstruction method.")
 
-        # Now, define the reconstruction matrices for each DM
+        # Check if joint reconstruction across multiple DMs should be performed
+        joint_reconstruction = getattr(self, 'joint_reconstruction', True)
 
+        # Define the reconstruction matrices for each DM
         reconstructor = []
         self.im_per_dm = []
-                
+        im_target_tensors = []
+        n_modes_target = []
+        all_dms_have_target = True
+
         for i in range(nDMs):
             # 1. Measured IM for POLC
             interaction_matrix_per_DM = []
@@ -305,56 +316,221 @@ class Controller:
                     im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
                     if self.nModes is not None:
                         n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
-                        im = im[:, :n_m]
+                        if n_m is not None:
+                            im = im[:, :n_m]
                     interaction_matrix_per_DM.append(im)
                     
             if len(interaction_matrix_per_DM) == 0:
-                nModes = modal_basis[i].shape[1]
-                self.im_per_dm.append(torch.zeros((0, nModes), dtype=torch.float64, device=self.device))
+                nModes_i = modal_basis[i].shape[1] - discarded_modes[i]
+                if self.nModes is not None:
+                    n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
+                    if n_m is not None:
+                        nModes_i = min(nModes_i, n_m)
+                self.im_per_dm.append(torch.zeros((0, nModes_i), dtype=torch.float64, device=self.device))
             else:
-                im_measured_tensor = torch.as_tensor(np.vstack(interaction_matrix_per_DM), dtype=torch.float64, device=self.device).squeeze()
-                if im_measured_tensor.ndim == 1:
-                    im_measured_tensor = im_measured_tensor.unsqueeze(0)
+                # (n_slopes, n_modes) also for a single mode: squeezing a (n, 1) IM would transpose it
+                im_measured_tensor = torch.as_tensor(np.vstack([np.atleast_2d(np.asarray(im).T).T for im in interaction_matrix_per_DM]),
+                                                     dtype=torch.float64, device=self.device)
                 self.im_per_dm.append(im_measured_tensor)
 
-            # 2. Target IM for Reconstructor
-            im_target_list = []
-            for j in range(nLPs):
-                if t_mask[i,j]:
-                    im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
-                    if self.nModes is not None:
-                        n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
-                        im = im[:, :n_m]
-                    im_target_list.append(im)
+        # Identify active WFS LightPaths (excluding science cameras with no sensor)
+        self.active_wfs_lps = []
+        for j in range(nLPs):
+            if any(interactionMatrix.interaction_matrix_warehouse[i][j]['IM'] is not None for i in range(nDMs)):
+                self.active_wfs_lps.append(j)
 
-            # Compute the reconstructor
-            if len(im_target_list) == 0:
-                self.logger.warning(f'Controller - DM {i} has no associated WFS in the target mask. Setting reconstructor to zero.')
-                nModes = modal_basis[i].shape[1]
-                temp_reconstructor = torch.zeros((nModes, 0), dtype=torch.float64, device=self.device)
-            else:
-                im_target_tensor = torch.as_tensor(np.vstack(im_target_list), dtype=torch.float64, device=self.device).squeeze()
-                if im_target_tensor.ndim == 1:
-                    im_target_tensor = im_target_tensor.unsqueeze(0)
-                    
-                if reconstructionMethod == 'inversion':
-                    temp_reconstructor = torch.linalg.pinv(im_target_tensor, self.rcond[i])
-                elif reconstructionMethod == 'tikhonov' or reconstructionMethod == 'tomography':
-                    # (D.T@D + alfa*I)@D.T --> implemented through SVD to improve the stability of the inversion and the automation of alfa
-                    H = im_target_tensor
-                    U, S, Vh = torch.linalg.svd(H, full_matrices=False)
-                    alfa = self.beta[i] * torch.max(S)**2
-                    S_reg = S / (S**2 + alfa)
-                    temp_reconstructor = Vh.T @ torch.diag(S_reg) @ U.T
+        # Mode dimensions per DM
+        n_modes_target = []
+        for i in range(nDMs):
+            n_m = modal_basis[i].shape[1] - discarded_modes[i]
+            if self.nModes is not None:
+                user_n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
+                if user_n_m is not None:
+                    n_m = min(n_m, user_n_m)
+            # Never more modes than the measured IM has (an IM measured with fewer modes than the basis)
+            if self.im_per_dm[i].shape[0] > 0:
+                n_m = min(n_m, self.im_per_dm[i].shape[1])
+            n_modes_target.append(n_m)
+
+        # Slope dimensions per active WFS
+        n_slopes_per_wfs = {}
+        for j in self.active_wfs_lps:
+            first_im = next(interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
+                            for i in range(nDMs)
+                            if interactionMatrix.interaction_matrix_warehouse[i][j]['IM'] is not None)
+            n_slopes_per_wfs[j] = first_im.shape[0]
+
+        # Compute Reconstructors: 2D Block Matrix (default) or Independent DM-by-DM
+        if joint_reconstruction and len(self.active_wfs_lps) > 0 and reconstructionMethod in {'inversion', 'tikhonov'}:
+            # Build 2D block matrix of shape (sum(N_slopes_wfs), sum(N_modes_dms))
+            blocks_2d = []
+            for j in self.active_wfs_lps:
+                row_blocks = []
+                n_s = n_slopes_per_wfs[j]
+                for i in range(nDMs):
+                    n_m = n_modes_target[i]
+                    im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
+                    if t_mask[i, j] and (im is not None):
+                        block_im = im[:, :n_m]
+                        row_blocks.append(torch.as_tensor(block_im, dtype=torch.float64, device=self.device))
+                    else:
+                        row_blocks.append(torch.zeros((n_s, n_m), dtype=torch.float64, device=self.device))
+                blocks_2d.append(row_blocks)
+
+            row_tensors = [torch.cat(row, dim=1) for row in blocks_2d]
+            H_global = torch.cat(row_tensors, dim=0)
+
+            if reconstructionMethod == 'inversion':
+                rcond_val = min(self.rcond) if isinstance(self.rcond, (list, tuple)) else self.rcond
+                R_global = torch.linalg.pinv(H_global, rcond=rcond_val)
+            elif reconstructionMethod == 'tikhonov':
+                gamma_parts = []
+                for i in range(nDMs):
+                    offset_i = sum(n_modes_target[:i])
+                    n_m = n_modes_target[i]
+                    dm_cols = H_global[:, offset_i : offset_i + n_m]
+                    s_vals = torch.linalg.svdvals(dm_cols)
+                    s_max = s_vals[0] if len(s_vals) > 0 and s_vals[0] > 0 else torch.tensor(1.0, dtype=torch.float64, device=self.device)
+                    beta_val = self.beta[i] if isinstance(self.beta, (list, tuple)) else self.beta
+                    alfa_i = beta_val * (s_max ** 2)
+                    gamma_parts.append(alfa_i * torch.ones(n_m, dtype=torch.float64, device=self.device))
+
+                Gamma = torch.cat(gamma_parts)
+                reg_matrix = H_global.T @ H_global + torch.diag(Gamma)
+                R_global = torch.linalg.solve(reg_matrix, H_global.T)
+
+            # Slice reconstructor blocks for each DM
+            offset = 0
+            for i in range(nDMs):
+                n_m = n_modes_target[i]
+                reconstructor.append(R_global[offset : offset + n_m, :])
+                offset += n_m
+        else:
+            # Independent DM-by-DM reconstruction
+            for i in range(nDMs):
+                im_target_list = []
+                for j in range(nLPs):
+                    if t_mask[i, j]:
+                        im = interactionMatrix.interaction_matrix_warehouse[i][j]['IM']
+                        if self.nModes is not None:
+                            n_m = self.nModes[i] if isinstance(self.nModes, list) else self.nModes
+                            if n_m is not None:
+                                im = im[:, :n_m]
+                        im_target_list.append(im)
+
+                if len(im_target_list) == 0:
+                    self.logger.warning(f'Controller - DM {i} has no associated WFS in the target mask. Setting reconstructor to zero.')
+                    reconstructor.append(torch.zeros((n_modes_target[i], 0), dtype=torch.float64, device=self.device))
                 else:
-                    self.logger.error('Controller::initializeReconstructor - Unknown reconstructor')
-                    raise ValueError('Unknown reconstructor method.')
-            reconstructor.append(temp_reconstructor)
+                    im_target_tensor = torch.as_tensor(np.vstack([np.atleast_2d(np.asarray(im).T).T for im in im_target_list]),
+                                                       dtype=torch.float64, device=self.device)
+                    if reconstructionMethod == 'inversion':
+                        temp_reconstructor = torch.linalg.pinv(im_target_tensor, self.rcond[i])
+                    elif reconstructionMethod == 'tikhonov' or reconstructionMethod == 'tomography':
+                        H = im_target_tensor
+                        U, S, Vh = torch.linalg.svd(H, full_matrices=False)
+                        alfa = self.beta[i] * torch.max(S)**2
+                        S_reg = S / (S**2 + alfa)
+                        temp_reconstructor = Vh.T @ torch.diag(S_reg) @ U.T
+                    else:
+                        self.logger.error('Controller::initializeReconstructor - Unknown reconstructor')
+                        raise ValueError('Unknown reconstructor method.')
+                    reconstructor.append(temp_reconstructor)
 
         self.logger.info(f'Controller::initializeReconstructor - Reconstruction took {time.time()-t0}[s]')
 
         return reconstructor, modal_basis, mask, t_mask, discarded_modes
     
+    def _init_polc_cross_ims(self, interactionMatrix):
+        """
+        IMs needed by the pseudo-open-loop slopes of each DM's own slope vector (the WFS of mask row i, in the order
+        computeControlAction concatenates them): s_pol_i = s_i + sum_j IM_{j -> WFS(mask i)} c_j(k - d_j). Every DM j that
+        is in the optical path of one of those WFS contributes, not only DM i.
+
+        Returns
+        -------
+        cross : list of list of torch.Tensor or None
+            ``cross[i][j]``: IM of DM j on the slopes of mask row i, (n_slopes_i, n_modes_j); None when DM j is in none of
+            those light paths.
+        missing : list of tuple
+            (i, j, lp): DM j is in the optical path of light path lp (in mask row i) but its IM on lp was not measured.
+        """
+        warehouse = interactionMatrix.interaction_matrix_warehouse
+        lps = getattr(interactionMatrix, 'light_path_list', None) or []
+        dms = getattr(interactionMatrix, 'dm_scanned_list', None) or []
+        nDMs, nLPs = len(warehouse), len(warehouse[0])
+        cross, missing = [], []
+        for i in range(nDMs):
+            row = []
+            lp_idx = [k for k in range(nLPs) if self.mask[i, k]]
+            for j in range(nDMs):
+                n_modes_j = self.reconstructor[j].shape[0]
+                blocks, used = [], False
+                for k in lp_idx:
+                    im = warehouse[j][k]['IM']
+                    n_slopes_k = next((warehouse[m][k]['IM'].shape[0] for m in range(nDMs) if warehouse[m][k]['IM'] is not None), 0)
+                    if im is not None:
+                        blocks.append(np.atleast_2d(np.asarray(im).T).T[:, :n_modes_j]); used = True
+                    else:
+                        in_path = k < len(lps) and j < len(dms) and getattr(lps[k], 'dm', None) is not None and \
+                                  any(d is dms[j] for d in lps[k].dm)
+                        if in_path:
+                            missing.append((i, j, k))
+                        blocks.append(np.zeros((n_slopes_k, n_modes_j)))
+                row.append(torch.as_tensor(np.vstack(blocks), dtype=torch.float64, device=self.device) if used else None)
+            cross.append(row)
+        return cross, missing
+
+    def set_tomography_targets(self, im_target_per_dm, joint=True, release_R_tomo=True):
+        """
+        Reconstructor of the tomographic (L&A) control law from the interaction matrices of the DMs seen by the target
+        (virtual) WFSs, and precomputation of the matrices used online.
+
+        Parameters
+        ----------
+        im_target_per_dm : list
+            One array per DM, [N_target_slopes, n_modes_i], rows in the order of the target slopes of R_tomo.
+        joint : bool, optional
+            True: one Tikhonov reconstructor of the stacked matrix [D_1 ... D_n], so that the DMs share the fit of the
+            target slopes (L&A control matrix C_z = (D_z^T D_z + alpha)^-1 D_z^T, regularisation beta_i * s_max(D_i)^2 per
+            DM as in the joint tikhonov reconstructor). False: one reconstructor per DM (every DM fits the whole target).
+        release_R_tomo : bool, optional
+            Free R_tomo once the products are computed (it is not used online any more).
+
+        Notes
+        -----
+        The tomography control law of computeControlAction() needs modal_error_i = R_i (R_tomo s_pol - sum_j D_j c_j),
+        which is evaluated as M1_i s_pol - M2_i c with M1_i = R_i R_tomo [n_modes_i x N_meas_slopes] and
+        M2_i = R_i [D_1 ... D_n]: two small products per iteration instead of R_tomo [N_target x N_meas] on the CPU.
+        """
+        if not hasattr(self, 'R_tomo') or self.R_tomo is None:
+            raise ValueError('Controller::set_tomography_targets - R_tomo is not loaded.')
+        nDMs = len(im_target_per_dm)
+        D = [torch.as_tensor(np.asarray(im), dtype=torch.float64, device='cpu') for im in im_target_per_dm]
+        n_modes = [d.shape[1] for d in D]
+        D_all = torch.cat(D, dim=1)
+        if joint:
+            gamma = []
+            for i in range(nDMs):
+                s_max = torch.linalg.svdvals(D[i])[0]
+                gamma.append(self.beta[i] * s_max ** 2 * torch.ones(n_modes[i], dtype=torch.float64))
+            R_all = torch.linalg.solve(D_all.T @ D_all + torch.diag(torch.cat(gamma)), D_all.T)
+            R = list(torch.split(R_all, n_modes, dim=0))
+        else:
+            R = []
+            for i in range(nDMs):
+                U, S, Vh = torch.linalg.svd(D[i], full_matrices=False)
+                alfa = self.beta[i] * torch.max(S) ** 2
+                R.append(Vh.T @ torch.diag(S / (S ** 2 + alfa)) @ U.T)
+        self.reconstructor = [r.to(self.device) for r in R]
+        self.im_target_per_dm = [d.to(self.device) for d in D]
+        self.tomo_M1 = [(r @ self.R_tomo).to(self.device) for r in R]
+        self.tomo_M2 = [(r @ D_all).to(self.device) for r in R]
+        if release_R_tomo:
+            self.R_tomo = None
+        self.logger.info(f"Controller::set_tomography_targets - {'joint' if joint else 'per-DM'} target reconstructor, "
+                         f"online matrices {[tuple(m.shape) for m in self.tomo_M1]}")
+
     def initializeController(self, controllerType, reconstructor):
         """
         Initialize the control state (history buffers) based on the controller type.
@@ -460,6 +636,20 @@ class Controller:
         
         self.slopes_res = error_res
 
+        # Extract global residual slopes from active WFS lightpaths
+        active_wfs = getattr(self, 'active_wfs_lps', None)
+        if active_wfs is not None and len(active_wfs) > 0:
+            global_slopes_list = []
+            for j in active_wfs:
+                if j < len(lightPaths) and hasattr(lightPaths[j], 'get_wavefront_error'):
+                    global_slopes_list.append(lightPaths[j].get_wavefront_error())
+            if len(global_slopes_list) > 0:
+                global_slopes = (-1) * torch.as_tensor(np.hstack(global_slopes_list).T, dtype=torch.float64, device=self.device).unsqueeze(1)
+            else:
+                global_slopes = torch.zeros((0, 1), dtype=torch.float64, device=self.device)
+        else:
+            global_slopes = error_res[0] if len(error_res) > 0 else torch.zeros((0, 1), dtype=torch.float64, device=self.device)
+
         if self.operationType == 'open':
             dm_cmd = []
             modal_cmd = []
@@ -475,8 +665,11 @@ class Controller:
         # ---------------------------------------------------------
         # Step 2: Compute POLC slopes if requested
         # ---------------------------------------------------------
+        # Pseudo-open-loop slopes: s_pol = s + IM c(k - d). error_res = -s (feedback sign), so -s_pol = error_res + IM c(k - d)
+        polc = self.operationType == 'polc' and self.reconstructionMethod != 'tomography'
         if self.operationType == 'polc':
             error_polc = []
+            global_pred = torch.zeros_like(global_slopes)
             for i in range(len(self.reconstructor)):
                 d_i = self.delay[i]
                 # command_history stores from oldest to newest. 
@@ -485,14 +678,27 @@ class Controller:
                 
                 # Predict slopes from delayed commands
                 pred_s = self.im_per_dm[i] @ cmd_delayed
-                error_polc.append(error_res[i] - pred_s)
+                # Per-DM slope vector: add back every DM seen by the WFS of this mask row, not only DM i
+                pred_i = torch.zeros_like(error_res[i])
+                for j in range(len(self.reconstructor)):
+                    if self.im_polc_cross is not None and self.im_polc_cross[i][j] is not None:
+                        pred_i = pred_i + self.im_polc_cross[i][j] @ self.command_history[-self.delay[j]][j]
+                error_polc.append(error_res[i] + pred_i)
+                if pred_s.shape[0] == global_slopes.shape[0]:
+                    global_pred = global_pred + pred_s
+                elif polc and any(R.shape[1] == global_slopes.shape[0] for R in self.reconstructor):
+                    raise ValueError(f'Controller - POLC with a joint reconstructor needs the IM of every DM on the global slopes: '
+                                     f'DM {i} predicts {pred_s.shape[0]} slopes, the global vector has {global_slopes.shape[0]}.')
             self.slopes_polc = error_polc
         else:
             self.slopes_polc = None
 
-        # Determine the error to feed to the controllers
-        # We use error_res for standard PI/Leaky to prevent windup.
-        error = error_res
+        # Error fed to the reconstructor: -s_pol in POLC (tomography builds its own below), -s otherwise
+        if polc:
+            error = error_polc
+            global_slopes = global_slopes + global_pred
+        else:
+            error = error_res
 
         # ---------------------------------------------------------
         # Step 3: Control Action
@@ -503,9 +709,27 @@ class Controller:
 
         if self.reconstructionMethod == 'inversion' or self.reconstructionMethod == 'tikhonov':
             for i in range(len(self.reconstructor)):
-                modal_error.append(self.reconstructor[i]@error[i])
+                if self.reconstructor[i].shape[1] == global_slopes.shape[0]:
+                    modal_error.append(self.reconstructor[i] @ global_slopes)
+                elif self.reconstructor[i].shape[1] == error[i].shape[0]:
+                    if polc and any(m[0] == i for m in self.polc_cross_missing):
+                        lost = sorted({(j, k) for (r, j, k) in self.polc_cross_missing if r == i})
+                        raise ValueError(f'Controller - POLC for DM {i}: (DM, light path) {lost} are in the optical path of its WFS '
+                                         f'but their IMs were not measured, so the pseudo-open-loop slopes would be incomplete. '
+                                         f'Measure those IMs (InteractionMatrixHandler boolean matrix) or use a joint reconstructor.')
+                    modal_error.append(self.reconstructor[i] @ error[i])
+                else:
+                    raise ValueError(f"Shape mismatch: reconstructor[{i}] has shape {self.reconstructor[i].shape}, "
+                                     f"but global_slopes has shape {global_slopes.shape} and error[{i}] has shape {error[i].shape}")
 
-                if self.controllerType == 'leaky':
+                if polc and self.controllerType in ('leaky', 'forwardPI', 'backwardPI'):
+                    # POLC law (Ellerbroek & Vogel 2003): c(k) = (1 - g) c(k-1) + g (-R s_pol). Unit DC gain, stable for 0 < g <= 1;
+                    # decay and ki are not used (an integrator fed with s_pol has no feedback and winds up)
+                    if self.controllerType != 'leaky' and not getattr(self, '_warned_polc_pi', False):
+                        self.logger.warning('Controller - POLC uses the law c = (1-g) c_prev + g (-R s_pol): ki is ignored.')
+                        self._warned_polc_pi = True
+                    modal_cmd.append((1 - self.gain[i]) * self.command_previous[i] + self.gain[i] * modal_error[i])
+                elif self.controllerType == 'leaky':
                     modal_cmd.append(self.gain[i]*modal_error[i] + self.decay[i] * self.command_previous[i])
                 elif self.controllerType == 'forwardPI':
                     modal_cmd.append(self.command_previous[i] + self.gain[i] * (modal_error[i]-self.error_previous[i]) + self.ki[i]*self.error_previous[i])
@@ -541,31 +765,41 @@ class Controller:
             else:
                 global_slopes = global_res
             
-            # Project measured slopes to target slopes using R_tomo
-            # target_slopes will have shape [N_target_slopes, 1]
-            if self.R_tomo.device != global_slopes.device:
-                target_slopes = (self.R_tomo @ global_slopes.to(self.R_tomo.device)).to(global_slopes.device)
+            if getattr(self, 'tomo_M1', None) is not None:
+                # Precomputed by set_tomography_targets(): R_i (R_tomo s_pol - sum_j D_j c_j) = M1_i s_pol - M2_i c
+                c_prev = torch.cat([self.command_history[-1][i] for i in range(len(self.reconstructor))], dim=0)
+                tomo_error = [self.tomo_M1[i] @ global_slopes - self.tomo_M2[i] @ c_prev for i in range(len(self.reconstructor))]
             else:
-                target_slopes = self.R_tomo @ global_slopes
+                # Project measured slopes to target slopes using R_tomo
+                # target_slopes will have shape [N_target_slopes, 1]
+                if self.R_tomo.device != global_slopes.device:
+                    target_slopes = (self.R_tomo @ global_slopes.to(self.R_tomo.device)).to(global_slopes.device)
+                else:
+                    target_slopes = self.R_tomo @ global_slopes
 
-            # Compute target residual slopes (how much of the target turbulence is left uncorrected by the DMs)
-            if hasattr(self, 'im_target_per_dm'):
-                target_dm_pred = torch.zeros_like(target_slopes)
-                for i in range(len(self.reconstructor)):
-                    target_dm_pred += self.im_target_per_dm[i] @ self.command_history[-1][i]
-                target_res = target_slopes - target_dm_pred
-            else:
-                # Fallback if target IMs were not stored (though they should be)
-                target_res = target_slopes
-                
+                # Compute target residual slopes (how much of the target turbulence is left uncorrected by the DMs)
+                if hasattr(self, 'im_target_per_dm'):
+                    target_dm_pred = torch.zeros_like(target_slopes)
+                    for i in range(len(self.reconstructor)):
+                        target_dm_pred += self.im_target_per_dm[i] @ self.command_history[-1][i]
+                    target_res = target_slopes - target_dm_pred
+                else:
+                    # Without the target IMs the open-loop target slopes would be integrated: the leaky law then
+                    # converges to gain/(1-decay) times the required command
+                    if not getattr(self, '_warned_no_target_im', False):
+                        self.logger.warning('Controller - tomography without target IMs: integrating open-loop target slopes.')
+                        self._warned_no_target_im = True
+                    target_res = target_slopes
+                tomo_error = [self.reconstructor[i] @ target_res for i in range(len(self.reconstructor))]
+
             dm_cmd = []
             for i in range(len(self.reconstructor)):
                 n_modes = self.reconstructor[i].shape[0]
-                
+
                 # We apply the integral controller directly on the target residual,
                 # so the DMs cooperate to drive the target residual to zero!
-                modal_error.append(self.reconstructor[i] @ target_res)
-                
+                modal_error.append(tomo_error[i])
+
                 if self.controllerType == 'leaky':
                     modal_cmd.append(self.gain[i]*modal_error[-1] + self.decay[i] * self.command_previous[i])
                 elif self.controllerType == 'forwardPI':
@@ -593,34 +827,3 @@ class Controller:
         self.command_history.append(modal_cmd.copy())
 
         return dm_cmd
-
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
-    
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

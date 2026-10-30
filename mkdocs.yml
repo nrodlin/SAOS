@@ -40,6 +40,9 @@ theme:
 
 extra_css:
   - stylesheets/extra.css
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
 
 plugins:
   - search
@@ -83,6 +86,8 @@ markdown_extensions:
       anchor_linenums: true
   - pymdownx.inlinehilite
   - tables
+  - pymdownx.arithmatex:
+      generic: true
   - toc:
       permalink: true
 
@@ -102,6 +107,8 @@ nav:
     - Light Path: api/light_path.md
     - Deformable Mirror: api/deformable_mirror.md
     - Misregistration: api/misregistration.md
+    - Vibration: api/vibration.md
+    - Local Seeing: api/local_seeing.md
     - NCPA: api/ncpa.md
     - SHWFS: api/shwfs.md
     - Correlating SHWFS: api/correlating_shwfs.md
@@ -109,4 +116,29 @@ nav:
     - Science Camera: api/science_cam.md
     - Interaction Matrix: api/interaction_matrix.md
     - Controller: api/controller.md
+    - Learn Estimator: api/learn_estimator.md
     - Sharepoint: api/sharepoint.md
+    - Savepoint: api/savepoint.md
+    - Reception Point: api/reception_point.md
+    - Logging: api/logging_helper.md
+    - Data files: api/data.md
+  - Validation:
+    - testing/index.md
+    - test_atmosphere.py: testing/test_atmosphere.md
+    - test_atmosphere_t2.py: testing/test_atmosphere_t2.md
+    - test_perturbations.py: testing/test_perturbations.md
+    - test_timing.py: testing/test_timing.md
+    - test_detector.py: testing/test_detector.md
+    - test_modal_basis.py: testing/test_modal_basis.md
+    - test_dm.py: testing/test_dm.md
+    - test_packaging.py: testing/test_packaging.md
+    - test_data.py: testing/test_data.md
+    - test_wfs.py: testing/test_wfs.md
+    - test_corrsh.py: testing/test_corrsh.md
+    - test_extended_source.py: testing/test_extended_source.md
+    - test_sciencecam.py: testing/test_sciencecam.md
+    - test_im_controller.py: testing/test_im_controller.md
+    - test_learn_estimator.py: testing/test_learn_estimator.md
+    - test_savepoint.py: testing/test_savepoint.md
+    - test_sharepoint.py: testing/test_sharepoint.md
+    - test_parallel_gpu.py: testing/test_parallel_gpu.md

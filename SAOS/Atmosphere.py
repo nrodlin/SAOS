@@ -10,11 +10,11 @@ Major update on March 24 2025
 import time
 
 import logging
-import logging.handlers
-from queue import Queue
 
 import h5py
+import json
 import os
+import threading
 
 from joblib import Parallel, delayed
 
@@ -25,8 +25,8 @@ import torch
 # Self dependencies
 from .infinitePhaseScreen import PhaseScreenVonKarman
 from .tools.tools import pol2cart
-from .tools.interpolateGeometricalTransformation import interpolate_cube
 from .Layer import LayerClass
+from .LoggingHelper import get_logger
 
 
 """
@@ -60,7 +60,8 @@ class Atmosphere:
                  altitude:list,
                  telescope,
                  zenith:float=0.0,
-                 logger=None):
+                 logger=None,
+                 n_jobs=None):
         """
         Initialize an Atmosphere object representing layered atmospheric turbulence.
 
@@ -75,7 +76,8 @@ class Atmosphere:
         fractionalR0 : list of float
             Cn2 profile; fractional contribution to turbulence per layer.
         windDirection : list of float
-            Wind direction for each layer [degrees].
+            Wind direction for each layer [degrees]: direction towards which the turbulence moves, in the frame of the source
+            azimuths (0 deg -> +x = +column, 90 deg -> +y = +row of the phase screens).
         altitude : list of float
             Altitude of each layer [m].
         telescope : Telescope object
@@ -84,14 +86,13 @@ class Atmosphere:
             Zenith angle [degrees] of the telescope during the simulation, to automatically convert the r0 given to the specific conditions.
         logger : logging.Logger, optional
             Logger instance for this object, by default None.
+        n_jobs : int, optional
+            Threads used to compute the OPD of the sub-directions of an extended source and to update the layers. Default (None):
+            the CPUs available to the process (os.sched_getaffinity, which honours Slurm, cgroups and taskset) when called from the
+            main thread, and 1 when called from another thread (e.g. LightPaths propagated in parallel), so that thread pools are
+            never nested.
         """
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         self.hasNotBeenInitialized  = True
         self.r0                     = r0                     # Fried Parameter in m, at 500 nm and pointing to the zenith
@@ -102,6 +103,7 @@ class Atmosphere:
         self.windSpeed              = windSpeed              # wind speed of the layers in m/s
         self.windDirection          = windDirection          # wind direction in degrees
         self.zenith                 = zenith * (np.pi/180)   # Zenith angle of the telescope during simulation
+        self.n_jobs                 = n_jobs                 # threads of the internal pools (None: automatic, see _n_jobs)
         self.tag                    = 'atmosphere'           # Tag of the object
 
         self.wavelength             = 500*1e-9               # Wavelength used to define the properties of the atmosphere
@@ -140,7 +142,8 @@ class Atmosphere:
         Parameters
         ----------
         randomState : int or None, optional
-            Seed for reproducible random number generation, by default None.
+            Seed for reproducible random number generation (layer i uses randomState + 1000 i). None: a random seed, logged
+            and stored in self.randomState so that the atmosphere can be reproduced.
 
         Returns
         -------
@@ -152,7 +155,12 @@ class Atmosphere:
         if self.hasNotBeenInitialized:
             self.initial_r0 = self.r0
             self.logger.debug('Atmosphere::initializeAtmosphere - Creating layers...')
-            results_layers = Parallel(n_jobs=self.nLayer, prefer="threads")(delayed(self.buildLayer)(i_layer, randomState) for i_layer in range(self.nLayer))
+            if randomState is None:
+                # Random base seed (not the time of day), logged so that the atmosphere can be reproduced
+                randomState = int(np.random.default_rng().integers(0, 2**31 - 1000*self.nLayer))
+                self.logger.info(f'Atmosphere::initializeAtmosphere - randomState not given: using {randomState}.')
+            self.randomState = randomState
+            results_layers = Parallel(n_jobs=self._n_jobs(self.nLayer), prefer="threads")(delayed(self.buildLayer)(i_layer, randomState) for i_layer in range(self.nLayer))
             for i_layer in range(self.nLayer):
                 setattr(self,'layer_'+str(i_layer+1),results_layers[i_layer])
         else:
@@ -184,9 +192,8 @@ class Atmosphere:
         layer               = LayerClass()
         layer.id            = i_layer
         # Seed for the random phase generation  
-        if seed is None:      
-            t = time.localtime()
-            seed = t.tm_hour*3600 + t.tm_min*60 + t.tm_sec
+        if seed is None:
+            seed = int(np.random.default_rng().integers(0, 2**31 - 1000*self.nLayer))
         layer.seed          = seed + i_layer*1000
         
         # gather properties of the atmosphere
@@ -194,15 +201,18 @@ class Atmosphere:
         layer.windSpeed     = self.windSpeed[i_layer]
         layer.windDirection = self.windDirection[i_layer]
         
-        # Diameter and resolution of the layer including the Field Of View and the number of extra pixels
-        
+        # Diameter of the layer seen by the Field Of View (metapupil). The layer pixel is the pupil pixel D / resolution, so the
+        # resolution pixels cut for a footprint span exactly D; the margin around the pupil is rounded up to whole pixels and kept
+        # symmetric (npix - resolution even), so the on-axis footprint is centred on the layer
         layer.D_fov        = self.D+2*np.tan(self.fov_rad/2)*layer.altitude
-        layer.npix         = int(np.ceil((self.resolution/self.D)*layer.D_fov))
-        layer.spatial_res  = layer.D_fov/layer.npix
+        layer.spatial_res  = self.D/self.resolution
+        layer.npix         = self.resolution + 2*int(np.ceil((layer.D_fov - self.D)/(2*layer.spatial_res) - 1e-9))
 
         self.logger.debug('Atmosphere::buildLayer - Creating layer '+str(i_layer+1))    
 
-        layer.fractionalR0 = self.r0*(np.cos(self.zenith)**0.6)*(self.fractionalR0[i_layer]**(-3/5))
+        # Fried parameter of the layer (a layer with zero Cn2 fraction has r0 = infinity: no turbulence)
+        frac = float(self.fractionalR0[i_layer])
+        layer.fractionalR0 = self.r0*(np.cos(self.zenith)**0.6)*(frac**(-3/5)) if frac > 0 else np.inf
 
         layer.screen = PhaseScreenVonKarman(nx_size=layer.npix, pixel_scale=layer.spatial_res, r0 = layer.fractionalR0, 
                                             L0 = self.L0, random_seed = layer.seed, n_columns=2, logger=self.logger)
@@ -262,6 +272,11 @@ class Atmosphere:
                 # Common variables
                 group.create_dataset('phase', data=getattr(self,'layer_'+str(i_layer+1)).screen.scrn)
                 group.attrs['n_columns'] = getattr(self,'layer_'+str(i_layer+1)).screen.n_columns
+                # Evolution state: random generator of the extrusion and sub-pixel displacement buffers, so that a loaded
+                # atmosphere continues exactly as the saved one would have
+                group.attrs['rng_state'] = json.dumps(getattr(self,'layer_'+str(i_layer+1)).screen._R.bit_generator.state)
+                group.attrs['displ_buffer_x'] = getattr(self,'layer_'+str(i_layer+1)).displ_buffer_x
+                group.attrs['displ_buffer_y'] = getattr(self,'layer_'+str(i_layer+1)).displ_buffer_y
         
         self.logger.info('Atmosphere::save - Saved.')
     
@@ -286,7 +301,9 @@ class Atmosphere:
             filename += ".h5"        
 
         with h5py.File(filename, 'r') as f:
-            for i_layer, grp_name in enumerate(f.keys()):
+            # Layers in their numeric order (the h5 groups are listed alphabetically: layer_10 before layer_2)
+            layer_names = sorted([k for k in f.keys() if k.startswith('layer_')], key=lambda k: int(k.split('_')[1]))
+            for i_layer, grp_name in enumerate(layer_names):
                 layer = LayerClass()
                 layer.id = f[grp_name].attrs['id']
                 layer.seed = f[grp_name].attrs['seed']
@@ -305,6 +322,11 @@ class Atmosphere:
                                'phase': np.array(f[grp_name]['phase'])}
                 layer.screen = PhaseScreenVonKarman(nx_size=layer.npix, pixel_scale=layer.spatial_res, r0=layer.fractionalR0, L0=self.L0, 
                                                     random_seed=layer.seed, n_columns=f[grp_name].attrs['n_columns'], from_file=True, screen_file=screen_dict, logger=self.logger)
+                # Evolution state (optional in the file: if absent, the generator restarts from the seed)
+                if 'rng_state' in f[grp_name].attrs:
+                    layer.screen._R.bit_generator.state = json.loads(f[grp_name].attrs['rng_state'])
+                layer.displ_buffer_x = float(f[grp_name].attrs.get('displ_buffer_x', 0.0))
+                layer.displ_buffer_y = float(f[grp_name].attrs.get('displ_buffer_y', 0.0))
                 
                 setattr(self, 'layer_'+str(i_layer+1), layer)
 
@@ -328,7 +350,7 @@ class Atmosphere:
         self.logger.debug('Atmosphere::update')
         # Update each layer at a different process to speed up the computation.
         # Threads are faster than multiprocessing due to the overheads of making the copies. 
-        results = Parallel(n_jobs=self.nLayer, prefer="threads")(
+        results = Parallel(n_jobs=self._n_jobs(self.nLayer), prefer="threads")(
             delayed(self.updateLayer)(getattr(self,'layer_'+str(i_layer+1))) for i_layer in range(self.nLayer))
         for i_layer in range(self.nLayer):
             setattr(self,'layer_'+str(i_layer+1),results[i_layer])
@@ -367,15 +389,33 @@ class Atmosphere:
         updatedLayer.displ_buffer_x += (vx*self.samplingTime) / updatedLayer.spatial_res
         updatedLayer.displ_buffer_y += (vy*self.samplingTime) / updatedLayer.spatial_res
 
-        # Check if there is a full pixel displacement and update the screen:
-        if (np.abs(updatedLayer.displ_buffer_y) > 1):
-            updatedLayer.screen.add_row(np.sign(updatedLayer.displ_buffer_y))
-            updatedLayer.displ_buffer_y = updatedLayer.displ_buffer_y - np.sign(updatedLayer.displ_buffer_y) * 1
-        if (np.abs(updatedLayer.displ_buffer_x) > 1):
-            updatedLayer.screen.add_col(np.sign(updatedLayer.displ_buffer_x))
-            updatedLayer.displ_buffer_x = updatedLayer.displ_buffer_x - np.sign(updatedLayer.displ_buffer_x) * 1
+        # Move the screen by every whole pixel accumulated in the buffers (several per step for fast layers); the fraction stays
+        # in the buffer. Same frame as the source azimuths (getOPD): x = +column, y = +row. add_col(+1) shifts the content
+        # towards +column; add_row(+1) appends at the bottom, so the content moves towards -row: the row sign is inverted
+        n_y = int(np.trunc(updatedLayer.displ_buffer_y))
+        for _ in range(abs(n_y)):
+            updatedLayer.screen.add_row(-np.sign(n_y))
+        updatedLayer.displ_buffer_y -= n_y
+        n_x = int(np.trunc(updatedLayer.displ_buffer_x))
+        for _ in range(abs(n_x)):
+            updatedLayer.screen.add_col(np.sign(n_x))
+        updatedLayer.displ_buffer_x -= n_x
 
         return updatedLayer
+
+    def _n_jobs(self, n_tasks):
+        """
+        Threads for an internal pool of n_tasks tasks: n_jobs if given; otherwise 1 when called from a thread other than the main one
+        (the caller already runs in parallel: no nested pools), else the CPUs available to the process (not os.cpu_count, which
+        ignores the Slurm allocation).
+        """
+        if self.n_jobs is not None:
+            n = int(self.n_jobs)
+        elif threading.current_thread() is not threading.main_thread():
+            n = 1
+        else:
+            n = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else (os.cpu_count() or 1)
+        return max(1, min(n, n_tasks))
 
     def getOPD(self, src):
         """
@@ -404,29 +444,23 @@ class Atmosphere:
         else:
             list_src.append(src)
 
-        # Then, we get the footprint for each element of the list -> we do this in parallel.
-        # result_footprint contains a list of nSources, each element containing a tuple of two list of size nLayers. The first list contains the footprint per layer, 
-        # and the second list the offset of the centroid due to discretization
-        n_jobs = np.minimum(np.round(os.cpu_count()*0.7).astype(int), len(list_src))
+        # One task per line of sight: footprint per layer, phase per layer [rad], sum of the layers -> OPD without pupil [m].
+        # A single pool (sequential when called from a parallel LightPath, see _n_jobs)
+        def opd_of(s):
+            return self.get_opd_per_src(s, self.project_phase(s, self.get_pupil_footprint(s)))
+        n_jobs = self._n_jobs(len(list_src))
         t0 = time.time()
-        result_footprint = Parallel(n_jobs=n_jobs, prefer="threads")(delayed(self.get_pupil_footprint)(list_src[i]) for i in range(len(list_src)))
-        t1 = time.time()
-        # Once the pupil is defined, we should use it to get the phase
-        # result_phase contains a list of nSources, each element containing a list of size nLayers, whose elements contain the phase per layer [in rad]
-        result_phase = Parallel(n_jobs=n_jobs, prefer="threads")(delayed(self.project_phase)(
-                                list_src[i], result_footprint[i][0], result_footprint[i][1]) for i in range(len(list_src)))
-        t2 = time.time()
-        # Finally, the phases are merged to get the resulting OPD per line of sight
-        # result_opd_no_pupil contains one list of size nSources containing the OPD without pupil per source. 
-        # The OPD is in [meters]
-        result_opd_no_pupil = Parallel(n_jobs=n_jobs, prefer="threads")(delayed(self.get_opd_per_src)(list_src[i], result_phase[i]) for i in range(len(list_src)))
-        t3 = time.time()
-        self.logger.debug(f'Footprint: {t1-t0}, project_phase: {t2-t1}, get_opd_per_src: {t3-t2}')
+        if n_jobs == 1:
+            result_opd_no_pupil = [opd_of(s) for s in list_src]
+        else:
+            result_opd_no_pupil = Parallel(n_jobs=n_jobs, prefer="threads")(delayed(opd_of)(s) for s in list_src)
+        self.logger.debug(f'getOPD: {time.time()-t0} s for {len(list_src)} lines of sight, {n_jobs} threads')
         return np.squeeze(result_opd_no_pupil)
            
     def get_pupil_footprint(self, src):
         """
-        Determine the pupil footprint and discretization offset for a source.
+        Determine the pupil footprint of a source on every layer. The footprint centre is h tan(theta) rounded to the nearest
+        layer pixel (integer-pixel model, like the screen motion): position error <= 0.5 px per axis, unbiased.
 
         Parameters
         ----------
@@ -435,23 +469,25 @@ class Atmosphere:
 
         Returns
         -------
-        Tuple[list, list]
-            A tuple of two lists: pupil footprint per layer and center offset.
+        list
+            Pupil footprint (mask of the layer) per layer.
         """
         self.logger.debug('Atmosphere::set_pupil_footprint')
         footprint_per_layer = []
-        extra_s = []
 
         for i_layer in range(self.nLayer):
             layer = getattr(self,'layer_'+str(i_layer+1))
 
-            # If defined, chromatic shift shall be define per layer. We need to check its format
+            # Chromatic shift: one on-sky vector (dx, dy) [arcsec] per layer, x = +column, y = +row, common to every source of
+            # this wavelength (atmospheric dispersion moves all the lines of sight alike); added to the source direction
             if src.chromatic_shift is None:
-                chromatic_shift = 0
+                chromatic_shift = np.zeros(2)
             else:
-                if len(src.chromatic_shift) != self.nLayer:
-                    raise ValueError('Atmosphere::get_pupil_footprint - If defined, the chromatic shift shall be defined per layer.')
-                chromatic_shift = src.chromatic_shift[i_layer]  
+                chromatic_shift = np.asarray(src.chromatic_shift, dtype=float)
+                if chromatic_shift.shape != (self.nLayer, 2):
+                    raise ValueError(f'Atmosphere::get_pupil_footprint - chromatic_shift must be one (dx, dy) [arcsec] per layer, '
+                                     f'shape ({self.nLayer}, 2); got {chromatic_shift.shape}.')
+                chromatic_shift = chromatic_shift[i_layer]
 
             # The source coordinates are defined as: [elevation, azimuth] taking as reference the Zenith, i.e. [0,x] has the telescope pointing to the sky vertically.
             # Elevation is measured in arcsec, azimuth in degrees.
@@ -459,24 +495,25 @@ class Atmosphere:
             # The polar coordinates, at an altiudue z_i are: r = z_i*tan(elevation), theta = azimuth. Then, we convert to cartesian coordinates.
             # Note that before changing coordinates, the radius in meters is converted to px using the layer diameter (layer.D) and phase screen size (layer.resolution)
             D = layer.npix * (self.D/ self.resolution)
-            [x_z,y_z] = pol2cart(layer.altitude*np.tan((src.coordinates[0]+chromatic_shift)/206265) * layer.npix / D, np.deg2rad(src.coordinates[1]))
+            # On-sky direction vector [arcsec] of the line of sight (source + chromatic shift), then its footprint h tan(|v|) along v
+            v = np.array(pol2cart(src.coordinates[0], np.deg2rad(src.coordinates[1]))) + chromatic_shift
+            ang = np.hypot(v[0], v[1])
+            r_px = layer.altitude*np.tan(ang/206265) * layer.npix / D
+            [x_z, y_z] = (r_px * v / ang) if ang > 0 else (0.0, 0.0)
             # [x_z, y_z] are the cartesian coordinates in px w.r.t zenith. 
-            center_x = int(y_z)+layer.npix//2
-            center_y = int(x_z)+layer.npix//2
+            # Rounded to the nearest layer pixel (integer-pixel model)
+            center_x = int(np.round(y_z))+layer.npix//2
+            center_y = int(np.round(x_z))+layer.npix//2
 
-            # As the coordinates are discretized in pixels, there may be an offset. We need to pass this offset when the phase is projected,
-            # so we store it and return it to the main function
-            extra_s.append([int(x_z)-x_z, int(y_z)-y_z])
-    
             # Finally, create the pupil and set the points inside the pupil to 1
             pupil_footprint = np.zeros([layer.npix,layer.npix])
-            pupil_footprint[center_x-self.resolution//2:center_x+self.resolution//2,
-                            center_y-self.resolution//2:center_y+self.resolution//2 ] = 1
+            row0, col0 = center_x - self.resolution//2, center_y - self.resolution//2      # resolution pixels, odd or even
+            pupil_footprint[row0:row0 + self.resolution, col0:col0 + self.resolution] = 1
             
             footprint_per_layer.append(pupil_footprint)
-        return footprint_per_layer, extra_s
+        return footprint_per_layer
             
-    def project_phase(self, src, pupil_footprint, extra_s):
+    def project_phase(self, src, pupil_footprint):
         """
         Project atmospheric phase through layers for a given source.
 
@@ -486,8 +523,6 @@ class Atmosphere:
             Light source object.
         pupil_footprint : list of np.ndarray
             Pupil masks per layer.
-        extra_s : list
-            Offset due to discretization for each layer.
 
         Returns
         -------
@@ -498,11 +533,11 @@ class Atmosphere:
 
         # Each layer shall run in parallel to reduce time consumption. Returns a list containing the phase per layer for the source line of sight
         result_phase = Parallel(n_jobs=1, prefer="threads")(
-            delayed(self.get_phase_layered)(src, getattr(self,'layer_'+str(i_layer+1)), pupil_footprint[i_layer], extra_s[i_layer]) for i_layer in range(self.nLayer))
+            delayed(self.get_phase_layered)(src, getattr(self,'layer_'+str(i_layer+1)), pupil_footprint[i_layer]) for i_layer in range(self.nLayer))
         
         return result_phase
 
-    def get_phase_layered(self, src, layer, pupil_footprint, extra_s):
+    def get_phase_layered(self, src, layer, pupil_footprint):
         """
         Compute phase at a given atmospheric layer for a specific source.
 
@@ -514,35 +549,13 @@ class Atmosphere:
             Atmospheric layer.
         pupil_footprint : np.ndarray
             Pupil mask for the layer.
-        extra_s : list
-            Offset due to discretization.
 
         Returns
         -------
         np.ndarray
             Phase screen for the layer.
         """
-        if src.tag == 'LGS':
-            sub_im = np.reshape(layer.phase[np.where(pupil_footprint==1)],[self.resolution,self.resolution])
-
-            alpha_cone = np.arctan(self.D/2/src.altitude)
-            h = src.altitude-layer.altitude
-
-            if np.isinf(h):
-                r =self.D/2
-            else:
-                r = h*np.tan(alpha_cone)
-
-            ratio = self.D/r/2
-
-            cube_in = np.atleast_3d(sub_im).T
-            
-            pixel_size_in   = layer.D/layer.resolution
-            pixel_size_out  = pixel_size_in/ratio
-            resolution_out  = self.resolution
-            return np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, resolution_out)).T* np.sqrt(layer.fractionalR0) * (self.wavelength/src.wavelength)
-        else:
-            return np.reshape(layer.screen.scrn[np.where(pupil_footprint==1)],[self.resolution,self.resolution]) * (self.wavelength/src.wavelength)
+        return np.reshape(layer.screen.scrn[np.where(pupil_footprint==1)],[self.resolution,self.resolution]) * (self.wavelength/src.wavelength)
     
     def get_opd_per_src(self, src, phase):
         """
@@ -565,33 +578,4 @@ class Atmosphere:
         opd_no_pupil = np.sum(phase,axis=0) * src.wavelength/2/np.pi # the phase is defined in rad, and the OPD in m
         return opd_no_pupil
 
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
     
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

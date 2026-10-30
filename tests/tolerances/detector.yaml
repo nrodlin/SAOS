@@ -1,0 +1,16 @@
+# Tolerances of tests/test_detector.py. Samples: 4 frames x 128^2 px = 65536 independent pixels (2 frames = 32768 for the
+# dark calibration). One statistical policy: tolerance = 3.5 sigma of the estimator, sigma measured over 30 seeds
+# (theoretical value in parentheses).
+shot_noise:
+  mean_rtol: 7.3e-4     # sigma(mean/(QE N)) = 2.1e-4 measured (1/sqrt(QE N n_px) = 2.5e-4)
+  var_rtol: 0.020       # sigma(var ratio) = 5.6e-3 (sqrt(2/n_px) = 5.5e-3)
+dark_current:
+  mean_rtol: 2.9e-3     # sigma = 8.4e-4 (1/sqrt(20 n_px) = 8.7e-4)
+  var_rtol: 0.017       # sigma = 4.8e-3 (sqrt(2/n_px) = 5.5e-3)
+readout_noise:
+  var_rtol: 0.0175      # sigma = 5.0e-3 (sqrt(2/n_px) = 5.5e-3); dark-frame variance uses the same value
+  dark_mean_atol: 0.020   # mean / (sigma/sqrt(2 pi)) - 1 of the clipped Gaussian (SAOS convention): sd = sqrt((1/2 - 1/(2 pi)) / n_px) / 0.399 = 5.7e-3, x 3.5
+quantisation:
+  bias_atol_dn: 0.0146  # sigma(mean) = 4.2e-3 DN (sqrt(1 + 1/12)/sqrt(n_px) = 4.0e-3)
+dark_calibration:
+  mean_atol_dn: 0.20    # signed residual of a 20-frame dark at sigma = 10 DN: sigma(mean) = 10 sqrt(1 + 1/20)/sqrt(32768) = 0.056 DN

@@ -1,7 +1,13 @@
 # Installation Guideline
 
 This guide covers the recommended installation procedure for SAOS, targeting a Linux environment (e.g., Ubuntu 24). 
-Since SAOS relies heavily on multi-threading for performance, the use of **free-threaded Python** (e.g., Python 3.13.2t) is highly recommended.
+SAOS requires Python >= 3.10. Since it propagates the light paths in threads, a **free-threaded Python** (no GIL) is highly
+recommended: with the GIL enabled the results are the same but the light paths do not run in parallel (SAOS logs a notice at
+import). Tested configuration: Python 3.13.9t, torch 2.11 (CUDA 13.0), h5py 3.16, pyzmq 27.1, pvlib 0.15.
+
+> **Note on free-threading:** torch support for 3.13t is experimental and PyTorch is moving its free-threaded wheels to 3.14t.
+> `PYTHON_GIL=0` also forces extensions that do not declare free-threading support (OpenCV, astropy, pyzmq) to run without the
+> GIL.
 
 ---
 
@@ -34,8 +40,8 @@ Make sure to add `pyenv` to your `~/.bashrc` or `~/.profile` as instructed by th
 Install the free-threaded version of Python 3.13 (or newer) and create a virtual environment:
 
 ```bash
-pyenv install 3.13.2t
-pyenv virtualenv 3.13.2t venv_saos
+pyenv install 3.13.9t
+pyenv virtualenv 3.13.9t venv_saos
 pyenv activate venv_saos
 ```
 
@@ -65,63 +71,52 @@ cd SAOS
 # Checkout to the development branch (if required)
 git checkout develop
 
-# Install SAOS
-pip install -e .
+# Install SAOS (editable) with its runtime dependencies
+pip install --prefer-binary -e .
+
+# Optional: documentation (mkdocs) and validation-suite tools (pytest, pytest-timeout, pyyaml, psutil, ruff, jupyter)
+pip install --prefer-binary -r requirements.txt
 ```
 
-### Git Large File Storage (LFS)
+The validation suite is described in `ci/README.md` (`ci/run_ci.sh fast`, or `python -m pytest tests -m fast`). `torch` runs on the CPU by default; a CUDA build of torch is optional and is used automatically when `torch.cuda.is_available()`.
 
-SAOS uses **Git LFS** to store large binary assets such as solar granulation images
-(e.g., `SAOS/images/cont_500nm.h5`, `cont_680nm.h5`). These files are required for
-solar AO simulations with `ExtendedSource`. Without pulling them, the simulator
-will fail to load the solar image data.
+> **Free-threaded builds and wheels:** use `--prefer-binary`. On a free-threaded Python the newest release of several
+> dependencies is often published only as source (e.g. scipy 1.18, matplotlib 3.11.2, pyzmq 27.2 at the time of writing),
+> and pip would try to compile it (scipy then fails without a Fortran compiler). `--prefer-binary` picks the newest version
+> with a free-threaded wheel instead (checked for 3.13t: numpy 2.4, scipy 1.17.1, matplotlib 3.11.1,
+> pyzmq 27.1.0, torch 2.12).
+>
+> **Packages built from source:** `opencv-contrib-python` and `h5py` have no free-threaded wheels, so pip compiles them.
+> OpenCV is the long one (of the order of one hour on a 12-core laptop); it needs the build tools of section 1, `cmake`,
+> and the `CMAKE_ARGS="-DPYTHON3_LIMITED_API=OFF"` exported in section 2. For h5py, see the optional HDF5 build below.
+> The compiled wheels stay in pip's cache, so later environments install them in seconds.
 
-**1. Install git-lfs** (if not already installed):
+The runtime dependencies (h5py, joblib, matplotlib, numpy, opencv-contrib-python, pvlib, pyzmq, scipy, torch) are declared in `setup.cfg` and installed by pip. A non-editable install (`pip install .` or a wheel built with
+`pip wheel . --no-deps`) contains every subpackage, so SAOS also works outside the repository.
+
+### Solar images
+
+`ExtendedSource` uses solar continuum images at 500 nm and 680 nm (370 MB in total). They are not part of the package:
+they are published in Zenodo, [doi:10.5281/zenodo.23821204](https://doi.org/10.5281/zenodo.23821204) (CC BY 4.0), and
+SAOS keeps them in a local data directory:
+
+- `$SAOS_DATA_DIR` when the variable is set;
+- otherwise `~/.cache/SAOS` (`$XDG_CACHE_HOME/SAOS`).
+
+Download them once after installing SAOS:
 
 ```bash
-# Ubuntu / Debian
-sudo apt install git-lfs
-
-# macOS (Homebrew)
-brew install git-lfs
-
-# Or via conda
-conda install -c conda-forge git-lfs
+saos-download-data            # or: python -m SAOS.data
+saos-download-data --verify   # also check the MD5 checksum of the files already present
 ```
 
-**2. Enable LFS in your git configuration** (one-time setup):
-
-```bash
-git lfs install
-```
-
-**3. Pull the LFS-tracked files** after cloning:
-
-```bash
-# Inside the SAOS directory
-git lfs pull
-```
-
-This will download the solar image files. You can verify them with:
-
-```bash
-git lfs ls-files
-```
-
-> **Note:** `git lfs pull` requires network access to GitHub. If you are on a
-> restricted network, ask your system administrator to mirror the LFS objects.
+If a file is missing, `ExtendedSource` downloads it the first time it is needed (the MD5 checksum is always verified).
+On a cluster, download them once into a shared directory and export `SAOS_DATA_DIR` on every node. Images passed with
+`img_path` are read directly and need no download.
 
 ## 4. Additional Dependencies
 
-Depending on your simulation needs, you may want to install the following dependencies:
-
-```bash
-# Required for telemetry streaming
-pip install zmq
-
-# Required for handling large data formats (like M7 discrete models)
-pip install h5py
-```
+h5py (data files, M7 discrete models) and pyzmq (telemetry streaming) are installed with SAOS.
 
 ### Compiling HDF5 and h5py from source (Optional)
 

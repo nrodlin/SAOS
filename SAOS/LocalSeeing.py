@@ -4,8 +4,7 @@ import h5py
 import cv2
 
 import logging
-import logging.handlers
-from queue import Queue
+from .LoggingHelper import get_logger
 
 class LocalSeeing:
     def __init__(self,
@@ -23,13 +22,7 @@ class LocalSeeing:
             Local seeing filename, the data is expected in [m] sampled with the telescope's pupil resolution
         """        
         # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         # Define class attributes
         self.tag = 'localSeeing'
@@ -96,7 +89,7 @@ class LocalSeeing:
         Returns
         -------
         np.ndarray
-           Local seeing OPD for the given iteration
+            Local seeing OPD for the given iteration
         """        
         if (iteration+1) > self.localSeeing_input.shape[2]:
             self.logger.warning('LocalSeeing::getCurrentOPD - The length of the local seeing array is smaller than the simulation window. Wrapping-around.')
@@ -104,33 +97,4 @@ class LocalSeeing:
         
         return self.localSeeing_input[:,:,iteration]
 
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
     
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

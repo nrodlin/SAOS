@@ -6,14 +6,13 @@ Created + major update on March 24 2025
 from SAOS.Source import Source
 
 import numpy as np
-from importlib.resources import files
 import h5py
 import pvlib
 import scipy as sp
 
 import logging
-import logging.handlers
-from queue import Queue
+from .LoggingHelper import get_logger
+from .data import get_data_file
 
 """
 ExtendedSource Module
@@ -48,7 +47,8 @@ class ExtendedSource(Source):
         altitude : float, optional
             Altitude of the source in meters. Default is infinity.
         img_path : str, optional
-            Path to the H5 image of the source (e.g., solar image).
+            Path to the H5 image of the source. Default "": the solar continuum image of the band (500 nm or 680 nm) from
+            the SAOS data directory, downloaded from Zenodo on first use (see SAOS.data).
         img_PS : float, optional
             Plate scale in arcsec/pixel, by default None to use the metadata of the image.
         nSubDirs : int, optional
@@ -63,13 +63,7 @@ class ExtendedSource(Source):
             Optional logger instance.
         """
         # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
         
         self.is_initialized = False
         tmp = self.photometry(optBand)
@@ -95,13 +89,13 @@ class ExtendedSource(Source):
         self.type     = 'SUN'
 
         if self.img_path == "":
-            images_dir = files('SAOS.images')
+            # Solar images from the SAOS data directory, downloaded from Zenodo on first use (SAOS.data)
             if self.wavelength == 500e-9:
-                self.img_path = images_dir / 'cont_500nm.h5'
+                self.img_path = get_data_file('cont_500nm.h5', self.logger)
             elif self.wavelength == 680e-9:
-                self.img_path = images_dir / 'cont_680nm.h5'
+                self.img_path = get_data_file('cont_680nm.h5', self.logger)
             else:
-                self.img_path = images_dir / 'cont_500nm.h5'
+                self.img_path = get_data_file('cont_500nm.h5', self.logger)
                 self.logger.warning('ExtendedSource::__init__ - There is no sun image for this wavelength. Applying solar continuum at 500nm.')
         
         # Convert image path to String
@@ -123,11 +117,14 @@ class ExtendedSource(Source):
 
         for dirX in range(self.nSubDirs):
             for dirY in range(self.nSubDirs):
-                self.subDirs_stars.append(Source(optBand=self.optBand, 
-                                            magnitude=1, 
-                                            coordinates=[self.subDirs_coordinates[0,dirX,dirY], self.subDirs_coordinates[1,dirX,dirY]],
-                                            logger=self.logger))
-                self.subDirs_stars[-1].flux = np.round(self.flux/(self.nSubDirs*self.nSubDirs))
+                # The sub-direction sources carry the photometry of this extended source (its own band table, e.g. 'IR' or
+                # 500/680 nm for the solar images), not the one of Source: they are built with a placeholder band and overwritten
+                star = Source(optBand='V', magnitude=1,
+                              coordinates=[self.subDirs_coordinates[0,dirX,dirY], self.subDirs_coordinates[1,dirX,dirY]],
+                              logger=self.logger)
+                star.optBand, star.wavelength, star.bandwidth = self.optBand, self.wavelength, self.bandwidth
+                star.flux = np.round(self.flux/(self.nSubDirs*self.nSubDirs))
+                self.subDirs_stars.append(star)
         
         # Last step, define the 2D filter that will be used to combine the subDirs. 
         # Taken from the WideField module of DASP (Durham Adaptive Optics Simulator, Alaister Basedn et al.)
@@ -135,41 +132,22 @@ class ExtendedSource(Source):
         if self.nSubDirs == 1:
             self.filter_2D = np.ones((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
         else:
-            self.filter_2D = np.zeros((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
-
-            lin = 1 - np.abs(np.arange(filt_width) - (filt_width - 1) / 2) / ((filt_width - 1) / 2)
-            filter_2D_template = np.tile(lin, (filt_width, 1))
-            filter_2D_template = filter_2D_template * lin[:, np.newaxis]
-            
-            subDir_size = filt_width
-
+            # Partition of unity by construction: tent windows (separable, non-zero at the edges) placed with the stride
+            # round(W/2) used to assemble the mosaic, each divided by the sum of all the placed windows. The filters then sum
+            # to one at every pixel of the mosaic, also along its border (where a single patch contributes)
+            stride = int(np.round(filt_width / 2))
+            lin = 1 - np.abs(np.arange(filt_width) - (filt_width - 1) / 2) / (filt_width / 2)
+            filter_2D_template = lin[:, np.newaxis] * lin[np.newaxis, :]
+            size = (self.nSubDirs - 1) * stride + filt_width
+            weight_sum = np.zeros((size, size))
             for dirX in range(self.nSubDirs):
                 for dirY in range(self.nSubDirs):
-                    self.filter_2D[:,:,dirX,dirY] = np.copy(filter_2D_template)
-
-                    if dirX == 0: # top, add top left and right to match the external contributions to the filter
-                        # top
-                        self.filter_2D[0:subDir_size//2,:,dirX,dirY] += filter_2D_template[-(subDir_size//2):,:] # add bottom
-                    if dirX == (self.nSubDirs-1): # bottom, add top to match the external contributions to the filter
-                        # bottom
-                        self.filter_2D[-(subDir_size//2):,:,dirX,dirY] += filter_2D_template[0:subDir_size//2,:] # add top
-                    if dirY == 0: # left, add right match the external contributions to the filter
-                        # left
-                        self.filter_2D[:,0:subDir_size//2,dirX,dirY] += filter_2D_template[:,-(subDir_size//2):] # add right
-                    if dirY == (self.nSubDirs-1): # right, add left match the external contributions to the filter
-                        # right
-                        self.filter_2D[:,-(subDir_size//2):,dirX,dirY] += filter_2D_template[:,0:subDir_size//2] # add left
-
-                    # Corner cases:
-
-                    if (dirX == 0 and dirY == 0): # top-left
-                        self.filter_2D[0:subDir_size//2,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
-                    if (dirX == 0 and dirY == (self.nSubDirs-1)): # top-right
-                        self.filter_2D[0:subDir_size//2,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
-                    if (dirX == (self.nSubDirs-1) and dirY == 0): # bottom-left
-                        self.filter_2D[-(subDir_size//2):,0:subDir_size//2,dirX,dirY] = np.max(filter_2D_template)
-                    if (dirX == (self.nSubDirs-1) and dirY == (self.nSubDirs-1)): # bottom-right
-                        self.filter_2D[-(subDir_size//2):,-(subDir_size//2):,dirX,dirY] = np.max(filter_2D_template)
+                    weight_sum[dirX*stride:dirX*stride + filt_width, dirY*stride:dirY*stride + filt_width] += filter_2D_template
+            self.filter_2D = np.zeros((filt_width, filt_width, self.nSubDirs, self.nSubDirs))
+            for dirX in range(self.nSubDirs):
+                for dirY in range(self.nSubDirs):
+                    self.filter_2D[:, :, dirX, dirY] = filter_2D_template / weight_sum[dirX*stride:dirX*stride + filt_width,
+                                                                                         dirY*stride:dirY*stride + filt_width]
                         
         self.is_initialized = True
         
@@ -355,41 +333,14 @@ class ExtendedSource(Source):
                 dirx_c = (subDir_size/2) + dirX * (subDir_size/2) - (self.fov+self.patch_padding)/2
                 diry_c = (subDir_size/2) + dirY * (subDir_size/2) - (self.fov+self.patch_padding)/2
 
-                # Now, change to polar, moving the origin towards the telescope axis
-
-                subDir_loc[0, dirX, dirY] = np.sqrt((dirx_c+tel_x)**2 + (diry_c+tel_y)**2)
-                subDir_loc[1, dirX, dirY] = np.rad2deg(np.arctan2((diry_c+tel_y), (dirx_c+tel_x)))
+                # Now, change to polar, moving the origin towards the telescope axis.
+                # dirX indexes the image rows and dirY the columns (the patch is cut at [row, col] and ScienceCam places it
+                # back at the same [row, col]). The sky frame of the atmosphere and the DMs is x = column, y = row, so the
+                # sky offset of this patch is x = diry_c (column) and y = dirx_c (row).
+                sky_x = diry_c + tel_x
+                sky_y = dirx_c + tel_y
+                subDir_loc[0, dirX, dirY] = np.sqrt(sky_x**2 + sky_y**2)
+                subDir_loc[1, dirX, dirY] = np.rad2deg(np.arctan2(sky_y, sky_x))
                 subDir_loc[2, dirX, dirY] = subDir_size
         
         return subDir_loc, subDir_imgs
-
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
-    
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

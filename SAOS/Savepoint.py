@@ -5,13 +5,17 @@ Created on May 15 2025
 import numpy as np
 import h5py
 import os
-from datetime import datetime
+import sys
+import json
+import getpass
+import platform
+import subprocess
+from datetime import datetime, timezone
 
-from scipy import signal
+from scipy import ndimage, signal
 
 import logging
-import logging.handlers
-from queue import Queue
+from .LoggingHelper import get_logger
 
 """
 Savepoint Module
@@ -20,9 +24,180 @@ Savepoint Module
 This module contains the `Savepoint` class, used for to save the data of adaptive optics simulations.
 """
 
+
+def peak_subpixel(img, half_width=1.0, step=1.0 / 32):
+    """
+    Peak value of a band-limited image: maximum of its Fourier (sinc) interpolation on a grid of `step` pixels within
+    +-half_width pixels of the brightest pixel. Exact for images sampled at Nyquist or better (diffraction-limited PSFs
+    with lambda/D >= 2 px); for undersampled images it is an interpolation estimate.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        2D image.
+    half_width : float
+        Half size of the search region around the brightest pixel [px].
+    step : float
+        Sampling of the search grid [px].
+
+    Returns
+    -------
+    float
+        Interpolated peak value (same units as img).
+    """
+    img = np.asarray(img, dtype=float)
+    n0, n1 = img.shape
+    r0, c0 = np.unravel_index(np.argmax(img), img.shape)
+    F = np.fft.fft2(img)
+    off = np.arange(-half_width, half_width + step / 2, step)
+    # Local inverse DFT: I(y, x) = 1/(n0 n1) sum_k,l F[k, l] exp(2 pi i (k y / n0 + l x / n1)), k, l integer frequencies
+    Ey = np.exp(2j * np.pi * np.outer(r0 + off, np.fft.fftfreq(n0) * n0) / n0)
+    Ex = np.exp(2j * np.pi * np.outer(np.fft.fftfreq(n1) * n1, c0 + off) / n1)
+    local = np.real(Ey @ F @ Ex) / (n0 * n1)
+    return float(max(local.max(), img[r0, c0]))
+
+
+_MAX_ATTR_SIZE = 10000                                     # larger arrays are not stored as metadata
+_MAX_ATTR_BYTES = 16384                                    # larger values go to datasets (HDF5 attributes are limited to 64 kB per object header)
+
+_RUN_INFO = None
+
+
+def _git_info(path):
+    """(commit, dirty) of the git repository holding path; (None, None) outside a repository or without git."""
+    try:
+        commit = subprocess.run(['git', '-C', path, 'rev-parse', 'HEAD'], capture_output=True, text=True, timeout=5)
+        if commit.returncode != 0:
+            return None, None
+        status = subprocess.run(['git', '-C', path, 'status', '--porcelain', '--untracked-files=no'], capture_output=True,
+                                text=True, timeout=5)
+        return commit.stdout.strip(), bool(status.stdout.strip())
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+
+
+def run_info():
+    """
+    Provenance of the running simulation: SAOS version and git commit, Python and library versions, host, user, command
+    line. Computed once per process.
+
+    Returns
+    -------
+    dict
+        Metadata (str, bool or None values).
+    """
+    global _RUN_INFO
+    if _RUN_INFO is None:
+        from . import __version__
+        commit, dirty = _git_info(os.path.dirname(os.path.abspath(__file__)))
+        info = dict(saos_version=__version__, saos_git_commit=commit, saos_git_dirty=dirty,
+                    python_version=sys.version.split()[0], gil_enabled=getattr(sys, '_is_gil_enabled', lambda: True)(),
+                    hostname=platform.node(), platform=platform.platform(), command_line=' '.join(sys.argv), cwd=os.getcwd())
+        try:
+            info['user'] = getpass.getuser()
+        except Exception:
+            info['user'] = None
+        for name in ('numpy', 'scipy', 'h5py', 'torch'):
+            module = sys.modules.get(name)
+            info[f'{name}_version'] = getattr(module, '__version__', None) if module is not None else None
+        torch = sys.modules.get('torch')
+        try:
+            info['cuda_device'] = torch.cuda.get_device_name(0) if (torch is not None and torch.cuda.is_available()) else None
+        except Exception:
+            info['cuda_device'] = None
+        _RUN_INFO = info
+    return dict(_RUN_INFO)
+
+
+def _attr_value(value):
+    """Value storable as an HDF5 attribute (scalars, strings, small numeric arrays; dicts and mixed lists as JSON), or None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return str(value)                                   # np.str_ has no HDF5 conversion
+    if isinstance(value, (bool, int, float, np.integer, np.floating, np.bool_)):
+        return value
+    if isinstance(value, dict):
+        return json.dumps(value, default=str)
+    if isinstance(value, (list, tuple, np.ndarray)):
+        try:
+            arr = np.asarray(value)
+        except ValueError:
+            return json.dumps(value, default=str)
+        if arr.dtype.kind in 'biuf' and arr.size <= _MAX_ATTR_SIZE:
+            return arr
+        if arr.dtype.kind in 'OUS' and arr.size <= _MAX_ATTR_SIZE:
+            return json.dumps(np.asarray(value, dtype=object).tolist(), default=str)
+        return None
+    return None
+
+
+def _write_attrs(group, values):
+    for key, value in values.items():
+        value = _attr_value(value)
+        if value is None:
+            continue
+        size = value.nbytes if isinstance(value, np.ndarray) else len(value.encode()) if isinstance(value, str) else 0
+        if size <= _MAX_ATTR_BYTES:
+            group.attrs[key] = value
+        elif key not in group:                              # written once; never replaces a data member of the group
+            group.create_dataset(key, data=value)
+
+
+def _pick(obj, names):
+    return {n: getattr(obj, n) for n in names if hasattr(obj, n)}
+
+
+def module_metadata(obj):
+    """
+    Configuration of a SAOS module (Telescope, Atmosphere, DeformableMirror, Source/ExtendedSource, WFS, ScienceCam,
+    Vibration, LightPath) as a flat dict of metadata. Unknown objects give only their class.
+    """
+    meta = {'class': type(obj).__name__}
+    tag = getattr(obj, 'tag', None)
+    if tag == 'lightpath':
+        meta['delay'] = getattr(obj, 'delay', None)
+        dms = getattr(obj, 'dm', None) or []
+        meta['n_dms'] = len(dms)
+        meta['dm_altitudes'] = [getattr(d, 'altitude', None) for d in dms]
+        for prefix, sub in (('src', getattr(obj, 'src', None)), ('wfs', getattr(obj, 'wfs', None)), ('sci', getattr(obj, 'sci', None)),
+                            ('vibration', getattr(obj, 'vibration', None))):
+            if sub is not None:
+                meta.update({f'{prefix}_{k}': v for k, v in module_metadata(sub).items()})
+        meta['has_atmosphere'] = getattr(obj, 'atm', None) is not None
+        return meta
+    if tag == 'atmosphere':
+        meta.update(_pick(obj, ('r0', 'L0', 'fractionalR0', 'altitude', 'windSpeed', 'windDirection', 'nLayer', 'randomState')))
+        if hasattr(obj, 'zenith'):
+            meta['zenith_deg'] = float(np.rad2deg(obj.zenith))
+        return meta
+    if tag == 'deformableMirror':
+        meta.update(_pick(obj, ('typeDM', 'nActs', 'nValidAct', 'altitude', 'pitch', 'mechCoupling', 'validActThreshpercentage',
+                                'maxStrokePtV', 'dynamic_model_path')))
+        if getattr(obj, 'misReg', None) is not None:
+            meta.update({f'misReg_{k}': v for k, v in _pick(obj.misReg, ('shiftX', 'shiftY', 'rotation', 'radialScaling')).items()})
+        return meta
+    if tag in ('source', 'sun'):
+        meta.update(_pick(obj, ('tag', 'optBand', 'wavelength', 'bandwidth', 'coordinates', 'magnitude', 'fov', 'nSubDirs')))
+        return meta
+    if tag == 'telescope':
+        meta.update(_pick(obj, ('D', 'resolution', 'pixelSize', 'centralObstruction', 'samplingTime', 'fov')))
+        meta['spiders'] = getattr(obj, 'spiders', None) or 'none'
+        return meta
+    if hasattr(obj, 'nSubap'):                                                          # wavefront sensors
+        meta.update(_pick(obj, ('nSubap', 'nValidSubaperture', 'plate_scale', 'fieldOfView', 'lightRatio', 'use_brightest',
+                                'unit_in_rad', 'guardPx', 'fft_fieldOfView_oversampling', 'validSubapThreshold', 'camera_params')))
+        return meta
+    if hasattr(obj, 'integrationTime'):                                                 # science cameras
+        meta.update(_pick(obj, ('plate_scale', 'fieldOfView', 'nPix', 'integrationTime', 'samplingTime', 'lightRatio', 'camera_params')))
+        return meta
+    meta.update(_pick(obj, ('Ts',)))
+    return meta
+
+
 class Savepoint:
     def __init__(self, file_path=None, atm=0, atm_per_dir=0, dm=0, dm_per_dir=0, slopes=0, error= 0, wfs=0, wfs_frame=0, sci=0, sci_frame=0, 
-                 only_metrics=False, only_long_exp=False, logger=None):
+                 only_metrics=False, only_long_exp=False, metadata=None, logger=None):
         """
         Initialize the Savepoint object for saving simulation data.
 
@@ -57,24 +232,36 @@ class Savepoint:
         sci : int
             Flag to save science phase. If 0, the science phase will not be saved. 
             Larger than 0, it will be saved with the specified decimation factor.
-        sci_frame : int
+        sci_frame : int or dict or list
             Flag to save science frame. If 0, the science frame will not be saved. 
             Larger than 0, it will be saved with the specified decimation factor.
+            A dict {'short': n, 'long': m} sets the decimation of the short and long exposure frames independently,
+            a list gives one value (int or dict) per light path, and a dict keyed by light path index (with an
+            optional 'default' key) selects the value per light path.
         only_metrics : bool
             If True, only the metrics of the buffers are saved. If false, the data
             is included as well.
         only_long_exp : bool
             If True, only the long exposure frame is saved. By default, False.
+        metadata : dict, optional
+            User metadata of the simulation (case, draw, controller settings...), stored in /metadata/user (as attributes; values
+            above 16 kB as datasets). More can be added with add_metadata().
         logger : logging.Logger, optional
-            External logger to use. If None, initializes internal logging.        
+            External logger to use. If None, initializes internal logging.
+
+        Notes
+        -----
+        Every file has a group /metadata, written at the first save:
+          - its attributes: SAOS version and git commit (saos_git_dirty = uncommitted changes), Python, library versions,
+            GIL, host, user, command line, creation time (UTC) and the Savepoint settings; last_iteration and
+            last_saved_utc are updated at every save (an interrupted run can be detected);
+          - /metadata/user: the user metadata;
+          - /metadata/telescope, /metadata/atmosphere and /metadata/dm_<i>: configuration of the modules of the first
+            light path that has them (written whatever is saved);
+        and every LightPath_<k>, Atmosphere_<i> and DeformableMirror_<i> group has the configuration of its module as
+        attributes (source, WFS, science camera, delay...). Values are scalars, small arrays or JSON strings.
         """
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
         
         self.file_path = file_path
         self.atm = atm
@@ -89,6 +276,8 @@ class Savepoint:
         self.only_long_exp = only_long_exp
         self.sci_frame = sci_frame
         self.only_metrics = only_metrics
+        self.metadata = dict(metadata) if metadata else {}
+        self._metadata_pending = bool(self.metadata)
 
         # Create the file path if not provided
         if not self.file_path:
@@ -100,6 +289,46 @@ class Savepoint:
         
         self.logger.info(f'Savepoint::__init__ - Saving path (not yet created): {self.file_path}')
 
+
+    def add_metadata(self, **metadata):
+        """
+        Add user metadata (stored in /metadata/user at the next save; a key given twice keeps the last value).
+
+        Parameters
+        ----------
+        **metadata
+            Name and value of every entry: scalars, strings, small arrays, lists or dicts (as JSON).
+        """
+        self.metadata.update(metadata)
+        self._metadata_pending = True
+
+    def _settings(self):
+        names = ('atm', 'atm_per_dir', 'dm', 'dm_per_dir', 'slopes', 'error', 'wfs', 'wfs_frame', 'sci', 'sci_frame',
+                 'only_metrics', 'only_long_exp')
+        return json.dumps({n: getattr(self, n) for n in names}, default=str)
+
+    def _write_metadata(self, f, data_object, iteration):
+        """Run, module and user metadata in /metadata (see __init__)."""
+        meta = f.require_group('metadata')
+        if 'saos_version' not in meta.attrs:
+            _write_attrs(meta, run_info())
+            meta.attrs['created_utc'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
+            meta.attrs['savepoint_settings'] = self._settings()
+        meta.attrs['last_iteration'] = int(iteration)
+        meta.attrs['last_saved_utc'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
+        if self._metadata_pending:
+            _write_attrs(meta.require_group('user'), self.metadata)
+            self._metadata_pending = False
+        for obj in data_object:
+            if getattr(obj, 'tag', None) != 'lightpath':
+                continue
+            if 'telescope' not in meta and getattr(obj, 'tel', None) is not None:
+                _write_attrs(meta.create_group('telescope'), module_metadata(obj.tel))
+            if 'atmosphere' not in meta and getattr(obj, 'atm', None) is not None:
+                _write_attrs(meta.create_group('atmosphere'), module_metadata(obj.atm))
+            for i, dm in enumerate(getattr(obj, 'dm', None) or []):
+                if f'dm_{i}' not in meta:
+                    _write_attrs(meta.create_group(f'dm_{i}'), module_metadata(dm))
 
     def _resolve_setting(self, setting_value, lp, lp_index):
         """
@@ -163,6 +392,7 @@ class Savepoint:
             Current iteration number.
         """
         group = f.create_group(group_name)
+        _write_attrs(group, module_metadata(data_group))
 
         lp_index = None
         if group_name.startswith('LightPath_'):
@@ -334,7 +564,16 @@ class Savepoint:
         lp : LightPath
             LightPath object containing simulation modules, required to get the ideal PSF
             and compute the Strehl ratio.
-        
+
+        Notes
+        -----
+        Strehl ratio of point-source frames ('strehl'): measured SR, as an instrument would estimate it,
+        SR = (peak / energy in the field) / (ideal peak / ideal energy in the field). The normalisation uses the energy
+        recorded inside the camera field (the observational convention), so with small fields the aberrated halo that
+        leaves the field raises the SR slightly. The peaks are the maxima of the band-limited (Fourier) interpolation of
+        the frames (see peak_subpixel), so the SR does not depend on where the PSF peak falls with respect to the pixel
+        grid; this is exact for frames sampled at Nyquist or better.
+
         Returns
         -------
         dict
@@ -378,8 +617,10 @@ class Savepoint:
             dict_stats['rms'] = np.array([[np.sqrt(np.mean(data[0:data.shape[0]//2]**2)), np.sqrt(np.mean(data[data.shape[0]//2:]**2))]])
 
         elif data_type == 'slopes_2D':
-            dict_stats['min'] = np.array([[np.min(data[0:data.shape[1]//2,:]), np.min(data[0,data.shape[1]//2:,:])]])
-            dict_stats['max'] = np.array([[np.max(data[0:data.shape[1]//2,:]), np.max(data[0,data.shape[1]//2:,:])]])
+            # data is (1, 2 n, n): the x block is rows [0, n) and the y block rows [n, 2 n) of the 2D map
+            n_rows = data.shape[1]//2
+            dict_stats['min'] = np.array([[np.min(data[0, :n_rows, :]), np.min(data[0, n_rows:, :])]])
+            dict_stats['max'] = np.array([[np.max(data[0, :n_rows, :]), np.max(data[0, n_rows:, :])]])
         
         elif data_type == 'sci_frame' and (lp is not None):
             if lp.src.tag == 'sun':
@@ -390,9 +631,13 @@ class Savepoint:
                 else:
                     dict_stats['contrast'] = np.array([0.0])
                 
+                # Normalize by the mean intensity so that MFGS is independent of the frame units (C would dominate otherwise)
+                squeezed_data = np.squeeze(data).astype(np.float64)
+                if mean_intensity != 0:
+                    squeezed_data = squeezed_data / mean_intensity
                 # Get median filtered image
-                squeezed_data = np.squeeze(data)
-                med = signal.medfilt(squeezed_data, kernel_size=3)
+                # (reflected borders: zero padding biased the border medians low and created spurious gradients)
+                med = ndimage.median_filter(squeezed_data, size=3, mode='reflect')
                 # Create Gradient filters
                 kx = np.array(([-3, 0, 3], [-10, 0, 10], [-3, 0, 3]))
                 ky = np.rot90(kx)
@@ -413,11 +658,13 @@ class Savepoint:
             else:
                  ideal_psf = lp.sci.fake_src_dict[str(int(lp.src.wavelength*1e9))]
                  
-                 if np.sum(data) == 0:
+                 frame = np.squeeze(np.asarray(data, dtype=float))
+                 if np.sum(frame) == 0:
                      i_peak_norm = 0
                  else:
-                     i_peak_norm = np.max(data) / np.sum(data)
-                 i_peak_ideal_norm = np.max(ideal_psf) / np.sum(ideal_psf)
+                     i_peak_norm = peak_subpixel(frame) / np.sum(frame)
+                 ideal = np.squeeze(np.asarray(ideal_psf, dtype=float))
+                 i_peak_ideal_norm = peak_subpixel(ideal) / np.sum(ideal)
 
                  dict_stats['strehl'] = np.array([i_peak_norm / i_peak_ideal_norm ])
 
@@ -486,6 +733,7 @@ class Savepoint:
         tag = data_object[0].tag
 
         with h5py.File(self.file_path, 'a') as f:
+            self._write_metadata(f, data_object, iteration)
             # First, check atmosphere and DM flags
             if tag == 'atmosphere' and self.atm:
                 for i in range(len(data_object)):
@@ -601,30 +849,4 @@ class Savepoint:
                                     sci_frame_grp = group.create_group('sci_frame_longExp')
                                     self.custom_create_dataset('sci_frame', sci_frame_grp, iteration, lp.long_exposure_frame, None, lp)                                
 
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
     
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

@@ -3,7 +3,7 @@ import torch
 
 from scipy.special import gamma
 
-from SAOS.modalBasis.zernikeModes import ZernikeNaive, get_zernikes
+from SAOS.modalBasis.zernikeModes import ZernikeNaive, get_zernikes, piston_free_orthonormal
 
 # Code reused from the Phase Diversity repository of the EST project.
 # An important point regarding this implementation is that the modes amplitude is not corrected by the atmosphere r0 nor the telescope diameter D. 
@@ -13,9 +13,9 @@ from SAOS.modalBasis.zernikeModes import ZernikeNaive, get_zernikes
 
 def generate_kl_modes(dm, nModes=None, useTorch=False):
 
-    # If the modes are not specified, use the number of actuators --> maximum number of modes
+    # If the modes are not specified, use every piston-free degree of freedom (the KL basis excludes piston)
     if nModes is None:
-        nModes = dm.nValidAct
+        nModes = dm.nValidAct - 1
 
     kl_modes = np.zeros((dm.coordinates.shape[0], nModes))
 
@@ -24,9 +24,11 @@ def generate_kl_modes(dm, nModes=None, useTorch=False):
 
     # Get metric on how far from orthogonal are the Zernikes in the DM:
     Noffset = 2 # +1 due to Noll's index starting at 1, +1 due to the piston mode
-    zernikes = get_zernikes(dm.coordinates, dm.validAct, nModes, Noffset)
+    zernikes, energies = get_zernikes(dm.coordinates, dm.validAct, nModes, Noffset, return_energy=True)
 
     zernikes_qr, R =  np.linalg.qr(zernikes[dm.validAct,:])
+    # Piston-free orthonormal columns also where the sampled Zernikes are rank-deficient (the covariance R C R^T is unchanged)
+    zernikes_qr = piston_free_orthonormal(zernikes_qr)
 
     zernikes_ortho = np.zeros_like(zernikes)
 
@@ -36,6 +38,9 @@ def generate_kl_modes(dm, nModes=None, useTorch=False):
     # Compute atmosphere Covariance Matrix
 
     Z_covmat = generate_covariance_matrix(nModes, Noffset-1)
+    # The columns are the Noll Zernikes divided by their rms on the actuators (energy_j): their coefficients are the Noll ones times
+    # energy_j, so their covariance is E C_Noll E (E = diag(energy))
+    Z_covmat = energies[:, None] * Z_covmat * energies[None, :]
 
     # Transform the CovMat to the Orthogonal space
 

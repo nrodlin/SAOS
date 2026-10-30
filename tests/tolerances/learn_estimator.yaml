@@ -1,0 +1,29 @@
+# Tolerances of tests/test_learn_estimator.py (SAOS/tomography/learnEstimator.py, CPU, stand-in light paths).
+# Tolerances cover the numerical precision of the independent reference (scipy Bessel-K von Karman
+# formulas, float64 matrices) or estimator statistics (~3.5 sigma measured over seeds).
+vk_series:
+  rtol: 1.0e-6          # series vs exact Bessel-K D(r): reference cancellation error C(0) - C(r) is <= 1e-10 relative at r = 1 cm (L0 = 50 m)
+  convergent_x_max: 1.0 # region tested as a passing control: x = pi r / L0 <= 1
+  use_rtol: 1.0e-4      # accuracy of the 10-term series in the EST range of use (r <= 8.5 m, L0 >= 10 m):
+                        # measured 6.1e-5 at L0 = 10 m, r = 8.5 m; <= 1e-8 for L0 >= 15 m
+matrix:
+  rtol: 1.0e-8          # float64 covariance entries vs the independent reference (same formula, scipy K_5/6)
+  asym_rtol: 1.0e-12    # |C - C^T| / |C|, float64
+  psd_rtol: 1.0e-9      # lowest eigenvalue / largest eigenvalue >= -psd_rtol (float64 eigvalsh)
+screens:
+  n_screens: 1200       # independent von Karman screens (N = 256, h = d/4)
+  q_lo: 0.67            # Q = sum (C_emp - C)^2 / sum Var: mean 1.02, sigma 0.10 over 9 seeds; band = mean -/+ 3.5 sigma
+  q_hi: 1.38
+  trace_atol: 0.035     # tr C_emp / tr C: mean 0.985 (FFT grid truncation above Nyquist, reference bias <= 1.5 %), sigma 0.55 % over 9 seeds; 1.5 % + 3.5 sigma
+reconstructor:
+  rtol: 1.0e-7          # R_saos vs R_ref (float64, same regularisation); Cholesky solve conditioning
+  err_ratio_atol: 1.0e-6  # tr(E[R_saos]) / tr(E[R_ref]) - 1, with both errors evaluated with the exact covariances
+  dt_rtol: 1.0e-9       # R(default dt) vs R(explicit dt), same code path
+gain:
+  rtol: 1.0e-9          # captured conversion factor vs 2 pi ps / (206265 lambda)
+frozen_flow:
+  n_screens: 1500
+  err_hi: 0.18          # ||C_emp - C(-V dt)|| / ||C||: mean 0.160, sigma 0.006 over 9 seeds; mean + 3.5 sigma
+  wrong_sign_lo: 1.0    # same norm against C(+V dt): measured 1.40 (> 6x the right-sign error), the sign is resolved
+phase1:
+  r0_rtol: 0.03         # |r0_fit / r0 - 1|: mean +0.9 % (L0 / noise coupling of the joint fit), sigma 0.5 % over 9 seeds; mean + 3.5 sigma

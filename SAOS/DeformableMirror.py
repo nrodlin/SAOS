@@ -17,12 +17,10 @@ import torch
 import h5py
 
 import logging
-import logging.handlers
-from queue import Queue
 
 from .MisRegistration import MisRegistration
-from .tools.interpolateGeometricalTransformation import interpolate_cube
 from .tools.tools import pol2cart
+from .LoggingHelper import get_logger
 
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% CLASS INITIALIZATION %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% 
@@ -30,8 +28,9 @@ from .tools.tools import pol2cart
 class dmLayerClass():
     def __init__(self):
         self.altitude = None
-        self.D_fov                  = None # diameter of the DM projected into the altitude layer [meters]
-        self.D_px                   = None # size of the DM in [pixels]
+        self.D_fov                  = None # diameter of the DM projected into the altitude layer (metapupil) [meters]
+        self.D_px                   = None # size of the DM grid in [pixels]: telescope resolution + symmetric whole-pixel margin
+        self.pixel_size             = None # grid step [meters]: the telescope pixel D / resolution, samples at the cell centres
         self.telescope_D            = None # Telescope diamter in [meters]
         self.telescope_resolution   = None # Telescope diameter in [px] using the original telescope resolution
         self.center                 = None # center coordinates of the DM [pixels]
@@ -57,11 +56,7 @@ class DeformableMirror:
                  modes:np.ndarray = None,
                  misReg = None,
                  typeDM:str = 'cartesian',
-                 floating_precision:int = 64,
                  altitude:float = None,
-                 flip = False,
-                 flip_lr = False,
-                 sign = 1,
                  valid_act_thresh_outer = None,
                  logger = None,
                  **kwargs):
@@ -86,16 +81,8 @@ class DeformableMirror:
             Misregistration object for geometrical offsets.
         typeDM : str, optional
             Type of the DM: {cartesian, radial, custom}. By default, cartesian. If 'custom', the `coordinates` parameter must be provided.
-        floating_precision : int, optional
-            Use 32 or 64-bit floats, by default 64.
         altitude : float, optional
             Conjugation altitude of the DM in meters.
-        flip : bool, optional
-            Flip the influence functions vertically.
-        flip_lr : bool, optional
-            Flip the influence functions left-right.
-        sign : int, optional
-            Sign of actuation.
         valid_act_thresh_outer : float, optional
             Threshold for validating actuators outside pupil.
         logger : logging.Logger, optional
@@ -113,21 +100,11 @@ class DeformableMirror:
                 Whether to apply Partition of Unity normalization to custom influence functions. By default True.
         """
         # Setup the logger to handle the queue of info, warning and errors msgs in the simulator
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         # Define class attributes
         self.tag = 'deformableMirror'
 
-        self.floating_precision = floating_precision
-        self.flip_= flip
-        self.flip_lr = flip_lr 
-        self.sign = sign
         self.altitude = altitude
         self.nActs = nActs
 
@@ -174,12 +151,14 @@ class DeformableMirror:
         # Compute scaling (epsilon) for the Gaussian influence functions based on mechanical coupling
         self.epsilon = np.sqrt(-1*np.log(self.mechCoupling))/self.pitch
 
-        # High resolution meshgrid
-        x    = np.linspace(-(self.dm_layer.D_fov)/2,(self.dm_layer.D_fov)/2, self.dm_layer.D_px)
+        # High resolution meshgrid: the telescope pixel grid (cell centres, step D / resolution), as the pupil, the atmosphere and
+        # the WFS sample the phase; the actuators span the metapupil D_fov
+        x    = (np.arange(self.dm_layer.D_px) - (self.dm_layer.D_px - 1)/2) * self.dm_layer.pixel_size
         X, Y = np.meshgrid(x,x)
 
         self.high_res_coords = np.array([X.flatten(), Y.flatten()]).T
         
+        self.custom_IFs = modes is not None
         if modes is not None:
             self.logger.info('DeformableMirror::__init__ - Using custom influence functions for shape generation.')
             custom_IF = torch.as_tensor(modes, device=self.device, dtype=torch.float64)
@@ -386,9 +365,12 @@ class DeformableMirror:
         else:
             layer.altitude          = altitude
                 
-        # Diameter and resolution of the layer including the Field Of View and the number of extra pixels
-        layer.D_fov             = telescope.D + 2*np.tan(telescope.fov/(206624*2))*layer.altitude # in [m]
-        layer.D_px              = int(np.ceil((telescope.resolution/telescope.D)*layer.D_fov)) # Diameter in [px]
+        # Diameter of the layer seen by the Field Of View (metapupil) and its grid: the telescope pixel D / resolution, with the
+        # margin around the pupil rounded up to whole pixels and symmetric (D_px - resolution even), so that the on-axis footprint
+        # is centred and every altitude samples the same physical pixel as the pupil and the atmosphere
+        layer.D_fov             = telescope.D + 2*np.tan(np.deg2rad(telescope.fov/3600)/2)*layer.altitude # in [m]
+        layer.pixel_size        = telescope.D/telescope.resolution # in [m]
+        layer.D_px              = telescope.resolution + 2*int(np.ceil((layer.D_fov - telescope.D)/(2*layer.pixel_size) - 1e-9)) # in [px]
         layer.center            = layer.D_px//2
 
         layer.OPD               = np.zeros([layer.D_px,layer.D_px]) # stores the layer OPD without projection to any source (full pupil/metapupil)
@@ -397,10 +379,10 @@ class DeformableMirror:
         layer.telescope_D          = telescope.D # Telescope diameter in [m]
         layer.telescope_resolution = telescope.resolution # Telescope diameter in [px] using the original telescope resolution
 
-        # Circular entrance pupil
-        x = np.linspace(-layer.D_px/2, layer.D_px/2, layer.D_px)
+        # Circular metapupil (pixel centres inside D_fov)
+        x = (np.arange(layer.D_px) - (layer.D_px - 1)/2) * layer.pixel_size
         xx, yy = np.meshgrid(x, x)
-        layer.metapupil = xx**2 + yy**2 < ((layer.D_px + 1)/2)**2
+        layer.metapupil = xx**2 + yy**2 <= (layer.D_fov/2)**2
         layer.pupil                 = telescope.pupil.copy()
         
         return layer
@@ -424,15 +406,16 @@ class DeformableMirror:
         
         # Source coordinates are [angle_fov["], zenith_angle[rad]]. Hence, to obtain the location of the object at the DM altitude plane:
         # 1) Compute the projection: altitude * tan(angle_fov[rad]) -> location in meters
-        # 2) From meters to pixels: result_1 * (D_px/metapupil_D)
+        # 2) From meters to pixels: result_1 / pixel_size
         # 3) From polar to cartesian: (result_2[px], zenith_angle[rad]) -> (x_z, y_z) [px]
-        [x_z, y_z] = pol2cart(self.dm_layer.altitude * np.tan(src.coordinates[0]/206265)*(self.dm_layer.D_px/self.dm_layer.D_fov), 
+        [x_z, y_z] = pol2cart(self.dm_layer.altitude * np.tan(src.coordinates[0]/206265)/self.dm_layer.pixel_size, 
                              np.deg2rad(src.coordinates[1]))
 
         # Matriz origin is placed at the left-top corner, whereas the telescope origin is at the optical axis.
-        # We add an offset to translate the origins.
-        center_x = int(y_z) + self.dm_layer.D_px//2
-        center_y = int(x_z) + self.dm_layer.D_px//2
+        # We add an offset to translate the origins. The offset is rounded to the nearest pixel (integer-pixel model, as the
+        # atmosphere footprint): position error <= 0.5 px per axis, unbiased.
+        center_x = int(np.round(y_z)) + self.dm_layer.D_px//2
+        center_y = int(np.round(x_z)) + self.dm_layer.D_px//2
     
         # Finally, we mask the region that sees the source. This region is centered at the location computed in 3) 
         # and its shape equals the telescope pupil with the DM layer diameter in [px]
@@ -471,29 +454,8 @@ class DeformableMirror:
         # Select only the region of the DM that is affecting to the source.
         OPD = np.zeros([self.dm_layer.telescope_resolution, self.dm_layer.telescope_resolution])
         OPD = opd_misregistered[pupil==1].reshape(self.dm_layer.telescope_resolution, self.dm_layer.telescope_resolution)
-        # Depending on the source type, certain action may differ
-        if source.tag == 'LGS':
-            # This code considers the impact of having an object at a finite altitude (typ. LGS). 
-            sub_im = np.atleast_3d(OPD)
-                
-            alpha_cone = np.arctan(self.dm_layer.telescope_D/2/source.altitude)
-            h = source.altitude-self.dm_layer.altitude
-
-            if np.isinf(h):
-                r = self.dm_layer.telescope_D/2
-            else:
-                r = h*np.tan(alpha_cone)
-
-            ratio = self.dm_layer.telescope_D/r/2
-            
-            cube_in = sub_im.T
-            pixel_size_in   = self.dm_layer.D_fov/self.dm_layer.D_px
-            pixel_size_out  = pixel_size_in/ratio
-            
-            output_OPD = np.asarray(np.squeeze(interpolate_cube(cube_in, pixel_size_in, pixel_size_out, self.dm_layer.telescope_resolution)))
-        
-        else: # NGS and Sun types can be handled equally. The sun is simplified, only considering the projection of the centrar subdir
-            output_OPD = OPD * self.dm_layer.pupil
+        # Natural sources and the sun (only the projection of the central sub-direction is considered)
+        output_OPD = OPD * self.dm_layer.pupil
 
         output_phase = output_OPD * (2*np.pi / source.wavelength)       
 
@@ -659,6 +621,39 @@ class DeformableMirror:
 
         return True
     
+    def set_actuator_misregistration(self, shiftX=0.0, shiftY=0.0, rotation=0.0, radialScaling=1.0):
+        """
+        Exact static misregistration of a DM with analytic (Gaussian, Partition of Unity) influence functions: the actuator coordinates
+        are transformed, x' = s R(rotation) x + (shiftX, shiftY), the Gaussian width is scaled by s, and the influence functions are
+        recomputed on them, so the DM shape is generated already misregistered (no interpolation of the OPD map). Use it instead of misReg.set_params; the OPD-map
+        misregistration (misReg) must stay null. The new shape applies from the next updateDMShape.
+
+        Parameters
+        ----------
+        shiftX, shiftY : float
+            Shift [m] in the DM plane.
+        rotation : float
+            Rotation [deg] around the centre, same sense as misReg (clockwise for a positive angle with x right and y up).
+        radialScaling : float
+            Magnification (1 = none).
+
+        Notes
+        -----
+        The shifts are in metres; the DM grid step is the telescope pixel D/resolution, the same one misReg uses.
+        """
+        if getattr(self, 'custom_IFs', False):
+            raise NotImplementedError('DeformableMirror::set_actuator_misregistration - only for analytic influence functions.')
+        # Same sense of rotation as the OPD-map misregistration (MisRegistration.apply_misreg, scipy.ndimage.rotate): a positive angle
+        # turns the DM clockwise in the (x right, y up) DM coordinates
+        th = -np.deg2rad(rotation)
+        rot = np.array([[np.cos(th), -np.sin(th)], [np.sin(th), np.cos(th)]])
+        coords = radialScaling * (self.coordinates[self.validAct] @ rot.T) + np.array([shiftX, shiftY])
+        # A magnification of the DM image scales the influence functions too (their width ~ 1/epsilon), not only the actuator positions:
+        # the shape is then exactly the unmisregistered one evaluated at T^-1(x), including the Partition of Unity normalisation
+        self.influence_functions = self.precomputeInfluenceFunctions(coords, self.high_res_coords, self.epsilon / radialScaling)
+        self.logger.info(f'DeformableMirror::set_actuator_misregistration - shift ({shiftX:.3e}, {shiftY:.3e}) m, rotation {rotation} deg, '
+                         f'scaling {radialScaling}: influence functions recomputed.')
+
     def updateMisreg(self, elapsedTime):
         """
         Update the mis-registration params by the temporal factor.
@@ -686,41 +681,11 @@ class DeformableMirror:
         None
         """
         self.logger.info('DeformableMirror::print_properties')
-        self.logger.info('DeformableMirror::print_properties')
         self.logger.info('{: ^21s}'.format('Controlled Actuators')                     + '{: ^18s}'.format(str(self.nValidAct)))
         self.logger.info('{: ^21s}'.format('Pitch')                                    + '{: ^18s}'.format(str(self.pitch))                    +'{: ^18s}'.format('[m]'))
         self.logger.info('{: ^21s}'.format('Mechanical Coupling')                      + '{: ^18s}'.format(str(self.mechCoupling))             +'{: ^18s}'.format('[%]' ))
-        self.logger.info('Mis-registration:')
-        self.misReg.print_properties()
+        self.logger.info('Mis-registration (map level):')
+        self.logger.info(f'shift X {self.misReg.shiftX} m, shift Y {self.misReg.shiftY} m, rotation {self.misReg.rotation} deg, '
+                         f'radial scaling {self.misReg.radialScaling}')
 
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
     
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if hasattr(self, 'external_logger_flag') and not self.external_logger_flag:
-            if hasattr(self, 'queue_listerner') and self.queue_listerner is not None:
-                self.queue_listerner.stop()

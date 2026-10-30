@@ -1,0 +1,24 @@
+# Tolerances of tests/test_sciencecam.py.
+# Calibrated on 2026-10-26 (develop a243eb4, CPU) unless stated; values are a few times the deviation measured with the
+# correct behaviour (fixed seeds), so that a real deviation and not numerical noise trips them.
+psf:
+  fwhm_rtol: 0.01               # measured -0.15% (64-px pixelated pupil vs continuous Airy)
+  first_zero_rtol: 0.02         # ring position from the azimuthal mean of an 8x upsampled frame (0.25 px bins)
+  airy_profile_atol: 0.01       # max |I/I0 - Airy| for r < 2 lambda/D
+  reference_profile_atol: 1.0e-6  # n_pix = res: SAOS and the independent FFT are the same computation
+motion:
+  shift_rtol: 0.003             # peak estimator (16x Fourier upsampling + parabola) ~0.01 px on 2-24 px shifts
+  cross_axis_atol_px: 0.02
+plate_scale:
+  rtol: 0.002                   # requested vs effective plate scale when n_pix != res
+strehl:
+  sr_rtol: 0.02                 # on-axis SR vs |<exp(i phi)>|^2 on the native grid
+long_exposure:
+  energy_rtol: 1.0e-10
+  mean_rtol: 1.0e-10            # max |LE/photons - mean(short)| / peak
+  discrete_profile_atol: 1.0e-3 # LE vs DL frame convolved with the discrete tilt set (exact; measured 2e-4 = FoV edge)
+  gaussian_fwhm_rtol: 0.015     # 30x30 Gaussian-quantile tilts vs continuous Gaussian blur (grid itself: ~0.3%)
+  gaussian_profile_atol: 0.015
+band_limit:                     # PSF band limited to the Nyquist band of the pupil sampling
+  energy_atol: 1.0e-10          # Parseval over exactly one period: numerical precision
+  inside_atol: 1.0e-10          # same samples, same transform (MFT vs zero-padded FFT): numerical precision

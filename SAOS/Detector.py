@@ -10,13 +10,14 @@ Update on March 26 2025
 Major implementation belong to OOPAO authors, the module now is just adjusted to fit the code style of SAOS.
 """
 
+import threading
+
 import numpy as np
 
 
 
 import logging
-import logging.handlers
-from queue import Queue
+from .LoggingHelper import get_logger
 
 
 """
@@ -85,13 +86,7 @@ class Detector:
                 Integration time for the detector [s]. Default is None.
         '''
         
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         # Map parameters to the 
 
@@ -141,6 +136,12 @@ class Detector:
         self.dark_calibration_frame = np.zeros_like(self.frame)  # stores the dark calibration frame
         
         self.randomGenerator    = np.random.default_rng(seed=self.random_state)
+        # Noise streams: every LightPath connected to this detector gets its own generator (register_stream), so that the noise of a
+        # path does not depend on the order in which paths sharing the detector are scheduled in threads
+        self._stream_entropy    = np.random.SeedSequence(self.random_state).entropy
+        self._streams           = {}
+        self._n_streams         = 0
+        self._stream_lock       = threading.Lock()
 
         if self.nBits == 8:
             self.dataType = np.uint8   
@@ -168,14 +169,41 @@ class Detector:
             self.calibrating  = True
             for _ in range(self.darkCalibration):
                 self.dark_calibration_frame += self.integrate(np.zeros_like(self.frame, dtype=float), 0)
-            self.dark_calibration_frame = self.dark_calibration_frame // self.darkCalibration
+            self.dark_calibration_frame = self.dark_calibration_frame / self.darkCalibration     # mean dark [DN]
             self.shotNoise = shotNoise
             self.calibrating = False
         else:
             self.dark_calibration_frame = np.zeros_like(self.frame)
 
 
-    def integrate(self, input_frame, input_photons):
+    def register_stream(self):
+        """
+        Assign a noise stream to a new user of the detector (LightPath.initialize_path): streams are numbered 0, 1, 2... in the
+        order in which the light paths are connected to this detector.
+
+        Returns
+        -------
+        int
+            Stream index, to be passed to integrate(stream=...).
+        """
+        with self._stream_lock:
+            stream = self._n_streams
+            self._n_streams += 1
+        return stream
+
+    def _generator(self, stream):
+        """Random generator of a noise stream (None: the detector's own generator). Each stream is seeded from the detector seed
+        and its index (SeedSequence spawn key), so its noise does not depend on the other streams."""
+        if stream is None:
+            return self.randomGenerator
+        with self._stream_lock:
+            rng = self._streams.get(stream)
+            if rng is None:
+                rng = np.random.default_rng(np.random.SeedSequence(self._stream_entropy, spawn_key=(int(stream),)))
+                self._streams[stream] = rng
+        return rng
+
+    def integrate(self, input_frame, input_photons, stream=None):
         """
         Integrate the noise free frame, adding the corresponding noise.
         
@@ -185,6 +213,8 @@ class Detector:
             The noise-free frame to integrate.
         input_photons : int
             The number of photons received in the current sampling time.
+        stream : int, optional
+            Noise stream (register_stream) of the light path; None uses the detector's own generator.
 
         Returns
         -------
@@ -196,13 +226,13 @@ class Detector:
         # Integrate
         if self.noiseFlag:
             # Get the noisy frame
-            frame = self.readout(input_frame, input_photons)
+            frame = self.readout(input_frame, input_photons, stream)
         else:
             frame = input_frame
 
         return frame
         
-    def readout(self, input_frame, photons):
+    def readout(self, input_frame, photons, stream=None):
         """
         Simulate the readout process of the detector including noises and quantification.
 
@@ -212,12 +242,15 @@ class Detector:
             The noise-free input frame.
         photons : int or float
             Number of incident photons.
+        stream : int, optional
+            Noise stream (register_stream); None uses the detector's own generator.
 
         Returns
         -------
         np.ndarray
             The simulated quantized and saturated frame.
         """
+        rng = self._generator(stream)
 
         # 1: Normalize energy in the frame to 1
         energy = np.sum(input_frame)
@@ -228,19 +261,17 @@ class Detector:
         # 2: Scale by the number of photons
         photons_frame = np.round(norm_frame * photons) # [photons]
 
-        # 3: Photon noise
+        # 3-4: Photon to electron conversion and shot noise. The detected electrons are a binomial thinning (QE) of the
+        # Poisson photon stream, i.e. Poisson(QE * photons). Applying QE after the Poisson draw would underestimate the
+        # shot noise by sqrt(QE)
         if self.shotNoise:
-            photon_noisy_frame = self.randomGenerator.poisson(photons_frame) # [photons]
+            electron_noisy_frame = rng.poisson(self.quantumEfficiency * photons_frame).astype(np.float64) # [e-]
         else:
-            photon_noisy_frame = photons_frame
-        
-        # 4: Convert from photons to electrons
-
-        electron_noisy_frame = self.quantumEfficiency * photon_noisy_frame # [e-]
+            electron_noisy_frame = self.quantumEfficiency * photons_frame # [e-]
 
         # 5: Dark current noise
         dark_current_map = np.ones_like(input_frame) * self.darkCurrent * self.integrationTime
-        electron_noisy_frame += self.randomGenerator.poisson(dark_current_map) # [e-]
+        electron_noisy_frame += rng.poisson(dark_current_map) # [e-]
 
         # 6: Saturate
 
@@ -255,7 +286,7 @@ class Detector:
         
         # 8: Readout noise
 
-        electron_noisy_frame += self.randomGenerator.normal(loc=0.0, scale=self.readoutNoise, size=electron_noisy_frame.shape) # [e-]
+        electron_noisy_frame += rng.normal(loc=0.0, scale=self.readoutNoise, size=electron_noisy_frame.shape) # [e-]
 
         # 9: CCD/CMOS gain
 
@@ -264,9 +295,10 @@ class Detector:
         
         # 10: Quantification
         if self.quantization_conversion == 0:
-            if self.fullWellCapacity is np.inf:
-                self.quantizationNoise = 0 # [e-]
-                quantized_frame = (electron_noisy_frame / electron_noisy_frame.max()) * 2**(self.nBits) # [counts]
+            if np.isinf(self.fullWellCapacity):
+                # Automatic conversion with an infinite full well: 1 e-/DN, so that the absolute signal scale is kept
+                self.quantizationNoise = 1 / np.sqrt(12) # [e-]
+                quantized_frame = electron_noisy_frame # [counts]
             else:
                 self.quantizationNoise = self.fullWellCapacity / (np.sqrt(12) * 2**(self.nBits)) # [e-]
                 quantized_frame = (electron_noisy_frame / self.fullWellCapacity) * 2**(self.nBits)  # [counts]
@@ -274,45 +306,16 @@ class Detector:
             self.quantizationNoise = self.quantization_conversion / np.sqrt(12)  # [e-]
             quantized_frame = electron_noisy_frame / self.quantization_conversion  # [counts]
         
-        quantized_saturated_frame = np.clip(quantized_frame, a_min=0, a_max=(2**self.nBits) - 1) # [counts]
+        # Rounding to the nearest count (truncation would bias the output by -0.5 DN)
+        quantized_saturated_frame = np.clip(np.round(quantized_frame), a_min=0, a_max=(2**self.nBits) - 1) # [counts]
         self.saturation_level = 100 * (quantized_saturated_frame.max() / 2**self.nBits)  # [%]
 
        
-        # Apply dark calibration
-
+        # Apply dark calibration: the calibrated frame is clipped at 0 (no bias pedestal: unsigned output, negative residuals
+        # of the dark subtraction would otherwise wrap to ~2^bits)
         if self.darkCalibration and not self.calibrating:
-            quantized_saturated_frame -= self.dark_calibration_frame
+            quantized_saturated_frame = np.clip(np.round(quantized_saturated_frame - self.dark_calibration_frame), a_min=0, a_max=None)
 
         # 11: Set precision 
             
-        return quantized_saturated_frame.astype(self.dataType)       
-    
-    def setup_logging(self, logging_level=logging.WARNING):
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
-    
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()
+        return quantized_saturated_frame.astype(self.dataType)

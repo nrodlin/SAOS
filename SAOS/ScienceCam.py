@@ -5,8 +5,6 @@ Created on March 26 2025
 """
 
 import logging
-import logging.handlers
-from queue import Queue
 
 import time
 
@@ -17,6 +15,7 @@ from joblib import delayed, Parallel
 
 
 from .Detector import Detector
+from .LoggingHelper import get_logger
 
 """
 Science Camera Module
@@ -31,7 +30,7 @@ class ScienceCam:
                  plate_scale:float,
                  samplingTime:float,
                  telescope,
-                 lightRatio:float=50,
+                 lightRatio:float=1.0,
                  integrationTime:float=None,
                  decimation:int=1,
                  noiseFlag:bool=False,
@@ -50,8 +49,9 @@ class ScienceCam:
             Time interval between frames [s].
         telescope : Telescope
             Associated telescope object.
-        lightRatio : float
-            Threshold ratio to select valid subapertures based on flux.            
+        lightRatio : float, optional
+            Fraction of the source photons (flux x integration time x effective area) that reaches the science camera (photon
+            budget). Default 1.0: the camera records all the light of the path.
         integrationTime : float, optional
             Integration time in seconds. Defaults to samplingTime.
         decimation : int, optional
@@ -87,13 +87,7 @@ class ScienceCam:
             randomState : int, optional
                 Detector parameter. Seed for the random number generator. Default is None.          
         """        
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger    
+        self.logger = logger if logger is not None else get_logger()
 
         self.fieldOfView         = fieldOfView
         self.plate_scale         = plate_scale
@@ -152,6 +146,7 @@ class ScienceCam:
                             **camera_kwargs)
         
         self.fake_src_dict = {}
+        self._mft_cache = {}       # MFT kernels per (lambda/D in px, image size, pupil size)
 
     def get_frame(self, src, phase):
         """
@@ -268,7 +263,7 @@ class ScienceCam:
 
         return frame.cpu().numpy()
     
-    def apply_noise(self, frame, total_photons):
+    def apply_noise(self, frame, total_photons, stream=None):
         """
         Apply detector noise to the science frame.
 
@@ -278,6 +273,8 @@ class ScienceCam:
             The input noise-free science frame.
         total_photons : int or float
             Total number of photons arriving.
+        stream : int, optional
+            Noise stream of the light path (Detector.register_stream); None uses the detector's own generator.
 
         Returns
         -------
@@ -287,72 +284,85 @@ class ScienceCam:
         # Compute photons arriving to the sensor
         input_photons = total_photons * self.lightRatio
         # Add detector noise
-        frame = self.cam.integrate(frame, input_photons)
+        frame = self.cam.integrate(frame, input_photons, stream)
 
         return frame
 
     def compute_psf(self, phase, fwhm, nPix=None):
         """
-        Compute the PSF from a given phase map using FFT.
+        Compute the PSF from a phase map with a matrix Fourier transform (MFT) evaluated directly at the camera pixels.
+
+        The pupil field P exp(i phase) is used on the native telescope grid (no resampling of the phase). Pixel k of the image is at the angle
+        (k - nPix//2) * plate_scale, exactly, for any plate scale. Sign and orientation are those of an FFT: a phase that
+        grows along the columns moves the PSF towards larger column indices.
+
+        Band limit: the pupil field is known only at its samples (step dx = D / n), so its spectrum is defined up to the
+        Nyquist frequency 1 / (2 dx), i.e. angles |theta_x|, |theta_y| <= lambda / (2 dx). Beyond it the transform of the
+        samples is periodic (period lambda / dx) and would only repeat the PSF; those pixels are set to zero
+        (Whittaker-Shannon interpretation of the sampled field: exact inside the band when the phase is well sampled,
+        dx << r0). The PSF is normalised so that its energy over the band is 1 (Parseval); the returned crop of
+        nPix x nPix pixels sums to the fraction of the energy inside the field.
 
         Parameters
         ----------
         phase : np.ndarray
-            Phase input in radians.
+            Phase on the telescope pupil grid, in radians at the wavelength of the source.
         fwhm : float
-            Full width at half maximum in arcsec.
+            lambda/D expressed in camera pixels (lambda / D / plate_scale). Must be >= 1 (Nyquist: >= 2).
         nPix : int, optional
-            Image size in pixels. If None, uses camera's resolution.
+            Image size in pixels. If None, uses the camera size.
 
         Returns
         -------
         torch.Tensor
-            Normalized PSF.
+            PSF of nPix x nPix pixels.
         """
         if nPix is None:
             nPix = self.nPix
-        # Compute FFT image size
         if fwhm < 1:
             raise ValueError('FWHM must be greater than 2 to guarantee enough spatial sampling.')
-        nFFT = np.round(fwhm * nPix).astype(int)
 
-        # Rescaled phase and pupil
-        phase_torch = torch.from_numpy(phase).contiguous().to(self.device)
-        pupil_torch = torch.from_numpy(self.pupil).contiguous().to(self.device)
+        n = self.pupil.shape[0]
+        A = self._mft_kernel(fwhm, nPix, n)
+        phase_torch = torch.as_tensor(phase, dtype=torch.float64, device=self.device)
+        pupil_torch = torch.as_tensor(self.pupil, dtype=torch.float64, device=self.device)
+        field = torch.polar(pupil_torch, phase_torch)
 
-        phase_rescaled = torch.nn.functional.interpolate(phase_torch.unsqueeze(0).unsqueeze(0), size=(nPix, nPix), 
-                                                         mode='bilinear', align_corners=True).squeeze().contiguous()
-        pupil_rescaled = torch.nn.functional.interpolate(pupil_torch.unsqueeze(0).unsqueeze(0), size=(nPix, nPix), 
-                                                         mode='bilinear', align_corners=True).squeeze().contiguous()
-        # Fill Phase image, zeropadded to get to the dimensions of nFFT
-        # Define pupil
-        start = (nFFT - nPix) // 2
-        end = start + nPix
+        # E[k, l] = sum_{m, q} A[k, m] field[m, q] A[l, q]
+        E = A @ field @ A.transpose(0, 1)
+        psf = E.real ** 2 + E.imag ** 2
 
-        # Phase torch
-        exp_phase = torch.zeros((nFFT, nFFT), dtype=torch.complex128, device=self.device).contiguous()
-
-        exp_phase[start:end, start:end] = torch.polar(pupil_rescaled, phase_rescaled)
-
-        # Compute PSF
-        psf = torch.fft.fft2(exp_phase, dim=(0, 1), norm='backward').contiguous()  # same as dividing by nFFT²
-
-        # Shift zero frequency to center
-        psf = torch.fft.fftshift(psf, dim=(0, 1))
-
-        # Compute normalized intensity
-        psf = torch.sqrt(psf.real**2 + psf.imag**2)**2
-
-        # Normalize energy
-        norma = torch.sum(psf)
-        
+        # Energy over the whole image plane (Parseval): M^2 sum |field|^2, with M = lambda / (d plate_scale) = fwhm * n
+        norma = (fwhm * n) ** 2 * torch.sum(pupil_torch ** 2)
         if norma > 0:
             psf /= norma
         else:
             self.logger.warning('ScienceCam::compute_psf - Could not normalize PSF.')
 
-        return psf[start:end, start:end].contiguous()  # Crop the PSF to the original size
-    
+        return psf.contiguous()
+
+    def _mft_kernel(self, fwhm, nPix, n):
+        """
+        MFT matrix A[k, m] = w(u_k) exp(-2 pi i u_k x_m) with x_m = (m - (n-1)/2) (pupil samples centred on the pupil) and
+        u_k = (k - nPix//2) / (fwhm n) (cycles per pupil sample at the angle of image pixel k). Band limit of the sampled
+        field: w = 1 for |u| < 1/2, 1/sqrt(2) at |u| = 1/2 (+1/2 and -1/2 are the same frequency: its energy is shared) and 0
+        beyond (rows outside the Nyquist band would only repeat the spectrum). Cached per (fwhm, nPix, n).
+        """
+        key = (round(float(fwhm), 12), int(nPix), int(n))
+        A = self._mft_cache.get(key)
+        if A is None:
+            x = torch.arange(n, dtype=torch.float64, device=self.device) - (n - 1) / 2
+            u = (torch.arange(nPix, dtype=torch.float64, device=self.device) - nPix // 2) / (fwhm * n)
+            w = torch.where(torch.abs(u) < 0.5 - 1e-12, 1.0, torch.where(torch.abs(u) <= 0.5 + 1e-12, np.sqrt(0.5), 0.0)).to(torch.float64)
+            A = w[:, None] * torch.exp(-2j * np.pi * torch.outer(u, x))
+            if bool((w == 0).any()):
+                half_field = (nPix // 2) / (fwhm * n)            # largest |u| in the frame, in cycles per pupil sample
+                self.logger.warning(f'ScienceCam - the field of view ({nPix} px) extends to {half_field:.2f} cycles per pupil sample, '
+                                    f'beyond the Nyquist band of the pupil sampling (0.5, i.e. lambda / (2 dx)): pixels beyond it '
+                                    f'are zero. A telescope resolution >= {int(np.ceil(2 * half_field * n))} px would cover the field.')
+            self._mft_cache[key] = A
+        return A
+
     def compute_image(self, sci_object, coherence):
         """
         Compute the convolved image from an object and a PSF.
@@ -362,7 +372,7 @@ class ScienceCam:
         sci_object : np.ndarray
             Intensity map of the object.
         coherence : torch.Tensor
-            PSF to convolve with the object.
+            PSF to convolve with the object, same size, centred at pixel (N//2, N//2) as returned by compute_psf.
 
         Returns
         -------
@@ -374,10 +384,12 @@ class ScienceCam:
         # Compute FFT2
 
         object_fft    = torch.fft.fft2(object_torch, norm='backward', dim=(0,1))
-        coherence_fft = torch.fft.fft2(coherence, norm='backward', dim=(0,1))
+        # The PSF centre (pixel N//2, see compute_psf) is moved to the origin, so that the circular convolution does not shift
+        # the object, for odd and even N
+        coherence_fft = torch.fft.fft2(torch.fft.ifftshift(coherence, dim=(0,1)), norm='backward', dim=(0,1))
 
         # Convolute
-        image_complex = torch.fft.fftshift(torch.fft.ifft2(object_fft*coherence_fft, norm='forward', dim=(0,1)), dim=(0,1))
+        image_complex = torch.fft.ifft2(object_fft*coherence_fft, norm='forward', dim=(0,1))
         image = torch.sqrt(image_complex.real**2 + image_complex.imag**2)
 
         # Normalize energy
@@ -391,33 +403,3 @@ class ScienceCam:
 
 
         return image
-
-    def setup_logging(self, logging_level=logging.INFO):
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
-    
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

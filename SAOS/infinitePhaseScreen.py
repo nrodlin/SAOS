@@ -7,12 +7,12 @@ An implementation of the "infinite phase screen", as deduced by Francois Assemat
 
 
 import logging
-import logging.handlers
-from queue import Queue
 
 import numpy as np
 from scipy import linalg
+from scipy.spatial.distance import cdist
 from scipy.special import gamma, kv
+from .LoggingHelper import get_logger
 
 class PhaseScreenVonKarman():
     """
@@ -70,10 +70,21 @@ class PhaseScreenVonKarman():
         L0 (float): Outer scale (metres)
         random_seed (int, optional): seed for the random number generator
         n_columns (int, optional): Number of columns to use to continue screen, default is 2
+        far_rows (bool, optional): Add to the stencil sparse rows (columns) further back in the screen, at distances 4, 8,
+            16, ... px with a stride that grows with the distance (as in the Fried & Clark stencil). With only the adjacent
+            rows the large scales are lost along the direction of motion (tilt ~0.7 of the theory along it). Default True.
+        subharmonics (bool, optional): Add subharmonics (3 levels, Lane et al. 1992 / Johansson & Gavel 1994) to the
+            initial FFT screen. Without them a screen the size of the pupil has ~1/4 of the tilt variance. Default True.
+        initial_oversize (float, optional): The initial FFT screen is generated on a grid this times larger and cropped,
+            to avoid the periodicity of an FFT screen of the pupil size (distorted focus/astigmatism). Default 4.
     """
-    def __init__(self, nx_size, pixel_scale, r0, L0, random_seed=None, n_columns=2, from_file=False, screen_file=None, logger=None):
+    def __init__(self, nx_size, pixel_scale, r0, L0, random_seed=None, n_columns=2, from_file=False, screen_file=None, logger=None,
+                 far_rows=True, subharmonics=True, initial_oversize=4):
 
         self.n_columns = n_columns
+        self.far_rows = far_rows
+        self.subharmonics = subharmonics
+        self.initial_oversize = initial_oversize
         self.nx_size = nx_size
         self.pixel_scale = pixel_scale
         self.r0 = r0
@@ -81,18 +92,10 @@ class PhaseScreenVonKarman():
         self.stencil_length_factor = 1
         self.stencil_length = self.nx_size
 
-        self.n_stencils = self.n_columns * self.nx_size
-
         self.random_seed = random_seed
         
         # Setup logger
-        if logger is None:
-            self.queue_listerner = self.setup_logging()
-            self.logger = logging.getLogger()
-            self.external_logger_flag = False
-        else:
-            self.external_logger_flag = True
-            self.logger = logger
+        self.logger = logger if logger is not None else get_logger()
 
         self.set_coords()
         self.set_stencil_coords()
@@ -118,6 +121,10 @@ class PhaseScreenVonKarman():
             self.make_initial_screen()
 
     def load_from_file(self, scrn):
+        if scrn['A_vert'].shape[1] != self.n_stencils:
+            # Screen saved with the stencil of the adjacent rows only: keep it so that the stored A/B matrices apply
+            self.far_rows = False
+            self.set_stencil_coords()
         self._scrn = scrn['phase'].copy()
         self._R = np.random.default_rng(self.random_seed)  
         # Vertical
@@ -143,10 +150,24 @@ class PhaseScreenVonKarman():
         self.horz_coords[:, 1] = -1
         self.horz_positions = self.horz_coords * self.pixel_scale
 
+    def far_stencil_lines(self):
+        """(distance in rows, stride across) of the sparse far rows of the stencil."""
+        lines = []
+        d = max(4, 2 * self.n_columns)
+        while self.far_rows and d < self.stencil_length:
+            lines.append((d, max(2, d // 2)))
+            d *= 2
+        if self.far_rows and self.stencil_length - 1 > self.n_columns and (not lines or lines[-1][0] != self.stencil_length - 1):
+            lines.append((self.stencil_length - 1, max(2, (self.stencil_length - 1) // 2)))
+        return lines
+
     def set_stencil_coords(self):
-        # Vertical --> Top
+        # Vertical --> Top: the n_columns rows next to the new one, plus sparse far rows (every `stride` px, edges included)
         self.stencil_vert = np.zeros((self.stencil_length, self.nx_size))
         self.stencil_vert[:self.n_columns, :] = 1
+        for d, stride in self.far_stencil_lines():
+            cols = np.unique(np.r_[np.arange(0, self.nx_size, stride), self.nx_size - 1])
+            self.stencil_vert[d, cols] = 1
 
         self.stencil_coords_vert = np.array(np.where(self.stencil_vert==1)).T
         self.stencil_positions_vert = self.stencil_coords_vert * self.pixel_scale
@@ -155,28 +176,22 @@ class PhaseScreenVonKarman():
 
         self.stencil_horz = np.zeros((self.stencil_length, self.nx_size))
         self.stencil_horz[:, :self.n_columns] = 1
+        for d, stride in self.far_stencil_lines():
+            rows = np.unique(np.r_[np.arange(0, self.nx_size, stride), self.nx_size - 1])
+            self.stencil_horz[rows, d] = 1
 
         self.stencil_coords_horz = np.array(np.where(self.stencil_horz==1)).T
         self.stencil_coords_horz =  self.stencil_coords_horz[np.lexsort((self.stencil_coords_horz[:, 0], self.stencil_coords_horz[:, 1]))]
         self.stencil_positions_horz = self.stencil_coords_horz * self.pixel_scale
+
+        self.n_stencils = len(self.stencil_coords_vert)
 
     def calc_separations(self, stencil_positions, new_positions):
         """
         Calculates the separations between the phase points in the stencil and the new phase vector
         """
         positions = np.append(stencil_positions, new_positions, axis=0)
-        separations = np.zeros((len(positions), len(positions)))
-
-        for i, (x1, y1) in enumerate(positions):
-            for j, (x2, y2) in enumerate(positions):
-                delta_x = x2 - x1
-                delta_y = y2 - y1
-
-                delta_r = np.sqrt(delta_x ** 2 + delta_y ** 2)
-
-                separations[i, j] = delta_r
-
-        return separations
+        return cdist(positions, positions)
 
     def make_covmats(self, separations, n_stencils):
         """
@@ -203,7 +218,7 @@ class PhaseScreenVonKarman():
             L0 (float): Outer scale of turbulence in metres
         """
         # Make sure everything is a float to avoid nasty surprises in division!
-        r = np.float32(r)
+        r = np.asarray(r, dtype=np.float64)
         r0 = float(r0)
         L0 = float(L0)
 
@@ -266,11 +281,20 @@ class PhaseScreenVonKarman():
         # If a seed is here, screen must be repeatable wiht same seed
         self._R = np.random.default_rng(self.random_seed)
 
-        self._scrn = self.von_karman_phase_screen(self.r0, self.stencil_length, self.pixel_scale, self.L0, 1e-10, seed=self._R)
+        self._scrn = self.initial_screen(self._R)
 
-        self._scrn = self._scrn[:, :self.nx_size]
+    def initial_screen(self, R):
+        """
+        FFT screen generated on a grid initial_oversize times larger than the screen (and with subharmonics, if enabled),
+        cropped at the centre: a periodic FFT screen of the size of the pupil distorts the low orders (astigmatism,
+        focus) because of its periodicity.
+        """
+        N = int(np.ceil(self.initial_oversize * self.stencil_length))
+        scrn = self.von_karman_phase_screen(self.r0, N, self.pixel_scale, self.L0, 1e-10, seed=R, subharmonics=self.subharmonics)
+        c = (N - self.stencil_length) // 2
+        return scrn[c:c + self.stencil_length, c:c + self.nx_size]
 
-    def von_karman_phase_screen(self, r0, N, delta, L0, l0, seed=None):
+    def von_karman_phase_screen(self, r0, N, delta, L0, l0, seed=None, subharmonics=False):
         """
         Creates a random phase screen with Von Karmen statistics.
         (Schmidt 2010)
@@ -321,6 +345,25 @@ class PhaseScreenVonKarman():
 
         phs =np.fft.ifftshift(np.fft.ifft2(np.fft.fftshift(cn))) * (N) ** 2
         phs = phs.real
+
+        if subharmonics:
+            # Scales larger than the screen: 3 levels of 3x3 frequencies with steps del_f/3^p (Lane et al. 1992,
+            # Johansson & Gavel 1994), the central one excluded
+            x = (np.arange(N) - N / 2) * delta                  # columns (x) and rows (y) share the coordinates
+            phs_lo = np.zeros((N, N), dtype=complex)
+            for p in range(1, 4):
+                del_fp = del_f / 3 ** p
+                fx_p = np.arange(-1, 2) * del_fp
+                (fx_p, fy_p) = np.meshgrid(fx_p, fx_p)
+                f_p = np.sqrt(fx_p ** 2 + fy_p ** 2)
+                PSD_p = 0.023 * r0 ** (-5. / 3.) * np.exp(-1 * ((f_p / fm) ** 2)) / ((f_p ** 2 + f0 ** 2) ** (11. / 6))
+                PSD_p[1, 1] = 0
+                cn_p = (R.normal(size=(3, 3)) + 1j * R.normal(size=(3, 3))) * np.sqrt(PSD_p) * del_fp
+                for i in range(3):
+                    for j in range(3):
+                        # exp(i 2 pi (fx x + fy y)) is separable: outer product of the row and column factors
+                        phs_lo += cn_p[i, j] * np.outer(np.exp(1j * 2 * np.pi * fy_p[i, j] * x), np.exp(1j * 2 * np.pi * fx_p[i, j] * x))
+            phs = phs + phs_lo.real - phs_lo.real.mean()
 
         return phs        
 
@@ -398,34 +441,3 @@ class PhaseScreenVonKarman():
         The current phase map held in the PhaseScreen object in radians.
         """
         return self._scrn[:self.nx_size, :self.nx_size]
-    
-    def setup_logging(self, logging_level=logging.WARNING):
-        #
-        #  Setup of logging at the main process using QueueHandler
-        log_queue = Queue()
-        queue_handler = logging.handlers.QueueHandler(log_queue)
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging_level)  # Minimum log level
-
-        # Setup of the formatting
-        formatter = logging.Formatter(
-            "%(asctime)s - %(levelname)s - %(message)s"
-        )
-
-        # Output to terminal
-        console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
-
-        # Qeue handler captures the messages from the different logs and serialize them
-        queue_listener = logging.handlers.QueueListener(log_queue, console_handler)
-        root_logger.addHandler(queue_handler)
-        queue_listener.start()
-
-        return queue_listener
-    
-    # The logging Queue requires to stop the listener to avoid having an unfinalized execution. 
-    # If the logger is external, then the queue is stop outside of the class scope and we shall
-    # avoid to attempt its destruction
-    def __del__(self):
-        if not self.external_logger_flag:
-            self.queue_listerner.stop()

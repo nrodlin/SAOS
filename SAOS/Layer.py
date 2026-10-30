@@ -20,11 +20,11 @@ class LayerClass:
         seed : int
             Random number generator seed.
         D_fov : float
-            Field of view diameter [m].
+            Diameter of the layer seen by the telescope field of view (metapupil) [m].
         spatial_res : float
-            Spatial resolution of the layer [m/px].
+            Spatial resolution of the layer [m/px]: the pupil pixel D / resolution.
         npix : int
-            Number of pixels in the layer.
+            Number of pixels in the layer: resolution plus a symmetric margin rounded up to whole pixels, npix * spatial_res >= D_fov.
         fractionalR0 : float
             Contribution of this layer to the overall r0.            
         screen : Von Karman infinite screen object
