@@ -46,7 +46,7 @@ $$C(r) = C(0)\,\frac{2^{1/6}}{\Gamma(5/6)}\,x^{5/6}K_{5/6}(x),\quad x = \frac{2\
 
 ## Test files
 
-217 test entries (a parametrised test counts as one entry).
+219 test entries (a parametrised test counts as one entry).
 
 | File | Content | Entries | Tier |
 |---|---|---|---|
@@ -60,8 +60,8 @@ $$C(r) = C(0)\,\frac{2^{1/6}}{\Gamma(5/6)}\,x^{5/6}K_{5/6}(x),\quad x = \frac{2\
 | [`test_packaging.py`](test_packaging.md) | wheel contents and declared dependencies (C.13, nightly) | 2 | nightly |
 | [`test_wfs.py`](test_wfs.md) | Shack-Hartmann (point source) validation | 18 | fast |
 | [`test_corrsh.py`](test_corrsh.md) | Correlating Shack-Hartmann (solar, extended scene) | 13 | fast |
-| [`test_extended_source.py`](test_extended_source.md) | Extended (solar) source with ScienceCam and Atmosphere | 14 | nightly |
-| [`test_sciencecam.py`](test_sciencecam.md) | Science camera PSF and long-exposure accumulation | 9 | fast |
+| [`test_extended_source.py`](test_extended_source.md) | Extended (solar) source with ScienceCam and Atmosphere | 15 | nightly |
+| [`test_sciencecam.py`](test_sciencecam.md) | Science camera PSF and long-exposure accumulation | 10 | fast |
 | [`test_im_controller.py`](test_im_controller.md) | Interaction matrix and control laws | 24 | fast |
 | [`test_learn_estimator.py`](test_learn_estimator.md) | Learn & Apply estimator (von Karman slope covariance, tomographic reconstructor) | 14 | fast (10) / nightly (4) |
 | [`test_savepoint.py`](test_savepoint.md) | Saved metrics and HDF5 output | 13 | fast |

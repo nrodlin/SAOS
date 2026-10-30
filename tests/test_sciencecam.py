@@ -190,6 +190,36 @@ def test_psf_obstructed_vs_reference(logger, tolerances, report):
 # Image motion and plate scale
 # ----------------------------------------------------------------------------------------------------------------------
 
+def test_psf_band_limited_beyond_nyquist(logger, tolerances, rng, report):
+    """
+    REGRESSION (SCI-MFT-ALIAS, 2026-10-30): a camera field wider than the Nyquist band of the pupil sampling. The pupil
+    field is known at its samples (dx = D / res), so its spectrum is defined for |u| <= 1/2 cycle per sample, i.e. angles
+    |theta| <= lambda / (2 dx); the transform of the samples is periodic beyond (replicas at lambda / dx). Here 64 px pupil,
+    4 px per lambda/D and a 384 px field (|u| up to 0.75): pixels outside the band must be exactly zero; inside the band the
+    PSF must equal the independent zero-padded FFT of the same samples (one period, theory.psf_reference), for a flat and
+    for a high-order phase (1 rad rms, PSD f^-11/3 above 4 cycles/D); and the PSF energy over the band is 1 (Parseval).
+    """
+    tol = tolerances['sciencecam']['band_limit']
+    res, fw, n_pix = 64, 4.0, 384
+    tel, src, cam = make_camera(logger, res=res, n_pix=n_pix, fw=fw, co=0.3)
+    half = int(round(fw * res / 2))                         # band edge |u| = 1/2 at |k - n_pix//2| = fw res / 2
+    c = n_pix // 2
+    k = np.arange(n_pix) - c
+    outside = (np.abs(k)[:, None] > half) | (np.abs(k)[None, :] > half)
+    inner = slice(c - half + 1, c + half)                    # |u| < 1/2 (the edge pixels carry half of the energy)
+    for label, phase in (('flat', np.zeros((res, res))), ('high-order phase', high_order_phase(rng, res, 4, 1.0, tel.pupil))):
+        psf = cam.compute_psf(phase, fw).cpu().numpy()
+        ref = theory.psf_reference(np.asarray(tel.pupil, dtype=float), phase, oversampling=fw)
+        ref = ref / ref.sum()                                # one period of the sampled-field transform
+        rc = ref.shape[0] // 2
+        ref_in = ref[rc - half + 1:rc + half, rc - half + 1:rc + half]
+        report.check(f'{label}: max PSF outside the Nyquist band', np.abs(psf[outside]).max(), expected=0.0, atol=0.0)
+        report.check(f'{label}: PSF energy over the band (Parseval)', psf.sum(), expected=1.0, atol=tol['energy_atol'])
+        report.check(f'{label}: max |PSF - independent FFT| / peak inside the band', np.abs(psf[inner, inner] - ref_in).max() / ref_in.max(),
+                     expected=0.0, atol=tol['inside_atol'])
+    report.assert_ok()
+
+
 def test_image_motion_tilt(logger, tolerances, report):
     """
     A tilt of angle theta moves the image by theta / plate_scale. Phase ramps along x (columns) and y (rows) of

@@ -18,16 +18,33 @@ $$
 
 Pixel $k$ is at the angle $(k-\lfloor n_{pix}/2\rfloor)\,\mathrm{ps}$ exactly, for any plate scale. The PSF centre (zero tilt) is therefore at pixel $\lfloor n_{pix}/2\rfloor$ in both axes, the centre of a pixel, for odd and even sizes. The sign is that of an FFT: a phase growing along the columns moves the PSF towards larger column indices. The normalisation is such that the energy over one period of the image plane is 1 (Parseval); the cropped $n_{pix}\times n_{pix}$ camera frame sums to the fraction of that energy inside the field. `get_frame` then renormalises each frame to unit sum. The ideal PSF used as Strehl reference is computed once per wavelength.
 
-!!! warning "Replicas of the PSF: limit on the field of view (under correction)"
-    The MFT is evaluated on the pupil sampled at $\Delta x = D/n$, so the computed PSF is periodic in angle with period $\lambda/\Delta x$ (in rad), not only a single Airy pattern. If the camera half field of view exceeds this period, replicas of the PSF appear inside the frame. The condition for a valid frame is
-    
-    $$
-    \frac{\mathrm{FoV}}{2} < \frac{\lambda}{\Delta x} = \frac{n\,\lambda}{D}
-    \qquad\Longleftrightarrow\qquad
-    \mathrm{FoV}_{max} = \frac{2\,n\,\lambda}{D}\ \text{[rad]} = 2\times 206265\,\frac{n\,\lambda}{D}\ \text{[arcsec]},
-    $$
-    
-    that is, the maximum valid field grows linearly with wavelength, $\mathrm{FoV}_{max}\approx 1.99\times10^{7}\,\lambda[\mathrm{m}]\,(n/200)(4.149/D)$ arcsec. Measured example: at 500 nm with $n = 200$ pixels over $D=4.149$ m, $\lambda/\Delta x = 4.97$ arcsec; with a 9.975 arcsec field, the replicas at $\pm 4.97$ arcsec carry 80 to 90 % of the central peak. The Strehl ratio, the encircled energy and the image-based metrics are not reliable in that regime, and the frame energy normalisation is distorted. Use a field smaller than $\mathrm{FoV}_{max}$ (or a higher pupil resolution) for each band. This limitation is known and is currently being corrected.
+### Band limit of the sampled pupil field
+
+The pupil field is known only at its samples, so its spectrum is defined up to the Nyquist frequency $1/(2\Delta x)$, i.e. for
+
+$$
+|\theta_x|,\ |\theta_y| \le \frac{\lambda}{2\,\Delta x} = \frac{n\,\lambda}{2D}
+\qquad (2.49'' \text{ at } 500\ \mathrm{nm},\ 3.38'' \text{ at } 680\ \mathrm{nm}\ \text{for}\ n = 200,\ D = 4.149\ \mathrm{m}).
+$$
+
+Beyond it the transform of the samples is periodic with period $\lambda/\Delta x$ and would only repeat the PSF (replicas
+carrying 80–90 % of the central peak at $\pm\lambda/\Delta x$ when the half field exceeds that value). `compute_psf`
+therefore sets the image to zero outside the band: the MFT kernel rows have weight $w(u) = 1$ for $|u| < 1/2$
+(cycles per pupil sample), $1/\sqrt{2}$ at $|u| = 1/2$ (the same frequency as $-1/2$: its energy is shared) and $0$
+beyond. This is the Whittaker–Shannon interpretation of the sampled field: inside the band the PSF is exactly the
+transform of the samples, which is the true one when the phase is well sampled ($\Delta x \ll r_0$; the field
+$e^{i\phi}$ is then band-limited to a good approximation, the criterion being $D_\phi(\Delta x) \ll 1\ \mathrm{rad}^2$).
+The PSF energy over the band is 1 (Parseval over one period). The light that a continuous turbulent pupil scatters
+beyond the band is not represented with this sampling; when the camera field exceeds the band a warning gives the
+telescope resolution that would cover it ($n \ge 2\,\theta_{max} D/\lambda$, e.g. $n \ge 401$ for $\pm 4.99''$ at
+500 nm).
+
+Two alternatives were considered and rejected: interpolating the phase to a finer grid before the transform (the
+behaviour before 2026-10-27) low-passes the phase and biases the Strehl ratio upwards (+5 to +16 %); a field constant
+inside each pupil pixel (zero-order hold) suppresses the replicas through the pixel transfer function
+$\mathrm{sinc}^2(\theta\,\Delta x/\lambda)$ but also attenuates the halo inside the band (×0.87 at 1″ and ×0.57 at 2″ in
+V), independently of how well the phase is sampled. References: Bracewell, *The Fourier Transform and Its
+Applications*; Goodman, *Introduction to Fourier Optics* (sampling theorem).
 
 ### Extended source (Sun)
 

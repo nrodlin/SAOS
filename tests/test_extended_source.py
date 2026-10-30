@@ -407,6 +407,32 @@ def test_b1_no_atmosphere_stars(flat_case, pattern, ref, tolerances, report):
     report.assert_ok()
 
 
+def test_b1_production_sampling_energy(pattern, ref, logger, tolerances, report):
+    """
+    REGRESSION (SCI-MFT-ALIAS, 2026-10-30). No atmosphere, production pupil sampling: 200 px over 4.149 m, so that
+    lambda / dx = 4.97" at 500 nm is inside the 9.975" field (B1 uses 450 px, where it is not). With a periodic PSF the
+    replicas carried ~86 % of the energy of every star outside its core, which the unit-sum windows of B1 cannot see.
+    Energy criteria against the independent annular-pupil PSF (own FFT): the fraction of the extended-source frame
+    outside the star windows (1.0" half-width) must not exceed 1 - EE_ref(window) (stars near the field edge lose part
+    of their halo out of the field, so the measured value can only be smaller), and every NGS frame must keep
+    EE_ref(window) of its energy in the window around its peak.
+    """
+    tol = tolerances['extended_source']['b1_production']
+    tel200 = Telescope(resolution=200, diameter=D, centralObstruction=OBS / D, samplingTime=TS, fov=30, logger=logger)
+    _, stars, _ = pattern
+    case = run_case(pattern[0], tel200, logger, None, stars)
+    n = case['n']
+    P = ref.psf()
+    ee_ref = float(window(P, ref.N // 2, ref.N // 2, W, norm=False).sum() / P.sum())
+    ext = case['ext']
+    in_windows = sum(window(ext, n // 2 + st['ix'], n // 2 + st['iy'], W, norm=False).sum() for st in stars)
+    report.metric('independent EE in the window', ee_ref)
+    report.check('extended frame: fraction outside the star windows', 1 - in_windows / ext.sum(), lo=0.0, hi=1 - ee_ref + tol['bg_atol'])
+    ee_ngs = [window(f, n // 2, n // 2, W, norm=False).sum() / f.sum() for f in case['ngs']]
+    report.check('NGS frames: energy fraction in the window', ee_ngs, lo=ee_ref - tol['ee_atol'], hi=1.0)
+    report.assert_ok()
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 # B2  orientation
 # ----------------------------------------------------------------------------------------------------------------------

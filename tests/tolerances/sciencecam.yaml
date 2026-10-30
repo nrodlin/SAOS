@@ -19,3 +19,6 @@ long_exposure:
   discrete_profile_atol: 1.0e-3 # LE vs DL frame convolved with the discrete tilt set (exact; measured 2e-4 = FoV edge)
   gaussian_fwhm_rtol: 0.015     # 30x30 Gaussian-quantile tilts vs continuous Gaussian blur (grid itself: ~0.3%)
   gaussian_profile_atol: 0.015
+band_limit:                     # PSF band limited to the Nyquist band of the pupil sampling (2026-10-30)
+  energy_atol: 1.0e-10          # Parseval over exactly one period: numerical precision
+  inside_atol: 1.0e-10          # same samples, same transform (MFT vs zero-padded FFT): numerical precision

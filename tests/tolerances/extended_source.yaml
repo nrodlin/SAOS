@@ -9,6 +9,11 @@ b1:                               # no atmosphere, deterministic
   pos_atol_px: 0.1                # specified by the owner; measured 0.025 (Fourier-upsampled peak estimator)
   fwhm_rtol: 0.005                # measured -0.10% (450 px pupil resampled to 898 px, SCI-SCALE ~ -0.1%)
   psf_atol: 0.006                 # measured 0.08-0.23% (pupil pixelation + bilinear resampling); 2.6x margin
+b1_production:                    # 200 px pupil (production sampling), energy criteria, deterministic
+  bg_atol: 0.005                  # measured fraction outside the windows 0.0109 vs 1 - EE_ref 0.0114 (edge halos leave the
+                                  # field); with the PSF replicas (before 2026-10-30) it was 0.84
+  ee_atol: 0.005                  # NGS EE in the window 0.9869 vs EE_ref 0.9886 (200 px pixelated annulus vs analytic
+                                  # annulus with 4x4 sub-pixel occupancy); 0.136 with the replicas
 b2:
   offset_atol_px: 0.09            # precision of the offset estimator on exact sub-pixel windows of the same screens (8 seeds, max over 9 directions):
                                   # mean 0.0557, sd 0.0095 (max 0.072) + 3.5 sd = 0.089 px

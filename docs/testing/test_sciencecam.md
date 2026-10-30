@@ -32,6 +32,14 @@ FWHM $=1.029\,\lambda/D$, first zero at $x=1.220$. The pupil is pixelated at 64 
 - **Tolerance:** `psf.fwhm_rtol` = 0.01; `psf.reference_profile_atol` = $10^{-6}$ of the peak.
 - **References:** Goodman.
 
+## `test_psf_band_limited_beyond_nyquist`
+- **Module:** `ScienceCam.compute_psf`, `ScienceCam._mft_kernel` (band limit).
+- **Tier:** fast.
+- **What it checks:** a 64 px pupil (obstruction 0.3), 4 px per $\lambda/D$ and a 384 px field, which extends to $|u| = 0.75$ cycles per pupil sample. For a flat phase and for a high-order phase (1 rad rms, PSD $f^{-11/3}$ above 4 cycles/D): pixels outside the Nyquist band are exactly zero, the PSF energy over the band is 1, and inside the band the PSF equals an independent zero-padded FFT of the same samples (one period).
+- **Theory / assumptions:** the transform of a field sampled at $\Delta x$ is periodic with period $1/\Delta x$; the band $|u| \le 1/2$ holds exactly one period, so Parseval gives unit energy, and outside it there is no information (replicas). Regression of SCI-MFT-ALIAS (2026-10-30).
+- **Tolerance:** `sciencecam.band_limit`: `energy_atol` and `inside_atol` $10^{-10}$ (numerical precision: same samples, same transform).
+- **References:** Bracewell, *The Fourier Transform and Its Applications*; Goodman, *Introduction to Fourier Optics*.
+
 ## `test_image_motion_tilt`
 - **Module:** `ScienceCam.get_frame` (image motion, sign convention).
 - **Tier:** fast.

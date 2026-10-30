@@ -20,6 +20,14 @@ where $\mathrm{PSF}_{ij}$ is the PSF of the line of sight to the centre of patch
 - **Tolerance:** `b1`: `pos_atol_px` = 0.1 px (owner's specification; measured 0.025), `fwhm_rtol` = 0.005 (measured -0.10 %, from the 450 to 898 px resampling), `psf_atol` = 0.006 of the peak (measured 0.08-0.23 %, 2.6x margin).
 - **References:** Goodman, "Introduction to Fourier Optics".
 
+## `test_b1_production_sampling_energy`
+- **Module:** `ScienceCam.get_frame` (extended source and point source), `ScienceCam.compute_psf`.
+- **Tier:** nightly.
+- **What it checks:** no atmosphere, production pupil sampling (200 px over 4.149 m, so $\lambda/\Delta x = 4.97''$ at 500 nm lies inside the 9.975″ field; B1 uses 450 px, where it does not). The fraction of the extended-source frame outside the 18 star windows (1.0″ half-width) must not exceed $1 - EE_{ref}$, and every point-source frame must keep $EE_{ref}$ of its energy in the window, with $EE_{ref}$ the encircled energy of the independent annular-pupil PSF (own FFT) in the same window.
+- **Theory / assumptions:** energy conservation of the image: with PSF replicas about 86 % of the energy of every star leaves its core, which the unit-sum windows of B1 cannot detect. Stars near the field edge lose part of their halo out of the field, so the measured outside fraction can only be smaller than $1 - EE_{ref}$. Regression of SCI-MFT-ALIAS (2026-10-30).
+- **Tolerance:** `extended_source.b1_production`: `bg_atol` 0.005 (measured 0.0109 vs bound 0.0114; 0.84 with the replicas), `ee_atol` 0.005 (measured 0.9869 vs 0.9886; 0.136 with the replicas).
+- **References:** Goodman, *Introduction to Fourier Optics*.
+
 ## `test_b2_image_not_transposed_or_mirrored`
 - **Module:** `ExtendedSource` / `ScienceCam` image orientation.
 - **Tier:** nightly.
