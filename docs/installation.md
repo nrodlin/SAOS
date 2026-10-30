@@ -92,50 +92,27 @@ The validation suite is described in `ci/README.md` (`ci/run_ci.sh fast`, or `py
 > The compiled wheels stay in pip's cache, so later environments install them in seconds.
 
 The runtime dependencies (h5py, joblib, matplotlib, numpy, opencv-contrib-python, pvlib, pyzmq, scipy, torch) are declared in `setup.cfg` and installed by pip. A non-editable install (`pip install .` or a wheel built with
-`pip wheel . --no-deps`) contains every subpackage and the solar images (~90 MB compressed), so SAOS also works outside the
-repository.
+`pip wheel . --no-deps`) contains every subpackage, so SAOS also works outside the repository.
 
-### Git Large File Storage (LFS)
+### Solar images
 
-SAOS uses **Git LFS** to store large binary assets such as solar granulation images
-(e.g., `SAOS/images/cont_500nm.h5`, `cont_680nm.h5`). These files are required for
-solar AO simulations with `ExtendedSource`. Without pulling them, the simulator
-will fail to load the solar image data.
+`ExtendedSource` uses solar continuum images at 500 nm and 680 nm (370 MB in total). They are not part of the package:
+they are published in Zenodo, [doi:10.5281/zenodo.23821204](https://doi.org/10.5281/zenodo.23821204) (CC BY 4.0), and
+SAOS keeps them in a local data directory:
 
-**1. Install git-lfs** (if not already installed):
+- `$SAOS_DATA_DIR` when the variable is set;
+- otherwise `~/.cache/SAOS` (`$XDG_CACHE_HOME/SAOS`).
 
-```bash
-# Ubuntu / Debian
-sudo apt install git-lfs
-
-# macOS (Homebrew)
-brew install git-lfs
-
-# Or via conda
-conda install -c conda-forge git-lfs
-```
-
-**2. Enable LFS in your git configuration** (one-time setup):
+Download them once after installing SAOS:
 
 ```bash
-git lfs install
+saos-download-data            # or: python -m SAOS.data
+saos-download-data --verify   # also check the MD5 checksum of the files already present
 ```
 
-**3. Pull the LFS-tracked files** after cloning:
-
-```bash
-# Inside the SAOS directory
-git lfs pull
-```
-
-This will download the solar image files. You can verify them with:
-
-```bash
-git lfs ls-files
-```
-
-> **Note:** `git lfs pull` requires network access to GitHub. If you are on a
-> restricted network, ask your system administrator to mirror the LFS objects.
+If a file is missing, `ExtendedSource` downloads it the first time it is needed (the MD5 checksum is always verified).
+On a cluster, download them once into a shared directory and export `SAOS_DATA_DIR` on every node. Images passed with
+`img_path` are read directly and need no download.
 
 ## 4. Additional Dependencies
 

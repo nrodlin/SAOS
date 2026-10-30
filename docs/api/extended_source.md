@@ -57,7 +57,7 @@ so that the filters add up to one at every pixel of the mosaic, including its bo
 
 - The atmosphere is sampled at $n^2$ discrete directions (maximum `maxnSubDirs` per axis, default 7); the anisoplanatism inside a sub-direction is neglected, and each sub-direction is a single line of sight (integer-pixel footprint, see [Atmosphere](atmosphere.md)).
 - Flux model: uniform solar disc, ground-level direct spectrum, 10 nm bandwidth.
-- Only the 500 nm and 680 nm images exist in the package; other wavelengths reuse the 500 nm granulation.
+- Solar images exist at 500 nm and 680 nm (downloaded from Zenodo, see [Installation](../installation.md#solar-images)); other wavelengths reuse the 500 nm granulation.
 
 ::: SAOS.ExtendedSource.ExtendedSource
     options:

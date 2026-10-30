@@ -121,6 +121,7 @@ nav:
     - Savepoint: api/savepoint.md
     - Reception Point: api/reception_point.md
     - Logging: api/logging_helper.md
+    - Data files: api/data.md
   - Validation:
     - testing/index.md
     - test_atmosphere.py: testing/test_atmosphere.md
@@ -131,6 +132,7 @@ nav:
     - test_modal_basis.py: testing/test_modal_basis.md
     - test_dm.py: testing/test_dm.md
     - test_packaging.py: testing/test_packaging.md
+    - test_data.py: testing/test_data.md
     - test_wfs.py: testing/test_wfs.md
     - test_corrsh.py: testing/test_corrsh.md
     - test_extended_source.py: testing/test_extended_source.md

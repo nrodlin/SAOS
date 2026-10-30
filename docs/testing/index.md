@@ -45,7 +45,7 @@ $$C(r) = C(0)\,\frac{2^{1/6}}{\Gamma(5/6)}\,x^{5/6}K_{5/6}(x),\quad x = \frac{2\
 
 ## Test files
 
-219 test entries (a parametrised test counts as one entry).
+224 test entries (a parametrised test counts as one entry).
 
 | File | Content | Entries | Tier |
 |---|---|---|---|
@@ -57,6 +57,7 @@ $$C(r) = C(0)\,\frac{2^{1/6}}{\Gamma(5/6)}\,x^{5/6}K_{5/6}(x),\quad x = \frac{2\
 | [`test_modal_basis.py`](test_modal_basis.md) | modal bases for DM commands and interaction matrices (T1) | 12 | fast |
 | [`test_dm.py`](test_dm.md) | DeformableMirror: influence functions, fitting, altitude footprints, geometry, dynamics, misregistration (T1) | 15 | fast |
 | [`test_packaging.py`](test_packaging.md) | wheel contents and declared dependencies (nightly) | 2 | nightly |
+| [`test_data.py`](test_data.md) | data directory and download of the solar images (T1) | 5 | fast |
 | [`test_wfs.py`](test_wfs.md) | Shack-Hartmann (point source) validation | 18 | fast |
 | [`test_corrsh.py`](test_corrsh.md) | Correlating Shack-Hartmann (solar, extended scene) | 13 | fast |
 | [`test_extended_source.py`](test_extended_source.md) | Extended (solar) source with ScienceCam and Atmosphere | 15 | nightly |

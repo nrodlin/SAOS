@@ -6,13 +6,13 @@ Created + major update on March 24 2025
 from SAOS.Source import Source
 
 import numpy as np
-from importlib.resources import files
 import h5py
 import pvlib
 import scipy as sp
 
 import logging
 from .LoggingHelper import get_logger
+from .data import get_data_file
 
 """
 ExtendedSource Module
@@ -47,7 +47,8 @@ class ExtendedSource(Source):
         altitude : float, optional
             Altitude of the source in meters. Default is infinity.
         img_path : str, optional
-            Path to the H5 image of the source (e.g., solar image).
+            Path to the H5 image of the source. Default "": the solar continuum image of the band (500 nm or 680 nm) from
+            the SAOS data directory, downloaded from Zenodo on first use (see SAOS.data).
         img_PS : float, optional
             Plate scale in arcsec/pixel, by default None to use the metadata of the image.
         nSubDirs : int, optional
@@ -88,13 +89,13 @@ class ExtendedSource(Source):
         self.type     = 'SUN'
 
         if self.img_path == "":
-            images_dir = files('SAOS.images')
+            # Solar images from the SAOS data directory, downloaded from Zenodo on first use (SAOS.data)
             if self.wavelength == 500e-9:
-                self.img_path = images_dir / 'cont_500nm.h5'
+                self.img_path = get_data_file('cont_500nm.h5', self.logger)
             elif self.wavelength == 680e-9:
-                self.img_path = images_dir / 'cont_680nm.h5'
+                self.img_path = get_data_file('cont_680nm.h5', self.logger)
             else:
-                self.img_path = images_dir / 'cont_500nm.h5'
+                self.img_path = get_data_file('cont_500nm.h5', self.logger)
                 self.logger.warning('ExtendedSource::__init__ - There is no sun image for this wavelength. Applying solar continuum at 500nm.')
         
         # Convert image path to String

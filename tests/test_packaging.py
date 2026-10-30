@@ -1,5 +1,6 @@
 """
-Packaging of SAOS: the wheel built from the repository must contain every subpackage and the solar images, and its
+Packaging of SAOS: the wheel built from the repository must contain every subpackage and the saos-download-data command
+(the solar images are not packaged: SAOS.data downloads them from Zenodo), and its
 declared dependencies must be exactly the third-party modules imported by the package (independent check: the imports are
 read from the source with ast, not from setup.cfg).
 """
@@ -56,14 +57,17 @@ def wheel(tmp_path_factory):
     return zipfile.ZipFile(path)
 
 
-def test_wheel_contains_every_subpackage_and_the_images(wheel, report):
+def test_wheel_contains_every_subpackage_and_the_data_command(wheel, report):
     names = wheel.namelist()
     in_wheel = {os.path.dirname(n).replace('/', '.') for n in names if n.endswith('__init__.py')}
     expected = source_packages()
     report.note('subpackages in the source: ' + ', '.join(sorted(expected)))
     report.check('subpackages of the source missing from the wheel', len(expected - in_wheel), expected=0, atol=0)
-    for img in ('cont_500nm.h5', 'cont_680nm.h5'):
-        report.check(f'SAOS/images/{img} in the wheel', float(f'SAOS/images/{img}' in names), expected=1.0, atol=0)
+    report.check('HDF5 files in the wheel', float(sum(n.endswith('.h5') for n in names)), expected=0.0, atol=0)
+    entry = [n for n in names if n.endswith('.dist-info/entry_points.txt')]
+    scripts = wheel.read(entry[0]).decode() if entry else ''
+    report.check('console script saos-download-data = SAOS.data:main', float('saos-download-data = SAOS.data:main' in scripts),
+                 expected=1.0, atol=0)
     report.assert_ok()
 
 
