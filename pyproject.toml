@@ -6,6 +6,9 @@ build-backend = "setuptools.build_meta"
 testpaths = ["tests"]
 addopts = "-ra -p no:cacheprovider"
 timeout = 600
+# On timeout, dump the stack of every thread and stop the session (a hung test leaves a trace instead of hitting the
+# run_ci.sh budget silently)
+timeout_method = "thread"
 markers = [
     "fast: T1 tier, isolated module physics at small scale (CPU, whole tier < 5 min)",
     "nightly: T2 tier, more realisations, extended object, CPU vs GPU, short closed loops (workstation GPU, < 45 min)",

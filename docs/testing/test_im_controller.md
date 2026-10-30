@@ -64,6 +64,14 @@ Reconstructors used as references (IM $H$, SVD $H=U\Sigma V^T$): minimum-norm ps
 - **Tolerance:** exact (`hi` = 0).
 - **References:** none.
 
+## `test_save_im_refuses_existing_file_and_overwrites_atomically`
+- **Module:** `InteractionMatrixHandler.save_IM`, `save_modalBasis`, `check_output_file`.
+- **Tier:** fast.
+- **What it checks:** with a pre-existing HDF5 file holding unrelated content, `check_output_file` and both save methods raise `FileExistsError` and leave the file byte-identical; with `overwrite=True` the file is replaced (old content gone, `basis_convention` written), no temporary file is left in the folder, and the overwritten IM loads back bit by bit.
+- **Theory / assumptions:** none (I/O contract): an existing file is never appended to, and a replacement only happens once the new file is complete (temporary file renamed with `os.replace`).
+- **Tolerance:** exact (boolean checks; IM difference 0).
+- **References:** none.
+
 ## `test_regression_save_load_im_with_science_lightpath_first`
 - **Module:** `InteractionMatrixHandler.save_IM`, `.load_IM`.
 - **Tier:** fast.
@@ -180,6 +188,28 @@ with stable poles (the maximum pole modulus is recorded).
 - **What it checks:** after each call `slopes_polc` equals $-s_{turb}=-\mathrm{IM}\,a$ (error-sign convention); the last step is compared (30 frames).
 - **Theory / assumptions:** sign convention of the pseudo-open-loop slopes.
 - **Tolerance:** `polc.sign` = $10^{-8}$ relative.
+- **References:** none.
+
+## `test_polc_per_dm_adds_every_dm_seen_by_the_wfs`
+- **Module:** `Controller.computeControlAction` (POLC with per-DM reconstructors, `joint_reconstruction=False`), `Controller._init_polc_cross_ims`.
+- **Tier:** fast.
+- **What it checks:** one WFS (14 slopes) seen by two DMs with prescribed IMs $B_0$ (14×6) and $B_1$ (14×4), plant $s(k) = t(k) + B_0 c_0(k-1) + B_1 c_1(k-1)$ with a random turbulence sequence $t$, Controller delay 1, 12 steps. The pseudo-open-loop slope vector of each DM must be $-t(k)$.
+- **Theory / assumptions:** with the error sign convention $e = -s$, the POLC slopes of the slope vector of DM $i$ (the WFS of its mask row) must remove every DM seen by those WFS:
+
+$$
+-s_{pol,i}(k) = -s(k) + \sum_j B_{j\to i}\,c_j(k-d_j) = -t(k),
+$$
+
+  so removing only DM $i$ would leave $B_{j}\,c_{j}$ of the other DM (the behaviour before 2026-10-30).
+- **Tolerance:** `im_controller.polc.sign` (max relative error over steps and DMs; numerical precision).
+- **References:** Ellerbroek & Vogel 2003 (POLC).
+
+## `test_polc_per_dm_missing_cross_im_raises`
+- **Module:** `Controller._init_polc_cross_ims`, `Controller.computeControlAction`.
+- **Tier:** fast.
+- **What it checks:** DM 1 is in the optical path of the WFS used by DM 0 (light path 0) but its IM on that WFS was not measured; DM 1 has its own WFS. The controller records the missing pair `(DM 0 row, DM 1, light path 0)` and `computeControlAction` raises `ValueError` instead of forming incomplete pseudo-open-loop slopes.
+- **Theory / assumptions:** none (configuration check).
+- **Tolerance:** exact (boolean checks).
 - **References:** none.
 
 ## `test_tomography_law_vs_stated_equations`
