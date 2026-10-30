@@ -32,6 +32,8 @@ jobs:
     timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true                                # solar images (Git LFS); kept in the runner workspace between runs
       - run: ci/run_ci.sh nightly -q
   fast:
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.tier == 'fast')
@@ -39,6 +41,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true                                # solar images (Git LFS); kept in the runner workspace between runs
       - run: ci/run_ci.sh fast -q
   nightly:
     if: github.event_name == 'workflow_dispatch' && inputs.tier == 'nightly'
@@ -46,6 +50,8 @@ jobs:
     timeout-minutes: 100
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true                                # solar images (Git LFS); kept in the runner workspace between runs
       - run: ci/run_ci.sh nightly -q
   heavy:
     if: github.event_name == 'workflow_dispatch' && inputs.tier == 'heavy'
@@ -53,4 +59,6 @@ jobs:
     timeout-minutes: 130
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true                                # solar images (Git LFS); kept in the runner workspace between runs
       - run: ci/run_ci.sh heavy -q
