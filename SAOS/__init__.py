@@ -8,7 +8,7 @@ Created on Thu May 8 2025
 import logging
 import sys
 
-__version__ = "5.1.0.dev0"
+__version__ = "6.0.0"
 
 # SAOS propagates the light paths in threads: with the GIL enabled they do not run in parallel (results are the same, only slower)
 if getattr(sys, '_is_gil_enabled', lambda: True)():
